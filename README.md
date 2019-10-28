@@ -47,3 +47,26 @@ pip install tensorflow
 
 pip install -r requirements.txt
 
+
+# Experiments
+- Content Based
+- Collaborative NMF Matrix Based from surprise
+- Content + Collaborative NMF
+- Content + Collaborative with extra features
+- Content + Collaborative with extra features with alpha tree
+
+# Innovation
+- Heterogenous Features via Deep Networks
+- Weighted Triplet Loss
+- Embedding Compression
+    - We train in a higher Dimensional Space, After training we use autoencoders to reduce dimensionality. 
+    - Since our task involves cosine distance, after auto-enc step we do another step where we use triplet loss with Distances calculated from initial bigger embeddings. 
+    This is similar to TSNE.
+    - the two steps can be combined into one encoder-decoder-triplet architecture where decoder loss and triplet loss are weighted and added.
+    
+- Combine Collaborative and Content Based Approach by 
+    - building content embeddings first
+    - enhancing them with collaborative relations
+    - Balancing between them using a weighted scheme to solve cold start problem
+- Multiple hybrid embeddings for sellers at different life-cycle stages. Multiple alpha 
+
