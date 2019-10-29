@@ -16,10 +16,9 @@ class Feature:
 
 
 class RecommendationBase:
-    def __init__(self, users: List[str], items: List[str], item_ranker: object):
-        self.users = list(users)
-        self.items = list(items)
-        self.item_ranker = item_ranker
+    def __init__(self):
+        self.users = list()
+        self.items = list()
 
         self.users_set = set(self.users)
         self.items_set = set(self.items)
@@ -61,12 +60,12 @@ class RecommendationBase:
     def fit(self,
             user_ids: List[str],
             item_ids: List[str],
-            user_data: Tuple[DataFrame, List[Feature]],
-            item_data: Tuple[DataFrame, List[Feature]],
-            user_item_affinities: Tuple[List[str], List[str], List[float]],
-            user_user_affinities: Tuple[List[str], List[str], List[float]],
-            item_item_affinities: Tuple[List[str], List[str], List[float]],
-            warm_start=True):
+            user_data: Tuple[DataFrame, List[Feature]] = None,
+            item_data: Tuple[DataFrame, List[Feature]] = None,
+            user_item_affinities: Tuple[List[str], List[str], List[float]] = None,
+            user_user_affinities: Tuple[List[str], List[str], List[float]] = None,
+            item_item_affinities: Tuple[List[str], List[str], List[float]] = None,
+            warm_start = True):
         # self.build_content_embeddings(item_data, user_item_affinities)
         assert user_data is None or \
                (len(user_data) == 2 and len(user_data[0].columns) == len(user_data[1]) and len(user_data[0]) == len(user_ids))
