@@ -68,5 +68,20 @@ pip install -r requirements.txt
     - building content embeddings first
     - enhancing them with collaborative relations
     - Balancing between them using a weighted scheme to solve cold start problem
-- Multiple hybrid embeddings for sellers at different life-cycle stages. Multiple alpha 
+- Multiple hybrid embeddings for sellers at different life-cycle stages. Multiple alpha
+
+
+# References
+
+### Misc References
+    - http://stevehanov.ca/blog/?id=145
+    
+### Dimensionality Reduction
+    - https://github.com/DmitryUlyanov/Multicore-TSNE
+    - https://github.com/lmcinnes/umap
+    - https://github.com/KlugerLab/FIt-SNE https://pypi.org/project/fitsne/0.1.10/
+    - https://stats.stackexchange.com/questions/402668/intuitive-explanation-of-how-umap-works-compared-to-t-sne
+    
+
+ 
 

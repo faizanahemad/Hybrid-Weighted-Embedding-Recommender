@@ -8,11 +8,33 @@ from pandas import DataFrame
 # TODO: For Above provide cleanup/delete APIs
 # TODO: Support Categorical features
 
+
 class Feature:
-    def __init__(self, feature_name: str, is_categorical: bool, cardinality: int):
-        self.feature_name = feature_name
-        self.is_categorical = is_categorical
-        self.cardinality = cardinality
+    def __init__(self, feature_name: str, feature_type: str, values:List,
+                 num_categories: int = 0):
+        self.feature_name: str = feature_name
+        self.feature_type: str = feature_type
+        assert feature_type in ["id", "numeric", "text", "categorical", "multi_categorical"]
+        if feature_type in ["categorical", "multi_categorical"] and num_categories == 0:
+            raise ValueError("Specify Total Categories for Categorical Features")
+        self.num_categories = num_categories
+        self.values = values
+
+    def __len__(self):
+        return len(self.values)
+
+
+class FeatureSet:
+    def __init__(self, features: List[Feature]):
+        self.features = features
+        self.feature_names = [f.feature_name for f in features]
+        self.feature_types = [f.feature_type for f in features]
+        assert self.feature_types.count("text") <= 1
+        assert self.feature_types.count("id") <= 1
+        assert len(set([len(f) for f in features])) == 1
+
+    def __len__(self):
+        return len(self.feature_names)
 
 
 class RecommendationBase:
@@ -60,18 +82,9 @@ class RecommendationBase:
     def fit(self,
             user_ids: List[str],
             item_ids: List[str],
-            user_data: Tuple[DataFrame, List[Feature]] = None,
-            item_data: Tuple[DataFrame, List[Feature]] = None,
-            user_item_affinities: Tuple[List[str], List[str], List[float]] = None,
-            user_user_affinities: Tuple[List[str], List[str], List[float]] = None,
-            item_item_affinities: Tuple[List[str], List[str], List[float]] = None,
-            warm_start = True):
+            warm_start=True,
+            **kwargs):
         # self.build_content_embeddings(item_data, user_item_affinities)
-        assert user_data is None or \
-               (len(user_data) == 2 and len(user_data[0].columns) == len(user_data[1]) and len(user_data[0]) == len(user_ids))
-        assert item_data is None or \
-               (len(item_data) == 2 and len(item_data[0].columns) == len(item_data[1]) and len(item_data[0]) == len(
-                   item_ids))
         self.add_users(user_ids)
         self.add_items(item_ids)
         raise NotImplementedError()
