@@ -3,8 +3,10 @@ import numpy as np
 
 
 class ContentEmbedderBase:
-    def __init__(self, n_dims, **kwargs):
+    def __init__(self, n_dims,make_unit_length=True, **kwargs):
         self.n_dims = n_dims
+        self.make_unit_length = make_unit_length
+        self.kwargs = kwargs
 
     def fit(self, feature: Feature, **kwargs):
         raise NotImplementedError()
@@ -24,5 +26,8 @@ class FasttextEmbedder(ContentEmbedderBase):
 class NumericEmbedder(ContentEmbedderBase):
     pass
 
-class Glove25Embedder(ContentEmbedderBase):
+class FlairGlove100Embedder(ContentEmbedderBase):
+    pass
+
+class FlairGlove100AndBytePairEmbedder(ContentEmbedderBase):
     pass

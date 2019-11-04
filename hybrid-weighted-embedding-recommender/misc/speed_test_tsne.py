@@ -1,3 +1,13 @@
+import sys
+import os
+from os import path
+sys.path.append(path.join(path.dirname(__file__), '../'))
+
+sys.path.insert(0, "../")
+
+import sys
+sys.path.append(os.getcwd())
+
 from MulticoreTSNE import MulticoreTSNE as TSNE
 from sklearn.manifold import TSNE as ScikitTSNE
 from sklearn.decomposition import PCA, KernelPCA
@@ -13,6 +23,7 @@ from math import factorial
 
 from tensorflow import keras
 import tensorflow as tf
+from utils import *
 
 
 
@@ -26,112 +37,10 @@ print(X.shape)
 # X = np.random.randn(100000, 128)
 
 
-shuf_ind0 = np.array(shuffle(list(range(len(X)))))
-shuf_ind1 = np.array(shuffle(list(range(len(X)))))
-shuf_ind2 = np.array(shuffle(list(range(len(X)))))
-
-def unit_length(a, axis=0):
-    return a/np.expand_dims(norm(a, axis=axis), axis=axis)
-
-
-def measure_array_dist_element_displacement(X1, X2):
-    X1 = list(X1)
-    X2 = list(X2)
-
-    assert len(X1) == len(X2)
-    diff = 0.
-    elem_to_index = {e:i for i,e in enumerate(X1)}
-    for index, element in enumerate(X2):
-        actual_index = elem_to_index[element]
-        diff += abs(index - actual_index)
-
-    return diff / len(X1) ** 2 * 2
-
-
-def measure_array_dist_inversions(X1, X2):
-    def merge_sort_inv_counter(arr):
-        return _merge_sort_counter(arr,[0]*len(arr),0,len(arr)-1)
-
-    def _merge_sort_counter(arr, temp_arr, left, right):
-        inv_count = 0
-        if left < right:
-            mid = (left + right) // 2
-            inv_count = _merge_sort_counter(arr, temp_arr, left, mid)
-            inv_count += _merge_sort_counter(arr, temp_arr, mid + 1, right)
-            inv_count += merge(arr, temp_arr, left, mid, right)
-        return inv_count
-
-    def merge(arr, temp_arr, left, mid, right):
-        i = left  # Starting index of left subarray
-        j = mid + 1  # Starting index of right subarray
-        k = left  # Starting index of to be sorted subarray
-        inv_count = 0
-        while i <= mid and j <= right:
-            if arr[i] <= arr[j]:
-                temp_arr[k] = arr[i]
-                k += 1
-                i += 1
-            else:
-                # Inversion will occur.
-                temp_arr[k] = arr[j]
-                inv_count += (mid - i + 1)
-                k += 1
-                j += 1
-
-        while i <= mid:
-            temp_arr[k] = arr[i]
-            k += 1
-            i += 1
-
-        while j <= right:
-            temp_arr[k] = arr[j]
-            k += 1
-            j += 1
-
-        for loop_var in range(left, right + 1):
-            arr[loop_var] = temp_arr[loop_var]
-
-        return inv_count
-
-    X1 = list(X1)
-    X2 = list(X2)
-    assert len(X1) == len(X2)
-    elem_to_index_unsorted= {e: i for i, e in enumerate(X2)}
-    unsorted = [elem_to_index_unsorted[e] for e in X1]
-    return merge_sort_inv_counter(unsorted)/comb(len(X1),2)
-
-# print(measure_array_dist_inversions([1,2,3,4,5,6],[2,3,4,5,6,1]))
-# print(measure_array_dist_inversions([1,2,3,4,5,6],[6,1,2,3,4,5]))
-#
-# print(measure_array_dist_element_displacement([1,2,3,4,5,6],[2,3,4,5,6,1]))
-# print(measure_array_dist_element_displacement([1,2,3,4,5,6],[6,1,2,3,4,5]))
-
-
-
-
-def dist_compare(X1, X2):
-    assert X1.shape[0] == X2.shape[0]
-
-    def generate_distances(X, order):
-        x_rev = X[order]
-        distances = np.sum(np.square(X - x_rev), axis=1)
-        return list(distances)
-
-    def get_sorted_distances(X):
-        distances = generate_distances(X, shuf_ind0) + generate_distances(X, shuf_ind1) + generate_distances(X,shuf_ind2)
-        sd, si = zip(*list(sorted(zip(distances, range(len(distances))), key=lambda x:x[0])))
-        si = np.array(si)
-        return si
-    sd1 = get_sorted_distances(X1)
-    sd2 = get_sorted_distances(X2)
-    score = measure_array_dist_element_displacement(sd1, sd2)
-    score2 = measure_array_dist_inversions(sd1, sd2)
-    return score, score2
-
 
 timings = []
 X = unit_length(X, axis=1)
-dist_compare(X, X)
+print(compare_embedding_global_distance_mismatches(X, X))
 
 
 def auto_encoder_transform(X, n_dims=32,):
@@ -174,15 +83,18 @@ start = time.time()
 ZPCA = PCA(n_components=32,).fit_transform(X)
 end = time.time()
 ZPCA = unit_length(ZPCA, axis=1)
-score = dist_compare(X, ZPCA)
+score = compare_embedding_global_distance_mismatches(X, ZPCA)
 print("PCA time = %.1f" % (end-start))
 timings.append(("PCA", "%.1f"%(end-start),score))
+
+print(timings)
+exit()
 
 start = time.time()
 Zenc = auto_encoder_transform(X, n_dims=32,)
 end = time.time()
 Zenc = unit_length(Zenc, axis=1)
-score = dist_compare(X, Zenc)
+score = compare_embedding_global_distance_mismatches(X, Zenc)
 print("AutoEnc time = %.1f" % (end-start))
 timings.append(("AutoEnc", "%.1f"%(end-start),score))
 

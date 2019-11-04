@@ -1,5 +1,7 @@
 from .recommendation_base import RecommendationBase, Feature, FeatureSet
 from typing import List, Dict, Tuple, Sequence, Type, Set
+from sklearn.decomposition import PCA
+from scipy.special import comb
 from pandas import DataFrame
 from .content_embedders import ContentEmbedderBase
 import tensorflow as tf
@@ -22,13 +24,13 @@ from .utils import unit_length
 
 
 class ContentRecommendation(RecommendationBase):
-    def __init__(self, embedder_mapper: dict[str, Type[ContentEmbedderBase]],
+    def __init__(self, embedding_mapper: dict[str, Type[ContentEmbedderBase]],
                  n_dims=32, auto_encoder_layers=2, max_auto_encoder_iter=20):
         super().__init__()
         self.n_dims = n_dims
         self.auto_encoder_layers = auto_encoder_layers
         self.max_auto_encoder_iter = max_auto_encoder_iter
-        self.embedder_mapper: dict[str, Type[ContentEmbedderBase]] = embedder_mapper
+        self.embedding_mapper: dict[str, Type[ContentEmbedderBase]] = embedding_mapper
 
     def add_users(self, users: List[str]):
         super().add_users(users)
@@ -69,7 +71,7 @@ class ContentRecommendation(RecommendationBase):
             if feature.feature_type == "id":
                 continue
             feature_name = feature.feature_name
-            embedding = self.embedder_mapper[feature_name].fit_predict(feature)
+            embedding = self.embedding_mapper[feature_name].fit_predict(feature)
             item_embeddings[feature_name] = embedding
 
         # Make one ndarray
@@ -79,7 +81,7 @@ class ContentRecommendation(RecommendationBase):
             if feature.feature_type == "id":
                 continue
             feature_name = feature.feature_name
-            embedding = self.embedder_mapper[feature_name].predict(feature)
+            embedding = self.embedding_mapper[feature_name].predict(feature)
             user_embeddings[feature_name] = embedding
 
         # For features which are not in user_data take average of item_features, while for ones present follow above method
@@ -139,7 +141,8 @@ class ContentRecommendation(RecommendationBase):
             user_vectors = np.concatenate((user_vectors, user_embeddings[feature_name]), axis=1)
             item_vectors = np.concatenate((item_vectors, item_embeddings[feature_name]), axis=1)
 
-        # TSNE
+        # PCA
+
 
 
 
