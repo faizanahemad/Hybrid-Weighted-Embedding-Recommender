@@ -81,6 +81,7 @@ pip install -r requirements.txt
     - https://github.com/lmcinnes/umap
     - https://github.com/KlugerLab/FIt-SNE https://pypi.org/project/fitsne/0.1.10/
     - https://stats.stackexchange.com/questions/402668/intuitive-explanation-of-how-umap-works-compared-to-t-sne
+    - https://github.com/nmslib/hnswlib
     
 
  

@@ -105,3 +105,4 @@ venv.bak/
 .idea/
 fastText-0.9.1/*
 *.zip
+hybrid-weighted-embedding-recommender/fasttext.bin

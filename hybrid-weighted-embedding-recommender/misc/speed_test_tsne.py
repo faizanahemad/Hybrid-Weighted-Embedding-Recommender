@@ -74,7 +74,6 @@ def auto_encoder_transform(X, n_dims=32,):
                     verbose=1,
                     callbacks=[es, reduce_lr])
 
-
     Z = encoder.predict(X)
     return Z
 
@@ -87,8 +86,6 @@ score = compare_embedding_global_distance_mismatches(X, ZPCA)
 print("PCA time = %.1f" % (end-start))
 timings.append(("PCA", "%.1f"%(end-start),score))
 
-print(timings)
-exit()
 
 start = time.time()
 Zenc = auto_encoder_transform(X, n_dims=32,)

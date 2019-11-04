@@ -6,6 +6,3 @@ print(dir(data))
 trainset, testset = train_test_split(data, test_size=.25)
 
 print(len(data))
-
-# Build a Fasttext Model
-#

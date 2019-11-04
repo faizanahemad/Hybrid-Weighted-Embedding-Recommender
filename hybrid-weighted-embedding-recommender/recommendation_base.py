@@ -92,13 +92,13 @@ class RecommendationBase:
     def default_predictions(self):
         pass
 
-    def find_similar_items(self, item: str, positive: List[str], negative: List[str]) -> List[List[int]]:
+    def find_similar_items(self, item: str, positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
         raise NotImplementedError()
 
-    def find_similar_users(self, user: str, positive: List[str], negative: List[str]) -> List[List[int]]:
+    def find_similar_users(self, user: str, positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
         raise NotImplementedError()
 
-    def find_items_for_user(self, user: List[str], positive: List[str], negative: List[str]) -> List[List[int]]:
+    def find_items_for_user(self, user: List[str], positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
         raise NotImplementedError()
 
     @staticmethod

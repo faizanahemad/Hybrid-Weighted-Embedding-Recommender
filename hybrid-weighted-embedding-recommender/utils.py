@@ -9,6 +9,24 @@ import time
 from tqdm import tqdm_notebook
 from fasttext import FastText
 from scipy.special import comb
+from sklearn.utils import shuffle
+
+import nmslib
+
+
+def get_nms_query_method(data, k=1000,
+                         index_time_params={'M': 15, 'indexThreadQty': 16, 'efConstruction': 200, 'post': 0, 'delaunay_type': 1}):
+    query_time_params = {'efSearch': k}
+    nms_index = nmslib.init(method='hnsw', space='cosinesimil')
+    nms_index.addDataPointBatch(data)
+    nms_index.createIndex(index_time_params, print_progress=True)
+    nms_index.setQueryTimeParams(query_time_params)
+
+    def query_method(v):
+        neighbors, dist = nms_index.knnQuery(v, k=k)
+        return dist, neighbors
+
+    return query_method, nms_index
 
 
 def cos_sim(a, b):
