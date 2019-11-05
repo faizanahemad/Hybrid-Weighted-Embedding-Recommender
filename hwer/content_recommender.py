@@ -3,7 +3,7 @@ from typing import List, Dict, Tuple, Sequence, Type, Set
 from sklearn.decomposition import PCA
 from scipy.special import comb
 from pandas import DataFrame
-from .content_embedders import ContentEmbedderBase
+from .content_embedders import ContentEmbeddingBase
 import tensorflow as tf
 import time
 import matplotlib.pyplot as plt
@@ -25,14 +25,14 @@ import nmslib
 
 
 class ContentRecommendation(RecommendationBase):
-    def __init__(self, embedding_mapper: dict[str, Type[ContentEmbedderBase]],
-                 n_output_dims=32,
-                 knn_params: dict = {"n_neighbors":1000,
-                                     "index_time_params":{'M': 15, 'indexThreadQty': 16, 'efConstruction': 200, 'post': 0, 'delaunay_type': 1}}):
+    def __init__(self, embedding_mapper: dict, knn_params: dict, n_output_dims: int = 32,):
         super().__init__()
         self.n_output_dims = n_output_dims
-        self.embedding_mapper: dict[str, Type[ContentEmbedderBase]] = embedding_mapper
+        self.embedding_mapper: dict[str, ContentEmbeddingBase] = embedding_mapper
         self.knn_params = knn_params
+        if self.knn_params is None:
+            self.knn_params = dict(n_neighbors=1000,
+                                index_time_params = {'M': 15, 'indexThreadQty': 16, 'efConstruction': 200, 'post': 0, 'delaunay_type': 1})
 
         self.user_id_to_vector = None
         self.index_to_user_id = None
@@ -163,10 +163,32 @@ class ContentRecommendation(RecommendationBase):
         item_vectors = unit_length(item_vectors, axis=1)
         return user_vectors,item_vectors
 
+    def __build_content_embeddings__(self,
+                                     user_ids: List[str],
+                                     item_ids: List[str],
+                                     **kwargs):
+        item_data: FeatureSet = kwargs["item_data"]
+
+        item_embeddings = {}
+        for feature in item_data:
+            if feature.feature_type == "id":
+                continue
+            feature_name = feature.feature_name
+            embedding = self.embedding_mapper[feature_name].fit_transform(feature)
+            item_embeddings[feature_name] = embedding
+
+        # Make one ndarray
+        # Make user_averaged_item_vectors
+
+        user_embeddings, processed_features = self.__build_user_embeddings__(user_ids, item_ids,
+                                                                             item_embeddings, **kwargs)
+        user_vectors, item_vectors = self.__concat_feature_vectors__(processed_features, item_embeddings,
+                                                                     user_embeddings)
+        return user_vectors, item_vectors
+
     def fit(self,
             user_ids: List[str],
             item_ids: List[str],
-            warm_start=True,
             **kwargs):
         """
         Note: Users Features need to be a subset of item features for them to be embedded into same space
@@ -178,23 +200,7 @@ class ContentRecommendation(RecommendationBase):
         :param kwargs:
         :return:
         """
-        item_data: FeatureSet = kwargs["item_data"]
-
-
-        item_embeddings = {}
-        for feature in item_data:
-            if feature.feature_type == "id":
-                continue
-            feature_name = feature.feature_name
-            embedding = self.embedding_mapper[feature_name].fit_predict(feature)
-            item_embeddings[feature_name] = embedding
-
-        # Make one ndarray
-        # Make user_averaged_item_vectors
-
-        user_embeddings, processed_features = self.__build_user_embeddings__(user_ids, item_ids,
-                                                                             item_embeddings, **kwargs)
-        user_vectors, item_vectors = self.__concat_feature_vectors__(processed_features, item_embeddings, user_embeddings)
+        user_vectors, item_vectors = self.__build_content_embeddings__(user_ids, item_ids, **kwargs)
 
         self.user_id_to_vector = dict(zip(user_ids, user_vectors))
         self.index_to_user_id = dict(zip(range(len(user_ids)), user_ids))
@@ -211,6 +217,7 @@ class ContentRecommendation(RecommendationBase):
         # Distance Preserving vs Non Preserving
 
         self.fit_done = True
+        return user_vectors, item_vectors
 
     def get_average_embeddings(self, entities: List[str]):
         embeddings = []

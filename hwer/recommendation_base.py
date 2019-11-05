@@ -1,5 +1,6 @@
 from typing import List, Dict, Tuple, Sequence, Type
 from pandas import DataFrame
+import abc
 
 
 # TODO: Add Validations for add apis
@@ -10,15 +11,28 @@ from pandas import DataFrame
 
 
 class Feature:
-    def __init__(self, feature_name: str, feature_type: str, values:List,
+    def __init__(self, feature_name: str,
+                 feature_type: str,
+                 feature_dtype: type,
+                 values: List,
                  num_categories: int = 0):
+        """
+
+        :param feature_name:
+        :param feature_type: Supported Types ["id", "numeric", "str"]
+        :param feature_dtype:
+        :param values:
+        :param num_categories:
+        """
         self.feature_name: str = feature_name
         self.feature_type: str = feature_type
-        assert feature_type in ["id", "numeric", "text", "categorical", "multi_categorical"]
+        assert feature_type in ["id", "numeric", "str", "categorical"]
         if feature_type in ["categorical", "multi_categorical"] and num_categories == 0:
             raise ValueError("Specify Total Categories for Categorical Features")
+
         self.num_categories = num_categories
         self.values = values
+        self.feature_dtype = feature_dtype
 
     def __len__(self):
         return len(self.values)
@@ -29,15 +43,17 @@ class FeatureSet:
         self.features = features
         self.feature_names = [f.feature_name for f in features]
         self.feature_types = [f.feature_type for f in features]
+        self.feature_dtypes = [f.feature_dtype for f in features]
         assert self.feature_types.count("text") <= 1
         assert self.feature_types.count("id") <= 1
+        # check all features have same count of values in FeatureSet
         assert len(set([len(f) for f in features])) == 1
 
     def __len__(self):
-        return len(self.feature_names)
+        return len(self.features[0])
 
 
-class RecommendationBase:
+class RecommendationBase(metaclass=abc.ABCMeta):
     def __init__(self):
         self.users = list()
         self.items = list()
@@ -79,25 +95,29 @@ class RecommendationBase:
         self.index_to_label = dict(zip(list(range(self.total_labels)), old_labels + items))
         return self
 
+    @abc.abstractmethod
     def fit(self,
             user_ids: List[str],
             item_ids: List[str],
-            warm_start=True,
             **kwargs):
         # self.build_content_embeddings(item_data, user_item_affinities)
         self.add_users(user_ids)
         self.add_items(item_ids)
         raise NotImplementedError()
 
+    @abc.abstractmethod
     def default_predictions(self):
-        pass
+        return
 
+    @abc.abstractmethod
     def find_similar_items(self, item: str, positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
         raise NotImplementedError()
 
+    @abc.abstractmethod
     def find_similar_users(self, user: str, positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
         raise NotImplementedError()
 
+    @abc.abstractmethod
     def find_items_for_user(self, user: List[str], positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
         raise NotImplementedError()
 
