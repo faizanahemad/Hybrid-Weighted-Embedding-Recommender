@@ -8,7 +8,7 @@ setup(name='hwer',
       author_email='fahemad3@gmail.com',
       license='MIT',
       install_requires=[
-          'numpy', 'pandas', 'beautifulsoup4', 'more-itertools',
+          'numpy', 'pandas', 'beautifulsoup4', 'more-itertools', 'bidict',
           'dill', 'pytidylib', 'seaborn', 'gensim', 'nltk','scikit-learn',
           'joblib', 'tensorflow', 'tqdm', 'nmslib', 'flair', 'hnswlib',
       ],
