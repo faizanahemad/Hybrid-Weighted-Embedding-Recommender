@@ -74,13 +74,13 @@ class ContentRecommendation(RecommendationBase):
 
         item_data: FeatureSet = kwargs["item_data"]
         user_data: FeatureSet = kwargs["user_data"]
-        user_item_affinities: Tuple[List[str], List[str], List[float]] = kwargs["user_item_affinities"]
+        user_item_affinities: List[Tuple[str, str, float]] = kwargs["user_item_affinities"]
 
         user_item_dict: Dict[str, Dict[str, float]] = {}
 
         item_to_index = dict(zip(item_ids, range(len(item_ids))))
 
-        for user, item, affinity in zip(user_item_affinities[0], user_item_affinities[1], user_item_affinities[2]):
+        for user, item, affinity in user_item_affinities:
             if user not in user_item_dict:
                 user_item_dict[user] = {}
             user_item_dict[user][item] = affinity
@@ -155,7 +155,8 @@ class ContentRecommendation(RecommendationBase):
         # PCA
         user_vectors_length = len(user_vectors)
         all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)
-        all_vectors = PCA(n_components=self.n_output_dims, ).fit_transform(all_vectors)
+        if self.n_output_dims < all_vectors.shape[1]:
+            all_vectors = PCA(n_components=self.n_output_dims, ).fit_transform(all_vectors)
         user_vectors = all_vectors[:user_vectors_length]
         item_vectors = all_vectors[user_vectors_length:]
 

@@ -1,4 +1,4 @@
-from .content_embedders import FlairGlove100Embedding, FlairGlove100AndBytePairEmbedding
+from .content_embedders import FlairGlove100Embedding, FlairGlove100AndBytePairEmbedding, MultiCategoricalEmbedding
 from .content_embedders import ContentEmbeddingBase, CategoricalEmbedding, FasttextEmbedding, NumericEmbedding
 from .recommendation_base import Feature, FeatureSet, RecommendationBase
 from .content_recommender import ContentRecommendation

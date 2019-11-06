@@ -244,5 +244,17 @@ def clean_text(text):
     text = re.sub('<.*?>', EMPTY, text)
     return text
 
+
+def repeat_args_wrapper(func):
+    def wrapper(*args, **kwargs):
+        results = []
+        for arg in args:
+            results.append(func(arg, **kwargs))
+        return results[0] if len(results) == 1 else results
+    return wrapper
+
+
+unit_length = repeat_args_wrapper(unit_length)
+
 average_precision = average_precision_v2
 

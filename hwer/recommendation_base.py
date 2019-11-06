@@ -19,14 +19,14 @@ class Feature:
         """
 
         :param feature_name:
-        :param feature_type: Supported Types ["id", "numeric", "str"]
+        :param feature_type: Supported Types ["id", "numeric", "str", "categorical", "multi_categorical"]
         :param feature_dtype:
         :param values:
         :param num_categories:
         """
         self.feature_name: str = feature_name
         self.feature_type: str = feature_type
-        assert feature_type in ["id", "numeric", "str", "categorical"]
+        assert feature_type in ["id", "numeric", "str", "categorical", "multi_categorical"]
         if feature_type in ["categorical", "multi_categorical"] and num_categories == 0:
             raise ValueError("Specify Total Categories for Categorical Features")
 
