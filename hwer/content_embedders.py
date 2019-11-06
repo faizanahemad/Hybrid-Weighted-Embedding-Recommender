@@ -42,14 +42,16 @@ class ContentEmbeddingBase(metaclass=abc.ABCMeta):
 
 # TODO: Support Multiple Categorical Variables at once to record their interactions
 class CategoricalEmbedding(ContentEmbeddingBase):
-    def __init__(self, n_dims, make_unit_length=True,n_iters=50, **kwargs):
+    def __init__(self, n_dims, make_unit_length=True, n_iters=50, **kwargs):
         super().__init__(n_dims, make_unit_length, **kwargs)
         self.n_iters = n_iters
         self.encoder = None
         self.ohe = None
 
     def fit(self, feature: Feature, **kwargs):
-        df = pd.DataFrame(data=feature.values, columns=["input"], dtype=feature.feature_dtype) # pd.DataFrame(data=np.array([feature.values]).reshape(-1,1))
+        assert type(feature.values[0]) == str and feature.feature_dtype == str
+        df = pd.DataFrame(data=feature.values, columns=["input"], dtype=feature.feature_dtype)
+        # pd.DataFrame(data=np.array([feature.values]).reshape(-1,1))
 
         if "target" in kwargs:
             target: FeatureSet = kwargs["target"]
@@ -83,7 +85,7 @@ class CategoricalEmbedding(ContentEmbeddingBase):
 
 
 class MultiCategoricalEmbedding(ContentEmbeddingBase):
-    def __init__(self, n_dims, make_unit_length=True,n_iters=50, **kwargs):
+    def __init__(self, n_dims, make_unit_length=True, n_iters=50, **kwargs):
         super().__init__(n_dims, make_unit_length, **kwargs)
         self.n_iters = n_iters
         self.encoder = None
@@ -241,4 +243,4 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
         assert feature.feature_dtype == str and feature.feature_type == "str"
         outputs = np.vstack([self.get_sentence_vector(t) for t in tqdm(feature.values)])
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
-        return self.check_output_dims(outputs)
+        return self.check_output_dims(outputs, feature)

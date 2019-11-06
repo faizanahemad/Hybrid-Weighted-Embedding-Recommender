@@ -64,15 +64,19 @@ class ContentRecommendation(RecommendationBase):
         for feature_name in self.user_only_features:
             user_embedding = user_embeddings[feature_name]
             item_embedding = np.zeros(shape=(len(item_ids), user_embedding.shape[1]))
-            for i, item in item_ids:
-                user_dict = item_user_dict[item]
-                users = user_dict.keys()
-                weights = user_dict.values()
-                user_indices = [self.user_id_to_index[user] for user in users]
-                user_ems = np.take(user_embedding, indices=user_indices, axis=0)
-                assert len(user_ems) > 0
-                item_em = np.average(user_ems, axis=0, weights=weights)
-                item_embedding[i] = item_em
+            average_embedding = np.mean(user_embedding, axis=0)
+            for i, item in enumerate(item_ids):
+                if item in item_user_dict:
+                    user_dict = item_user_dict[item]
+                    users = user_dict.keys()
+                    weights = list(user_dict.values())
+                    user_indices = [self.user_id_to_index[user] for user in users]
+                    user_ems = np.take(user_embedding, indices=user_indices, axis=0)
+                    assert len(user_ems) > 0
+                    item_em = np.average(user_ems, axis=0, weights=weights)
+                    item_embedding[i] = item_em
+                else:
+                    item_embedding[i] = average_embedding.copy()
             item_embeddings[feature_name] = item_embedding
         return item_embeddings
 
@@ -112,9 +116,11 @@ class ContentRecommendation(RecommendationBase):
             item_embedding = item_embeddings[feature_name]
             for i, embedding in enumerate(user_embedding):
                 user = user_ids[i]
+                if user not in user_item_dict:
+                    continue
                 item_dict = user_item_dict[user]
                 items = item_dict.keys()
-                weights = item_dict.values()
+                weights = list(item_dict.values())
                 item_indices = [self.item_id_to_index[item] for item in items]
                 item_ems = np.take(item_embedding, indices=item_indices, axis=0)
                 assert len(item_ems) > 0
@@ -130,15 +136,19 @@ class ContentRecommendation(RecommendationBase):
             feature_name = feature.feature_name
             item_embedding = item_embeddings[feature_name]
             user_embedding = np.zeros(shape=(len(user_ids), item_embedding.shape[1]))
-            for i, user in user_ids:
-                item_dict = user_item_dict[user]
-                items = item_dict.keys()
-                weights = item_dict.values()
-                item_indices = [self.item_id_to_index[item] for item in items]
-                item_ems = np.take(item_embedding, indices=item_indices, axis=0)
-                assert len(item_ems) > 0
-                item_em = np.average(item_ems, axis=0, weights=weights)
-                user_embedding[i] = item_em
+            average_embedding = np.mean(item_embedding, axis=0)
+            for i, user in enumerate(user_ids):
+                if user in user_item_dict:
+                    item_dict = user_item_dict[user]
+                    items = item_dict.keys()
+                    weights = list(item_dict.values())
+                    item_indices = [self.item_id_to_index[item] for item in items]
+                    item_ems = np.take(item_embedding, indices=item_indices, axis=0)
+                    assert len(item_ems) > 0
+                    item_em = np.average(item_ems, axis=0, weights=weights)
+                    user_embedding[i] = item_em
+                else:
+                    user_embedding[i] = average_embedding.copy()
             user_embeddings[feature_name] = user_embedding
             processed_features.append(feature_name)
         return user_embeddings, processed_features

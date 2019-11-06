@@ -30,7 +30,43 @@ ratings['user_id'] = ratings['user_id'].astype(str)
 
 print(users.shape, movies.shape, ratings.shape)
 
-user_item_affinities = list(map(lambda x: tuple(x[0], x[1], x[2]), data.raw_ratings))
+user_item_affinities = list(map(lambda x: tuple([x[0], x[1], x[2]]), data.raw_ratings))
+
+from importlib import reload
+import hwer
+reload(hwer)
+
+from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding
+from hwer import Feature, FeatureSet, ContentRecommendation
+
+embedding_mapper = {}
+embedding_mapper['gender'] = CategoricalEmbedding(n_dims=2)
+embedding_mapper['age'] = CategoricalEmbedding(n_dims=2)
+embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=2)
+embedding_mapper['zip'] = CategoricalEmbedding(n_dims=8)
+
+embedding_mapper['title'] = FlairGlove100AndBytePairEmbedding()
+embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=16)
+
+
+recsys = ContentRecommendation(embedding_mapper=embedding_mapper, knn_params=None, n_output_dims=32)
+
+kwargs = {'user_item_affinities':user_item_affinities}
+
+u1 = Feature(feature_name="gender", feature_type="categorical", feature_dtype=str, values=users.gender.values)
+u2 = Feature(feature_name="age", feature_type="categorical", feature_dtype=str, values=users.age.astype(str).values)
+u3 = Feature(feature_name="occupation", feature_type="categorical", feature_dtype=str, values=users.occupation.astype(str).values)
+u4 = Feature(feature_name="zip", feature_type="categorical", feature_dtype=str, values=users.zip.astype(str).values)
+user_data = FeatureSet([u1, u2, u3, u4])
+
+i1 = Feature(feature_name="title", feature_type="str", feature_dtype=str, values=movies.title.values)
+i2 = Feature(feature_name="genres", feature_type="multi_categorical", feature_dtype=list, values=movies.genres.values)
+item_data = FeatureSet([i1, i2])
+
+kwargs['user_data'] = user_data
+kwargs['item_data'] = item_data
+
+recsys.fit(user_ids=users.user_id.values, item_ids=movies.movie_id.values, **kwargs)
 
 
 

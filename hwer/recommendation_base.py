@@ -18,25 +18,20 @@ class Feature:
     def __init__(self, feature_name: str,
                  feature_type: str,
                  feature_dtype: type,
-                 values: List,
-                 num_categories: int = 0):
+                 values: List):
         """
 
         :param feature_name:
         :param feature_type: Supported Types ["id", "numeric", "str", "categorical", "multi_categorical"]
         :param feature_dtype:
         :param values:
-        :param num_categories:
         """
         self.feature_name: str = feature_name
         self.feature_type: str = feature_type
         assert feature_type in ["id", "numeric", "str", "categorical", "multi_categorical"]
-        if feature_type in ["categorical", "multi_categorical"] and num_categories == 0:
-            raise ValueError("Specify Total Categories for Categorical Features")
-
-        self.num_categories = num_categories
         self.values = values
         self.feature_dtype = feature_dtype
+        assert type(self.values[0]) == self.feature_dtype
 
     def __len__(self):
         return len(self.values)
@@ -110,13 +105,13 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         user_knn.init_index(max_elements=len(user_ids)*2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])
         user_knn.set_ef(n_neighbors * 2)
-        user_knn.add_items(user_vectors, list(range(len(self.users))))
+        user_knn.add_items(user_vectors, list(range(len(self.users_set))))
 
         item_knn = hnswlib.Index(space='cosine', dim=self.n_output_dims)
         item_knn.init_index(max_elements=len(item_ids) * 2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])
         item_knn.set_ef(n_neighbors * 2)
-        item_knn.add_items(item_vectors, list(range(len(self.items))))
+        item_knn.add_items(item_vectors, list(range(len(self.items_set))))
 
         self.user_knn = user_knn
         self.item_knn = item_knn
