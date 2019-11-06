@@ -22,7 +22,10 @@ movies = pd.read_csv(str(movies),sep="::", header=None, names=["movie_id", "titl
 ratings = pd.read_csv(str(ratings),sep="::", header=None, names=["user_id", "movie_id", "rating", "timestamp"], engine='python')
 
 movies['genres'] = movies['genres'].apply(lambda x: x.lower().split('|'))
-
+users['user_id'] = users['user_id'].astype(str)
+movies['movie_id'] = movies['movie_id'].astype(str)
+ratings['movie_id'] = ratings['movie_id'].astype(str)
+ratings['user_id'] = ratings['user_id'].astype(str)
 # CountVectorizer and make 1 column for each genre
 
 print(users.shape, movies.shape, ratings.shape)

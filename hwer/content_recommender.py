@@ -21,82 +21,88 @@ import operator
 from tqdm import tqdm_notebook
 import fasttext
 from .utils import unit_length
-import nmslib
 
 
 class ContentRecommendation(RecommendationBase):
     def __init__(self, embedding_mapper: dict, knn_params: dict, n_output_dims: int = 32,):
-        super().__init__()
-        self.n_output_dims = n_output_dims
+        super().__init__(knn_params=knn_params, n_output_dims=n_output_dims)
+
         self.embedding_mapper: dict[str, ContentEmbeddingBase] = embedding_mapper
-        self.knn_params = knn_params
-        if self.knn_params is None:
-            self.knn_params = dict(n_neighbors=1000,
-                                index_time_params = {'M': 15, 'indexThreadQty': 16, 'efConstruction': 200, 'post': 0, 'delaunay_type': 1})
 
-        self.user_id_to_vector = None
-        self.index_to_user_id = None
-        self.item_id_to_vector = None
-        self.index_to_item_id = None
-        self.user_knn = None
-        self.item_knn = None
+    def __build_item_only_embeddings__(self, item_ids: List[str], item_data: FeatureSet):
+        item_embeddings = {}
+        for feature in item_data:
+            if feature.feature_type == "id":
+                continue
+            feature_name = feature.feature_name
+            embedding = self.embedding_mapper[feature_name].fit_transform(feature)
+            assert embedding.shape[0] == len(item_ids)
+            item_embeddings[feature_name] = embedding
+        return item_embeddings
 
-        self.fit_done = False
+    def __build_user_only_embeddings__(self, user_ids: List[str], user_data: FeatureSet):
+        user_embeddings = {}
+        for feature in user_data:
+            feature_name = feature.feature_name
+            if feature.feature_type == "id" or feature_name not in self.user_only_features:
+                continue
+            embedding = self.embedding_mapper[feature_name].fit_transform(feature)
+            assert embedding.shape[0] == len(user_ids)
+            user_embeddings[feature_name] = embedding
+        return user_embeddings
 
-    def add_users(self, users: List[str]):
-        super().add_users(users)
+    def __build_item_embeddings__(self, item_ids: List[str],
+                                  user_embeddings: Dict[str, np.ndarray],
+                                  item_embeddings: Dict[str, np.ndarray],
+                                  user_item_affinities: List[Tuple[str, str, float]]):
+        item_user_dict: Dict[str, Dict[str, float]] = {}
+        for user, item, affinity in user_item_affinities:
+            if item not in item_user_dict:
+                item_user_dict[item] = {}
+            item_user_dict[item][user] = affinity
 
-    def add_items(self, items: List[str]):
-        super().add_items(items)
-
-    def __build_knn__(self, user_vectors: np.ndarray, item_vectors: np.ndarray):
-        n_neighbors = self.knn_params["n_neighbors"]
-        index_time_params = self.knn_params["index_time_params"]
-        query_time_params = {'efSearch': n_neighbors}
-
-
-        nms_user_index = nmslib.init(method='hnsw', space='cosinesimil')
-        nms_user_index.addDataPointBatch(user_vectors)
-        nms_user_index.createIndex(index_time_params, print_progress=True)
-        nms_user_index.setQueryTimeParams(query_time_params)
-
-        nms_item_index = nmslib.init(method='hnsw', space='cosinesimil')
-        nms_item_index.addDataPointBatch(item_vectors)
-        nms_item_index.createIndex(index_time_params, print_progress=True)
-        nms_item_index.setQueryTimeParams(query_time_params)
-
-        return nms_user_index, nms_item_index
+        for feature_name in self.user_only_features:
+            user_embedding = user_embeddings[feature_name]
+            item_embedding = np.zeros(shape=(len(item_ids), user_embedding.shape[1]))
+            for i, item in item_ids:
+                user_dict = item_user_dict[item]
+                users = user_dict.keys()
+                weights = user_dict.values()
+                user_indices = [self.user_id_to_index[user] for user in users]
+                user_ems = np.take(user_embedding, indices=user_indices, axis=0)
+                assert len(user_ems) > 0
+                item_em = np.average(user_ems, axis=0, weights=weights)
+                item_embedding[i] = item_em
+            item_embeddings[feature_name] = item_embedding
+        return item_embeddings
 
     def __build_user_embeddings__(self,
                                   user_ids: List[str],
-                                  item_ids: List[str],
-                                  item_embeddings: Dict[str, np.ndarray], **kwargs):
-
-        item_data: FeatureSet = kwargs["item_data"]
-        user_data: FeatureSet = kwargs["user_data"]
-        user_item_affinities: List[Tuple[str, str, float]] = kwargs["user_item_affinities"]
+                                  user_data: FeatureSet,
+                                  item_data: FeatureSet,
+                                  user_embeddings: Dict[str, np.ndarray],
+                                  item_embeddings: Dict[str, np.ndarray],
+                                  user_item_affinities: List[Tuple[str, str, float]]):
 
         user_item_dict: Dict[str, Dict[str, float]] = {}
-
-        item_to_index = dict(zip(item_ids, range(len(item_ids))))
 
         for user, item, affinity in user_item_affinities:
             if user not in user_item_dict:
                 user_item_dict[user] = {}
             user_item_dict[user][item] = affinity
 
-        user_embeddings = {}
         for feature in user_data:
-            if feature.feature_type == "id":
-                continue
             feature_name = feature.feature_name
-            embedding = self.embedding_mapper[feature_name].predict(feature)
+            if feature.feature_type == "id" or feature_name in self.user_only_features:
+                continue
+            embedding = self.embedding_mapper[feature_name].transform(feature)
             user_embeddings[feature_name] = embedding
 
         # For features which are not in user_data take average of item_features, while for ones present follow above method
         # Assume some features are not present in Users
         # Weighted Averaging for features not present and present in user_data
 
+        # for features which are in both user_data and item_data or for user_only_features too
         processed_features = []
         for feature in user_data:
             if feature.feature_type == "id":
@@ -109,7 +115,7 @@ class ContentRecommendation(RecommendationBase):
                 item_dict = user_item_dict[user]
                 items = item_dict.keys()
                 weights = item_dict.values()
-                item_indices = [item_to_index[item] for item in items]
+                item_indices = [self.item_id_to_index[item] for item in items]
                 item_ems = np.take(item_embedding, indices=item_indices, axis=0)
                 assert len(item_ems) > 0
                 item_em = np.average(item_ems, axis=0, weights=weights)
@@ -117,6 +123,7 @@ class ContentRecommendation(RecommendationBase):
                 user_embedding[i] = final_embedding
             processed_features.append(feature_name)
 
+        # for item_only_features
         for feature in item_data:
             if feature.feature_type == "id" or feature.feature_name in processed_features:
                 continue
@@ -127,7 +134,7 @@ class ContentRecommendation(RecommendationBase):
                 item_dict = user_item_dict[user]
                 items = item_dict.keys()
                 weights = item_dict.values()
-                item_indices = [item_to_index[item] for item in items]
+                item_indices = [self.item_id_to_index[item] for item in items]
                 item_ems = np.take(item_embedding, indices=item_indices, axis=0)
                 assert len(item_ems) > 0
                 item_em = np.average(item_ems, axis=0, weights=weights)
@@ -167,22 +174,17 @@ class ContentRecommendation(RecommendationBase):
     def __build_content_embeddings__(self,
                                      user_ids: List[str],
                                      item_ids: List[str],
-                                     **kwargs):
-        item_data: FeatureSet = kwargs["item_data"]
+                                     user_data: FeatureSet,
+                                     item_data: FeatureSet,
+                                     user_item_affinities: List[Tuple[str, str, float]]):
+        item_embeddings = self.__build_item_only_embeddings__(item_ids, item_data)
+        user_embeddings = self.__build_user_only_embeddings__(user_ids, user_data)
+        item_embeddings = self.__build_item_embeddings__(item_ids, user_embeddings,
+                                                         item_embeddings, user_item_affinities)
+        user_embeddings, processed_features = self.__build_user_embeddings__(user_ids, user_data, item_data,
+                                                                             user_embeddings, item_embeddings,
+                                                                             user_item_affinities)
 
-        item_embeddings = {}
-        for feature in item_data:
-            if feature.feature_type == "id":
-                continue
-            feature_name = feature.feature_name
-            embedding = self.embedding_mapper[feature_name].fit_transform(feature)
-            item_embeddings[feature_name] = embedding
-
-        # Make one ndarray
-        # Make user_averaged_item_vectors
-
-        user_embeddings, processed_features = self.__build_user_embeddings__(user_ids, item_ids,
-                                                                             item_embeddings, **kwargs)
         user_vectors, item_vectors = self.__concat_feature_vectors__(processed_features, item_embeddings,
                                                                      user_embeddings)
         return user_vectors, item_vectors
@@ -201,17 +203,16 @@ class ContentRecommendation(RecommendationBase):
         :param kwargs:
         :return:
         """
-        user_vectors, item_vectors = self.__build_content_embeddings__(user_ids, item_ids, **kwargs)
 
-        self.user_id_to_vector = dict(zip(user_ids, user_vectors))
-        self.index_to_user_id = dict(zip(range(len(user_ids)), user_ids))
+        super().fit(user_ids, item_ids, **kwargs)
+        item_data: FeatureSet = kwargs["item_data"]
+        user_data: FeatureSet = kwargs["user_data"]
+        user_item_affinities: List[Tuple[str, str, float]] = kwargs["user_item_affinities"]
 
-        self.item_id_to_vector = dict(zip(item_ids, user_vectors))
-        self.index_to_item_id = dict(zip(range(len(item_ids)), item_ids))
+        user_vectors, item_vectors = self.__build_content_embeddings__(user_ids, item_ids,
+                                                                       user_data, item_data, user_item_affinities)
 
-        nms_user_index, nms_item_index = self.__build_knn__(user_vectors, item_vectors)
-        self.user_knn = nms_user_index
-        self.item_knn = nms_item_index
+        _, _ = self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
 
         # AutoEncoder them so that error is minimised and distance is maintained
         # https://stats.stackexchange.com/questions/351212/do-autoencoders-preserve-distances
@@ -220,46 +221,9 @@ class ContentRecommendation(RecommendationBase):
         self.fit_done = True
         return user_vectors, item_vectors
 
-    def get_average_embeddings(self, entities: List[str]):
-        embeddings = []
-        for entity in entities:
-            if entity in self.user_id_to_vector:
-                embeddings.append(self.user_id_to_vector[entity])
-            elif entity in self.item_id_to_vector:
-                embeddings.append(self.item_id_to_vector[entity])
-            else:
-                raise ValueError("Unseen entity: %s"%(entity))
-        return np.average(embeddings, axis=0)
-
     def default_predictions(self):
         assert self.fit_done
         raise NotImplementedError()
-
-    def find_similar_items(self, item: str, positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
-        assert self.fit_done
-        assert item in self.item_id_to_vector
-        embedding_list = [self.item_id_to_vector[item], self.get_average_embeddings(positive), -1 * self.get_average_embeddings(negative)]
-        embedding = np.average(embedding_list, axis=0)
-        neighbors, dist = self.item_knn.knnQuery(embedding)
-        return [(self.index_to_item_id[idx], dt) for idx, dt in zip(neighbors,dist)]
-
-    def find_similar_users(self, user: str, positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
-        assert self.fit_done
-        assert user in self.user_id_to_vector
-        embedding_list = [self.user_id_to_vector[user], self.get_average_embeddings(positive),
-                          -1 * self.get_average_embeddings(negative)]
-        embedding = np.average(embedding_list, axis=0)
-        neighbors, dist = self.user_knn.knnQuery(embedding)
-        return [(self.index_to_user_id[idx], dt) for idx, dt in zip(neighbors,dist)]
-
-    def find_items_for_user(self, user: List[str], positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
-        assert self.fit_done
-        assert user in self.user_id_to_vector
-        embedding_list = [self.user_id_to_vector[user], self.get_average_embeddings(positive),
-                          -1 * self.get_average_embeddings(negative)]
-        embedding = np.average(embedding_list, axis=0)
-        neighbors, dist = self.item_knn.knnQuery(embedding)
-        return [(self.index_to_item_id[idx], dt) for idx, dt in zip(neighbors,dist)]
 
     @staticmethod
     def persist(filename: str, instance):

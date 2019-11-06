@@ -10,7 +10,7 @@ setup(name='hwer',
       install_requires=[
           'numpy', 'pandas', 'beautifulsoup4', 'more-itertools',
           'dill', 'pytidylib', 'seaborn', 'gensim', 'nltk','scikit-learn',
-          'joblib', 'tensorflow', 'tqdm', 'nmslib', 'flair',
+          'joblib', 'tensorflow', 'tqdm', 'nmslib', 'flair', 'hnswlib',
       ],
       keywords=['data-science', 'ML', 'Machine Learning', 'Recommendation System', 'Hybrid Recommendation System', 'Embeddings'],
       packages=find_packages(),
