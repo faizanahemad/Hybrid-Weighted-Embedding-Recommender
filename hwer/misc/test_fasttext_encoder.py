@@ -12,18 +12,18 @@ sys.path.append(os.getcwd())
 import numpy as np
 from gensim.test.utils import common_texts
 
-from hwer import FasttextEmbedding, Feature
+from hwer import FasttextEmbedding, Feature, FeatureType
 
 ft = FasttextEmbedding(32, fasttext_file="/Users/ahemf/mygit/Hybrid-Weighted-Embedding-Recommender/hwer/fasttext.bin")
 
 text = list(map(lambda x: " ".join(x), common_texts))
-f1 = Feature("text", "str",str, text)
+f1 = Feature("text", FeatureType.STR, text)
 print(ft.fit_transform(f1))
 
 print("="*40)
 ft = FasttextEmbedding(4,)
 
-f1 = Feature("text", "str",str, text)
+f1 = Feature("text", FeatureType.STR, text)
 print(ft.fit_transform(f1))
 
 print(ft.fit_transform(f1).shape)

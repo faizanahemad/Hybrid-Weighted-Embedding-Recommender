@@ -7,6 +7,7 @@ from sklearn.neighbors import NearestNeighbors
 import nmslib
 import time
 from tqdm import tqdm_notebook
+from typing import List, Dict, Tuple, Sequence, Type, Set
 from fasttext import FastText
 from scipy.special import comb
 from sklearn.utils import shuffle
@@ -254,7 +255,30 @@ def repeat_args_wrapper(func):
     return wrapper
 
 
-unit_length = repeat_args_wrapper(unit_length)
+def build_user_item_dict(user_item_affinities: List[Tuple[str, str, float]]):
+    user_item_dict: Dict[str, Dict[str, float]] = {}
 
+    for user, item, affinity in user_item_affinities:
+        if user not in user_item_dict:
+            user_item_dict[user] = {}
+        user_item_dict[user][item] = affinity
+    return user_item_dict
+
+
+def build_item_user_dict(user_item_affinities: List[Tuple[str, str, float]]):
+    item_user_dict: Dict[str, Dict[str, float]] = {}
+    for user, item, affinity in user_item_affinities:
+        if item not in item_user_dict:
+            item_user_dict[item] = {}
+        item_user_dict[item][user] = affinity
+    return item_user_dict
+
+
+def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str, float]]) -> List[Tuple[str, str, float]]:
+    pass
+
+
+
+unit_length = repeat_args_wrapper(unit_length)
 average_precision = average_precision_v2
 

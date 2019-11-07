@@ -4,7 +4,6 @@ import pandas as pd
 from pathlib import Path
 from surprise.model_selection import train_test_split
 data = Dataset.load_builtin('ml-1m')
-print(dir(data))
 trainset, testset = train_test_split(data, test_size=.25)
 
 print(data.ratings_file)
@@ -37,7 +36,7 @@ import hwer
 reload(hwer)
 
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding
-from hwer import Feature, FeatureSet, ContentRecommendation
+from hwer import Feature, FeatureSet, ContentRecommendation, FeatureType
 
 embedding_mapper = {}
 embedding_mapper['gender'] = CategoricalEmbedding(n_dims=2)
@@ -49,18 +48,18 @@ embedding_mapper['title'] = FlairGlove100AndBytePairEmbedding()
 embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=16)
 
 
-recsys = ContentRecommendation(embedding_mapper=embedding_mapper, knn_params=None, n_output_dims=32)
+recsys = ContentRecommendation(embedding_mapper=embedding_mapper, knn_params=None, n_output_dims=64)
 
 kwargs = {'user_item_affinities':user_item_affinities}
 
-u1 = Feature(feature_name="gender", feature_type="categorical", feature_dtype=str, values=users.gender.values)
-u2 = Feature(feature_name="age", feature_type="categorical", feature_dtype=str, values=users.age.astype(str).values)
-u3 = Feature(feature_name="occupation", feature_type="categorical", feature_dtype=str, values=users.occupation.astype(str).values)
-u4 = Feature(feature_name="zip", feature_type="categorical", feature_dtype=str, values=users.zip.astype(str).values)
+u1 = Feature(feature_name="gender", feature_type=FeatureType.CATEGORICAL, values=users.gender.values)
+u2 = Feature(feature_name="age", feature_type=FeatureType.CATEGORICAL, values=users.age.astype(str).values)
+u3 = Feature(feature_name="occupation", feature_type=FeatureType.CATEGORICAL, values=users.occupation.astype(str).values)
+u4 = Feature(feature_name="zip", feature_type=FeatureType.CATEGORICAL, values=users.zip.astype(str).values)
 user_data = FeatureSet([u1, u2, u3, u4])
 
-i1 = Feature(feature_name="title", feature_type="str", feature_dtype=str, values=movies.title.values)
-i2 = Feature(feature_name="genres", feature_type="multi_categorical", feature_dtype=list, values=movies.genres.values)
+i1 = Feature(feature_name="title", feature_type=FeatureType.STR, values=movies.title.values)
+i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=movies.genres.values)
 item_data = FeatureSet([i1, i2])
 
 kwargs['user_data'] = user_data
@@ -68,5 +67,7 @@ kwargs['item_data'] = item_data
 
 recsys.fit(user_ids=users.user_id.values, item_ids=movies.movie_id.values, **kwargs)
 
+res, dist = zip(*recsys.find_items_for_user(user='1', positive=[], negative=[]))
+res = res[:20]
 
 

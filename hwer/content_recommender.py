@@ -1,5 +1,5 @@
 from .recommendation_base import RecommendationBase, Feature, FeatureSet
-from typing import List, Dict, Tuple, Sequence, Type, Set
+from typing import List, Dict, Tuple, Sequence, Type, Set, Optional
 from sklearn.decomposition import PCA
 from scipy.special import comb
 from pandas import DataFrame
@@ -20,11 +20,11 @@ from collections import Counter
 import operator
 from tqdm import tqdm_notebook
 import fasttext
-from .utils import unit_length
+from .utils import unit_length, build_user_item_dict, build_item_user_dict
 
 
 class ContentRecommendation(RecommendationBase):
-    def __init__(self, embedding_mapper: dict, knn_params: dict, n_output_dims: int = 32,):
+    def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], n_output_dims: int = 32,):
         super().__init__(knn_params=knn_params, n_output_dims=n_output_dims)
 
         self.embedding_mapper: dict[str, ContentEmbeddingBase] = embedding_mapper
@@ -55,12 +55,7 @@ class ContentRecommendation(RecommendationBase):
                                   user_embeddings: Dict[str, np.ndarray],
                                   item_embeddings: Dict[str, np.ndarray],
                                   user_item_affinities: List[Tuple[str, str, float]]):
-        item_user_dict: Dict[str, Dict[str, float]] = {}
-        for user, item, affinity in user_item_affinities:
-            if item not in item_user_dict:
-                item_user_dict[item] = {}
-            item_user_dict[item][user] = affinity
-
+        item_user_dict: Dict[str, Dict[str, float]] = build_item_user_dict(user_item_affinities)
         for feature_name in self.user_only_features:
             user_embedding = user_embeddings[feature_name]
             item_embedding = np.zeros(shape=(len(item_ids), user_embedding.shape[1]))
@@ -88,12 +83,7 @@ class ContentRecommendation(RecommendationBase):
                                   item_embeddings: Dict[str, np.ndarray],
                                   user_item_affinities: List[Tuple[str, str, float]]):
 
-        user_item_dict: Dict[str, Dict[str, float]] = {}
-
-        for user, item, affinity in user_item_affinities:
-            if user not in user_item_dict:
-                user_item_dict[user] = {}
-            user_item_dict[user][item] = affinity
+        user_item_dict: Dict[str, Dict[str, float]] = build_user_item_dict(user_item_affinities)
 
         for feature in user_data:
             feature_name = feature.feature_name

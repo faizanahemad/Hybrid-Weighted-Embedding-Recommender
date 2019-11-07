@@ -12,11 +12,11 @@ sys.path.append(os.getcwd())
 import numpy as np
 from gensim.test.utils import common_texts
 
-from hwer import FlairGlove100AndBytePairEmbedding,FlairGlove100Embedding, Feature
+from hwer import FlairGlove100AndBytePairEmbedding,FlairGlove100Embedding, Feature, FeatureType
 
 text = list(map(lambda x: " ".join(x), common_texts))
 
-f1 = Feature("text", "str",str, text)
+f1 = Feature("text", FeatureType.STR, text)
 
 flair1 = FlairGlove100Embedding()
 print(flair1.fit_transform(f1))

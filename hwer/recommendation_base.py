@@ -5,6 +5,7 @@ import numpy as np
 import nmslib
 import hnswlib
 from bidict import bidict
+from enum import Enum
 
 
 # TODO: Add Validations for add apis
@@ -13,25 +14,43 @@ from bidict import bidict
 # TODO: For Above provide cleanup/delete APIs
 # TODO: Support Categorical features
 
+class EntityType(Enum):
+    USER = 1
+    ITEM = 2
+
+
+class FeatureType(Enum):
+    ID = 1
+    NUMERIC = 2
+    STR = 3
+    CATEGORICAL = 4
+    MULTI_CATEGORICAL = 5
+
 
 class Feature:
     def __init__(self, feature_name: str,
-                 feature_type: str,
-                 feature_dtype: type,
+                 feature_type: FeatureType,
                  values: List):
         """
 
         :param feature_name:
-        :param feature_type: Supported Types ["id", "numeric", "str", "categorical", "multi_categorical"]
-        :param feature_dtype:
+        :param feature_type:
         :param values:
         """
         self.feature_name: str = feature_name
-        self.feature_type: str = feature_type
-        assert feature_type in ["id", "numeric", "str", "categorical", "multi_categorical"]
+        self.feature_type: FeatureType = feature_type
+        assert type(feature_type) == FeatureType
         self.values = values
-        self.feature_dtype = feature_dtype
-        assert type(self.values[0]) == self.feature_dtype
+        if feature_type is FeatureType.ID:
+            assert type(self.values[0]) == str or type(self.values[0]) == int
+        if feature_type is FeatureType.NUMERIC:
+            assert type(self.values[0]) == float or type(self.values[0]) == int or type(self.values[0]) == np.float
+        if feature_type is FeatureType.STR:
+            assert type(self.values[0]) == str
+        if feature_type is FeatureType.CATEGORICAL:
+            assert type(self.values[0]) == str
+        if feature_type is FeatureType.MULTI_CATEGORICAL:
+            assert type(self.values[0]) == list or type(self.values[0]) == np.ndarray
 
     def __len__(self):
         return len(self.values)
@@ -42,9 +61,7 @@ class FeatureSet:
         self.features = features
         self.feature_names = [f.feature_name for f in features]
         self.feature_types = [f.feature_type for f in features]
-        self.feature_dtypes = [f.feature_dtype for f in features]
-        assert self.feature_types.count("text") <= 1
-        assert self.feature_types.count("id") <= 1
+        assert self.feature_types.count(FeatureType.ID) <= 1
         # check all features have same count of values in FeatureSet
         assert len(set([len(f) for f in features])) == 1
 
@@ -120,7 +137,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
     def add_user(self, user_id: str, features: FeatureSet, user_item_affinities: List[Tuple[str, str, float]]):
         assert self.fit_done
         self.__add_users__(users=[user_id])
-        assert set([f.feature_name for f in features if f.feature_type != "id"]) == set(self.user_features)
+        assert set([f.feature_name for f in features if f.feature_type != FeatureType.ID]) == set(self.user_features)
         users, items, weights = zip(*user_item_affinities)
         embedding = np.average(self.get_average_embeddings(items), weights=weights)
         self.user_knn.add_items([embedding], [len(self.users_set)-1])
@@ -128,7 +145,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
     def add_item(self, item_id, features: FeatureSet, user_item_affinities: List[Tuple[str, str, float]]):
         assert self.fit_done
         self.__add_items__(items=[item_id])
-        assert set([f.feature_name for f in features if f.feature_type != "id"]) == set(self.item_features)
+        assert set([f.feature_name for f in features if f.feature_type != FeatureType.ID]) == set(self.item_features)
         users, items, weights = zip(*user_item_affinities)
         embedding = np.average(self.get_average_embeddings(users), weights=weights)
         self.item_knn.add_items([embedding], [len(self.items_set)-1])
@@ -147,8 +164,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         item_data: FeatureSet = kwargs["item_data"]
         user_data: FeatureSet = kwargs["user_data"]
-        self.user_features = [feature.feature_name for feature in user_data if feature.feature_type != "id"]
-        self.item_features = [feature.feature_name for feature in item_data if feature.feature_type != "id"]
+        self.user_features = [feature.feature_name for feature in user_data if feature.feature_type != FeatureType.ID]
+        self.item_features = [feature.feature_name for feature in item_data if feature.feature_type != FeatureType.ID]
         self.item_only_features = list(set(self.item_features) - set(self.user_features))
         self.user_only_features = list(set(self.user_features) - set(self.item_features))
 
@@ -158,41 +175,66 @@ class RecommendationBase(metaclass=abc.ABCMeta):
     def default_predictions(self):
         return
 
-    def get_average_embeddings(self, entities: List[str]):
-        users = list(filter(lambda x: x in self.users_set, entities))
-        items = list(filter(lambda x: x in self.items_set, entities))
-        users = [self.user_id_to_index[u] for u in users]
-        items = [self.item_id_to_index[i] for i in items]
-
-        user_vectors = self.user_knn.get_items(users)
-        item_vectors = self.item_knn.get_items(items)
-        embeddings = np.concatenate((user_vectors, item_vectors), axis=0)
+    def get_average_embeddings(self, entities: List[Tuple[str, EntityType]]):
+        users = list(filter(lambda x: x[1] == EntityType.USER, entities))
+        items = list(filter(lambda x: x[1] == EntityType.ITEM, entities))
+        user_vectors = None
+        item_vectors = None
+        if len(users) > 0:
+            users, _ = zip(*users)
+            users = [self.user_id_to_index[u] for u in users]
+            user_vectors = self.user_knn.get_items(users)
+        if len(items) > 0:
+            items, _ = zip(*items)
+            items = [self.item_id_to_index[i] for i in items]
+            item_vectors = self.item_knn.get_items(items)
+        if user_vectors is not None and item_vectors is not None:
+            embeddings = np.concatenate((user_vectors, item_vectors), axis=0)
+        elif user_vectors is not None:
+            embeddings = user_vectors
+        elif item_vectors is not None:
+            embeddings = item_vectors
+        else:
+            raise ValueError("No Embeddings Found")
         return np.average(embeddings, axis=0)
 
-    def find_similar_items(self, item: str, positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
+    def find_similar_items(self, item: str, positive: List[Tuple[str, EntityType]], negative: List[Tuple[str, EntityType]]) \
+            -> List[Tuple[str, float]]:
         assert self.fit_done
         assert item in self.items_set
-        embedding_list = [self.get_average_embeddings([item]), self.get_average_embeddings(positive),
-                          -1 * self.get_average_embeddings(negative)]
+        embedding_list = [self.get_average_embeddings([(item, EntityType.ITEM)])]
+        if len(positive) > 0:
+            embedding_list.append(self.get_average_embeddings(positive))
+        if len(negative) > 0:
+            embedding_list.append(-1 * self.get_average_embeddings(negative))
+
         embedding = np.average(embedding_list, axis=0)
 
         (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=self.knn_params['n_neighbors'])
         return [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
 
-    def find_similar_users(self, user: str, positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
+    def find_similar_users(self, user: str, positive: List[Tuple[str, EntityType]], negative: List[Tuple[str, EntityType]]) -> List[Tuple[str, float]]:
         assert self.fit_done
         assert user in self.users_set
-        embedding_list = [self.get_average_embeddings([user]), self.get_average_embeddings(positive),
-                          -1 * self.get_average_embeddings(negative)]
+        embedding_list = [self.get_average_embeddings([(user, EntityType.USER)])]
+        if len(positive) > 0:
+            embedding_list.append(self.get_average_embeddings(positive))
+        if len(negative) > 0:
+            embedding_list.append(-1 * self.get_average_embeddings(negative))
+
         embedding = np.average(embedding_list, axis=0)
         (neighbors,), (dist,) = self.user_knn.knn_query([embedding], k=self.knn_params['n_neighbors'])
         return [(self.user_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
 
-    def find_items_for_user(self, user: str, positive: List[str], negative: List[str]) -> List[Tuple[str, float]]:
+    def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]], negative: List[Tuple[str, EntityType]]) -> List[Tuple[str, float]]:
         assert self.fit_done
         assert user in self.users_set
-        embedding_list = [self.get_average_embeddings([user]), self.get_average_embeddings(positive),
-                          -1 * self.get_average_embeddings(negative)]
+        embedding_list = [self.get_average_embeddings([(user, EntityType.USER)])]
+        if len(positive) > 0:
+            embedding_list.append(self.get_average_embeddings(positive))
+        if len(negative) > 0:
+            embedding_list.append(-1 * self.get_average_embeddings(negative))
+
         embedding = np.average(embedding_list, axis=0)
         (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=self.knn_params['n_neighbors'])
         return [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]

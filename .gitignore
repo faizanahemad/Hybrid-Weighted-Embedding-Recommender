@@ -106,3 +106,6 @@ venv.bak/
 fastText-0.9.1/*
 *.zip
 hwer/fasttext.bin
+**/.DS_Store
+*.gz
+hwer/misc/sentences.txt

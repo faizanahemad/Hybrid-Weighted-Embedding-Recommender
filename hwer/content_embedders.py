@@ -1,4 +1,4 @@
-from .recommendation_base import Feature, FeatureSet
+from .recommendation_base import Feature, FeatureSet, FeatureType, EntityType
 import numpy as np
 import abc
 import pandas as pd
@@ -13,7 +13,7 @@ from flair.data import Sentence
 from flair.embeddings import WordEmbeddings, FlairEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings, StackedEmbeddings
 from joblib import Parallel, delayed
 from tqdm import tqdm
-
+from typing import Type, Union
 
 
 class ContentEmbeddingBase(metaclass=abc.ABCMeta):
@@ -23,16 +23,20 @@ class ContentEmbeddingBase(metaclass=abc.ABCMeta):
         self.kwargs = kwargs
 
     @abc.abstractmethod
-    def fit(self, feature: Feature, **kwargs):
+    def fit(self, feature: Union[Feature, FeatureSet], **kwargs):
         raise NotImplementedError()
 
     @abc.abstractmethod
-    def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+    def transform(self, feature: Union[Feature, FeatureSet], **kwargs) -> np.ndarray:
         raise NotImplementedError()
 
-    def fit_transform(self, feature: Feature, **kwargs) -> np.ndarray:
+    def fit_transform(self, feature: Union[Feature, FeatureSet], **kwargs) -> np.ndarray:
         self.fit(feature, **kwargs)
-        return self.check_output_dims(self.transform(feature, **kwargs), feature)
+        if type(feature) == FeatureSet:
+            output_check_feature = feature.features[0]
+        else:
+            output_check_feature = feature
+        return self.check_output_dims(self.transform(feature, **kwargs), output_check_feature)
 
     def check_output_dims(self, output: np.ndarray, feature: Feature):
         if self.n_dims != output.shape[1] or output.shape[0] != len(feature):
@@ -49,13 +53,12 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         self.ohe = None
 
     def fit(self, feature: Feature, **kwargs):
-        assert type(feature.values[0]) == str and feature.feature_dtype == str
-        df = pd.DataFrame(data=feature.values, columns=["input"], dtype=feature.feature_dtype)
+        assert type(feature.values[0]) == str
+        df = pd.DataFrame(data=feature.values, columns=["input"], dtype=str)
         # pd.DataFrame(data=np.array([feature.values]).reshape(-1,1))
 
         if "target" in kwargs:
             target: FeatureSet = kwargs["target"]
-            assert len(set(target.feature_dtypes)) == 1 and set(target.feature_dtypes) == {float}
             assert set([len(f) for f in target.features]) == {len(feature)}
 
             for i, feat in enumerate(target.features):
@@ -77,7 +80,7 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         self.ohe = ohe
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
-        df = pd.DataFrame(data=feature.values, columns=["input"], dtype=feature.feature_dtype)
+        df = pd.DataFrame(data=feature.values, columns=["input"], dtype=str)
         network_inputs = self.ohe.transform(df[['input']])
 
         outputs = unit_length(self.encoder.predict(network_inputs), axis=1) if self.make_unit_length else self.encoder.predict(network_inputs)
@@ -94,12 +97,12 @@ class MultiCategoricalEmbedding(ContentEmbeddingBase):
 
     def fit(self, feature: Feature, **kwargs):
         assert type(feature.values[0]) == list or type(feature.values[0]) == np.ndarray
-        assert feature.feature_type == "multi_categorical" and (feature.feature_dtype == list or feature.feature_dtype == np.ndarray)
+        assert feature.feature_type == FeatureType.MULTI_CATEGORICAL
         df = pd.DataFrame(data=np.array(feature.values).T, columns=["input"])
 
         if "target" in kwargs:
             target: FeatureSet = kwargs["target"]
-            assert len(set(target.feature_dtypes)) == 1 and set(target.feature_dtypes) == {float}
+            assert set(target.feature_types) == {FeatureType.NUMERIC}
             assert set([len(f) for f in target.features]) == {len(feature)}
 
             for i, feat in enumerate(target.features):
@@ -138,7 +141,7 @@ class FasttextEmbedding(ContentEmbeddingBase):
                                                      dim=self.n_dims, epoch=10, lr=0.1, thread=os.cpu_count())
 
     def fit(self, feature: Feature, **kwargs):
-        assert feature.feature_type == "str" and feature.feature_dtype == str
+        assert feature.feature_type == FeatureType.STR
         if self.fasttext_file is None:
             df = pd.DataFrame(data=feature.values, columns=[feature.feature_name])
             df[feature.feature_name] = df[feature.feature_name].fillna("").apply(clean_text)
@@ -149,11 +152,11 @@ class FasttextEmbedding(ContentEmbeddingBase):
         self.text_model = text_model
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
-        assert feature.feature_type == "str" and feature.feature_dtype == str
+        assert feature.feature_type == FeatureType.STR
         outputs = list(map(lambda x: self.text_model.get_sentence_vector(clean_text(x)), feature.values))
         outputs = np.array(outputs)
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
-        return self.check_output_dims(outputs)
+        return self.check_output_dims(outputs, feature)
 
 
 class NumericEmbedding(ContentEmbeddingBase):
@@ -170,7 +173,7 @@ class NumericEmbedding(ContentEmbeddingBase):
         self.feature_names = None
 
     def fit(self, features: FeatureSet, **kwargs):
-        assert set(features.feature_types) == {"numeric"}
+        assert set(features.feature_types) == {FeatureType.NUMERIC}
         self.feature_names = features.feature_names
         df = pd.DataFrame(np.array([f.values for f in features.features]).T, columns=features.feature_names)
         scaler = MinMaxScaler(feature_range=(-0.95, 0.95))
@@ -191,13 +194,13 @@ class NumericEmbedding(ContentEmbeddingBase):
         self.encoder = encoder
 
     def transform(self, features: FeatureSet, **kwargs) -> np.ndarray:
-        assert set(features.feature_types) == {"numeric"}
+        assert set(features.feature_types) == {FeatureType.NUMERIC}
         assert self.feature_names == features.feature_names
         df = pd.DataFrame(np.array([f.values for f in features.features]).T, columns=features.feature_names)
         inputs = self.scaler.transform(df)
         outputs = unit_length(self.encoder.predict(inputs),
                               axis=1) if self.make_unit_length else self.encoder.predict(inputs)
-        return self.check_output_dims(outputs)
+        return self.check_output_dims(outputs, features.features[0])
 
 
 class FlairGlove100Embedding(ContentEmbeddingBase):
@@ -213,14 +216,14 @@ class FlairGlove100Embedding(ContentEmbeddingBase):
         return a.detach().numpy()
 
     def fit(self, feature: Feature, **kwargs):
-        assert feature.feature_dtype == str and feature.feature_type == "str"
+        assert feature.feature_type == FeatureType.STR
         return
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
-        assert feature.feature_dtype == str and feature.feature_type == "str"
+        assert feature.feature_type == FeatureType.STR
         outputs = np.vstack([self.get_sentence_vector(t) for t in tqdm(feature.values)])
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
-        return self.check_output_dims(outputs)
+        return self.check_output_dims(outputs, feature)
 
 
 class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
@@ -236,11 +239,11 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
         return a.detach().numpy()
 
     def fit(self, feature: Feature, **kwargs):
-        assert feature.feature_dtype == str and feature.feature_type == "str"
+        assert feature.feature_type == FeatureType.STR
         return
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
-        assert feature.feature_dtype == str and feature.feature_type == "str"
+        assert feature.feature_type == FeatureType.STR
         outputs = np.vstack([self.get_sentence_vector(t) for t in tqdm(feature.values)])
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
         return self.check_output_dims(outputs, feature)
