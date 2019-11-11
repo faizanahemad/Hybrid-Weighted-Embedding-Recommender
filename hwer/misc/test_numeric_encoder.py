@@ -15,8 +15,14 @@ from hwer import CategoricalEmbedding, FeatureSet, Feature, NumericEmbedding, Fe
 
 f1 = Feature("f1", FeatureType.NUMERIC, [1.2, 0.1, 2.2, 4.1, 5.0, 6.1, 2.1, 5.0])
 f2 = Feature("f2", FeatureType.NUMERIC, [0.7, 3.0, 2.0, 4.0, 5.0, 6.0, 7.0, 5.0])
-fs = FeatureSet([f1, f2])
+new_vals = list(zip(f1.values,f2.values))
+print(new_vals)
+
+f = Feature("f1", FeatureType.NUMERIC, new_vals)
+
 
 ns = NumericEmbedding(4)
+print(ns.fit_transform(f))
 
-print(ns.fit_transform(fs))
+ns = NumericEmbedding(4)
+print(ns.fit_transform(f1))

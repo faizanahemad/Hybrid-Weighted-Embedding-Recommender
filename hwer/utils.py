@@ -87,12 +87,37 @@ def average_precision_v2(y_true, y_pred):
     return score / len(y_true)
 
 
-def mean_average_precision(y_true, y_pred, n):
+def mean_average_precision(y_true: List[List[str]], y_pred: List[List[str]]):
     sn = []
     for i in range(len(y_true)):
         y = y_true[i]
         yp = y_pred[i]
-        sn.append(average_precision(y, yp, n))
+        sn.append(average_precision(y, yp))
+    return np.mean(sn)
+
+
+def mean_average_precision_by_users(y_true: Dict[str, List[str]], y_pred: Dict[str, List[str]]):
+    sn = []
+    for k, v in y_true.items():
+        yp = y_pred[k] if k in y_pred else []
+        y = v
+        sn.append(average_precision(y, yp))
+    return np.mean(sn)
+
+def ndcg(y_true: List[str], y_pred: List[str]):
+    y_pred = np.array(y_pred)
+    if len(y_pred.shape) == 2:
+        y_pred = y_pred[:, 0]
+    y_pred = np.array(y_pred).reshape((1, -1))[0]
+    y_true = np.array(y_true).reshape((1, -1))[0]
+
+
+def ndcg_by_users(y_true: Dict[str, List[str]], y_pred: Dict[str, List[str]]):
+    sn = []
+    for k, v in y_true.items():
+        yp = y_pred[k] if k in y_pred else []
+        y = v
+        sn.append(ndcg(y, yp))
     return np.mean(sn)
 
 
@@ -231,8 +256,8 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32,verbose=1,epochs=25 ):
 
 def clean_text(text):
     EMPTY = ' '
-    if text is None:
-        return EMPTY
+    assert text is not None
+    assert type(text) == str
     text = text.replace("'", " ").replace('"', " ")
     text = text.replace("\n", " ").replace("(", " ").replace(")", " ").replace("\r", " ").replace("\t", " ").lower()
     text = re.sub('<pre><code>.*?</code></pre>', EMPTY, text)
@@ -274,9 +299,108 @@ def build_item_user_dict(user_item_affinities: List[Tuple[str, str, float]]):
     return item_user_dict
 
 
-def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str, float]]) -> List[Tuple[str, str, float]]:
-    pass
+def get_mean_rating(user_item_affinities: List[Tuple[str, str, float]]) -> float:
+    uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
+    mean = uid.rating.mean()
+    return mean
 
+
+def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str, float]],) \
+        -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
+    uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
+    # Calculating Biases
+    mean = uid.rating.mean()
+    uid["rating"] = uid["rating"] - mean
+    bu = uid.groupby(['user']).agg(['mean', 'min', 'max'])
+    bu.columns = bu.columns.get_level_values(1)
+    bu["spread"] = np.max((bu["max"] - bu["mean"], bu["mean"] - bu["min"]), axis=0)
+    bu = bu.reset_index()
+    uid = uid.merge(bu[["user", "mean"]], on="user")
+    uid["rating"] = uid["rating"] - uid["mean"]
+
+    bu = dict(zip(bu['user'], bu['mean']))
+    # Stochastic Gradient Descent Taken from Surprise Lib
+    lr = 0.001
+    reg = 0.01
+    n_epochs = 20
+    for dummy in range(n_epochs):
+        for u, i, r in user_item_affinities:
+            err = (r - (mean + bu[u]))
+            bu[u] += lr * (err - reg * bu[u])
+
+    uid = [[u, i, r - (mean + bu[u])] for u, i, r in user_item_affinities]
+    uid = pd.DataFrame(uid, columns=["user", "item", "rating"])
+    unique_items = uid["item"].unique()
+    bi = dict(zip(unique_items, [0]*len(unique_items)))
+
+    # Calculating Spreads
+    spread = max(uid["rating"].max(), np.abs(uid["rating"].min()))
+
+    # Making final Dict
+    uid = list(zip(uid['user'], uid['item'], uid['rating']))
+
+    return mean, bu, bi, spread, uid
+
+
+def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str, str, float]],) \
+        -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
+    uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
+    # Calculating Biases
+    mean = uid.rating.mean()
+    uid["rating"] = uid["rating"] - mean
+    bu = uid.groupby(['user']).agg(['mean', 'min', 'max'])
+    bu.columns = bu.columns.get_level_values(1)
+    bu["spread"] = np.max((bu["max"] - bu["mean"], bu["mean"] - bu["min"]), axis=0)
+    bu = bu.reset_index()
+    uid = uid.merge(bu[["user", "mean"]], on="user")
+    uid["rating"] = uid["rating"] - uid["mean"]
+    uid = uid[["user", "item", "rating"]]
+
+    bi = uid[["user", "item", "rating"]].groupby(['item']).agg(['mean', 'min', 'max'])
+    bi.columns = bi.columns.get_level_values(1)
+    bi["spread"] = np.max((bi["max"] - bi["mean"], bi["mean"] - bi["min"]), axis=0)
+    bi = bi.reset_index()
+    uid = uid.merge(bi[["item", "mean"]], on="item")
+    uid["rating"] = uid["rating"] - uid["mean"]
+
+    bu = dict(zip(bu['user'], bu['mean']))
+    bi = dict(zip(bi['item'], bi['mean']))
+    # Stochastic Gradient Descent Taken from Surprise Lib
+    lr = 0.001
+    reg = 0.01
+    n_epochs = 20
+    for dummy in range(n_epochs):
+        for u, i, r in user_item_affinities:
+            err = (r - (mean + bu[u] + bi[i]))
+            bu[u] += lr * (err - reg * bu[u])
+            bi[i] += lr * (err - reg * bi[i])
+
+    uid = [[u, i, r - (mean + bu[u] + bi[i])] for u, i, r in user_item_affinities]
+    uid = pd.DataFrame(uid, columns=["user", "item", "rating"])
+
+    # Calculating Spreads
+    spread = max(uid["rating"].max(), np.abs(uid["rating"].min()))
+
+    # Making final Dict
+    uid = list(zip(uid['user'], uid['item'], uid['rating']))
+
+    return mean, bu, bi, spread, uid
+
+
+def is_num(x):
+    ans = isinstance(x, int) or isinstance(x, float) or isinstance(x, np.float)
+    return ans
+
+
+def is_1d_array(x):
+    ans = (isinstance(x, list) or isinstance(x, np.ndarray) or isinstance(x, tuple)) \
+          and not isinstance(x[0], list) and not isinstance(x[0], np.ndarray) and not isinstance(x[0], tuple)
+    return ans
+
+
+def is_2d_array(x):
+    ans = (isinstance(x, list) or isinstance(x, np.ndarray) or isinstance(x, tuple)) and is_1d_array(x[0])
+    return ans
 
 
 unit_length = repeat_args_wrapper(unit_length)

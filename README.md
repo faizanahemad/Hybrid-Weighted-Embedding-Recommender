@@ -73,6 +73,14 @@ pip install -r requirements.txt
 
 # References
 
+### Datasets and Downloads
+    - https://github.com/celiao/tmdbsimple/
+    - https://www.kaggle.com/tmdb/tmdb-movie-metadata#tmdb_5000_movies.csv
+    - http://www.cs.cmu.edu/~ark/personas/ and https://github.com/askmeegs/movies
+    - https://www.kaggle.com/jrobischon/wikipedia-movie-plots/data#
+    - https://github.com/markriedl/WikiPlots
+    - https://www.kaggle.com/rounakbanik/the-movies-dataset or [Google Drive Mirror](https://drive.google.com/open?id=1aBT4ojTiY-2I5NxUJAq2R1BtxbU7mpIQ)
+
 ### Misc References
     - http://stevehanov.ca/blog/?id=145
     
@@ -82,6 +90,10 @@ pip install -r requirements.txt
     - https://github.com/KlugerLab/FIt-SNE https://pypi.org/project/fitsne/0.1.10/
     - https://stats.stackexchange.com/questions/402668/intuitive-explanation-of-how-umap-works-compared-to-t-sne
     - https://github.com/nmslib/hnswlib
+
+    
+### Metrics
+    - https://stackoverflow.com/questions/34252298/why-rank-based-recommendation-use-ndcg
     
 
  

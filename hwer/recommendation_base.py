@@ -1,4 +1,4 @@
-from typing import List, Dict, Tuple, Sequence, Type
+from typing import List, Dict, Tuple, Sequence, Type, Optional
 from pandas import DataFrame
 import abc
 import numpy as np
@@ -6,6 +6,10 @@ import nmslib
 import hnswlib
 from bidict import bidict
 from enum import Enum
+from collections import defaultdict
+import math
+from .utils import normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, get_mean_rating
+from .utils import is_num, is_1d_array, is_2d_array
 
 
 # TODO: Add Validations for add apis
@@ -17,6 +21,7 @@ from enum import Enum
 class EntityType(Enum):
     USER = 1
     ITEM = 2
+    USER_ITEM = 3
 
 
 class FeatureType(Enum):
@@ -44,13 +49,13 @@ class Feature:
         if feature_type is FeatureType.ID:
             assert type(self.values[0]) == str or type(self.values[0]) == int
         if feature_type is FeatureType.NUMERIC:
-            assert type(self.values[0]) == float or type(self.values[0]) == int or type(self.values[0]) == np.float
+            assert is_num(self.values[0]) or (is_2d_array(self.values) and is_num(self.values[0][0]))
         if feature_type is FeatureType.STR:
-            assert type(self.values[0]) == str
+            assert isinstance(self.values[0], str)
         if feature_type is FeatureType.CATEGORICAL:
-            assert type(self.values[0]) == str
+            assert isinstance(self.values[0], str)
         if feature_type is FeatureType.MULTI_CATEGORICAL:
-            assert type(self.values[0]) == list or type(self.values[0]) == np.ndarray
+            assert is_2d_array(self.values)
 
     def __len__(self):
         return len(self.values)
@@ -63,14 +68,15 @@ class FeatureSet:
         self.feature_types = [f.feature_type for f in features]
         assert self.feature_types.count(FeatureType.ID) <= 1
         # check all features have same count of values in FeatureSet
-        assert len(set([len(f) for f in features])) == 1
+        assert len(set([len(f) for f in features])) <= 1
 
     def __getitem__(self, key):
         return self.features[key]
 
 
 class RecommendationBase(metaclass=abc.ABCMeta):
-    def __init__(self, knn_params: dict, n_output_dims: int = 32,):
+    def __init__(self, knn_params: dict, rating_scale: Tuple[float, float],
+                 n_output_dims: int = 32, biased: bool = True, bias_type: EntityType = EntityType.USER_ITEM):
         self.users_set = set()
         self.items_set = set()
 
@@ -90,6 +96,14 @@ class RecommendationBase(metaclass=abc.ABCMeta):
                                 index_time_params = {'M': 15, 'ef_construction': 200,})
 
         self.n_output_dims = n_output_dims
+        self.rating_scale = rating_scale
+        self.biased = biased
+        self.bias_type = bias_type
+        assert bias_type == EntityType.USER_ITEM or bias_type == EntityType.USER
+        self.mu: Optional[int] = None
+        self.bu = defaultdict(int)
+        self.bi = defaultdict(int)
+        self.spread: Optional[int] = None
 
     def __add_users__(self, users: List[str]):
         new_users_set = set(users)
@@ -122,12 +136,16 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         user_knn.init_index(max_elements=len(user_ids)*2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])
         user_knn.set_ef(n_neighbors * 2)
+        assert len(user_vectors) == len(self.users_set)
+        assert user_vectors.shape[1] == self.n_output_dims
         user_knn.add_items(user_vectors, list(range(len(self.users_set))))
 
         item_knn = hnswlib.Index(space='cosine', dim=self.n_output_dims)
         item_knn.init_index(max_elements=len(item_ids) * 2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])
         item_knn.set_ef(n_neighbors * 2)
+        assert item_vectors.shape[1] == self.n_output_dims
+        assert len(item_vectors) == len(self.items_set)
         item_knn.add_items(item_vectors, list(range(len(self.items_set))))
 
         self.user_knn = user_knn
@@ -154,6 +172,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
     def fit(self,
             user_ids: List[str],
             item_ids: List[str],
+            user_item_affinities: List[Tuple[str, str, float]],
             **kwargs):
         # self.build_content_embeddings(item_data, user_item_affinities)
         assert not self.fit_done
@@ -162,20 +181,36 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.__add_users__(user_ids)
         self.__add_items__(item_ids)
 
-        item_data: FeatureSet = kwargs["item_data"]
-        user_data: FeatureSet = kwargs["user_data"]
+        item_data: FeatureSet = kwargs["item_data"] if "item_data" in kwargs else FeatureSet([])
+        user_data: FeatureSet = kwargs["user_data"] if "user_data" in kwargs else FeatureSet([])
         self.user_features = [feature.feature_name for feature in user_data if feature.feature_type != FeatureType.ID]
         self.item_features = [feature.feature_name for feature in item_data if feature.feature_type != FeatureType.ID]
         self.item_only_features = list(set(self.item_features) - set(self.user_features))
         self.user_only_features = list(set(self.user_features) - set(self.item_features))
+        uid = user_item_affinities
+        if self.biased:
+            if self.bias_type == EntityType.USER:
+                self.mu, self.bu, self.bi, self.spread, uid = normalize_affinity_scores_by_user(user_item_affinities)
+            elif self.bias_type == EntityType.USER_ITEM:
+                self.mu, self.bu, self.bi, self.spread, uid = normalize_affinity_scores_by_user_item(user_item_affinities)
+        else:
+            self.mu, self.spread, uid = get_mean_rating(user_item_affinities), self.rating_scale[1] - self.rating_scale[0], user_item_affinities
 
-        return
+        return uid
+
+    def default_prediction(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[Tuple[str, str, float]]:
+        return [(u, i, self.mu) for u, i in user_item_pairs]
+
+    def __build_rating_prediction_network__(self, user_vectors, item_vectors):
+        # Datagen based Keras tf2 DNN predictor.
+        # Input user_vector, item_vector, mu+bu+bi, bu, bi, mu+bi+bu+Dist(user_vector, item_vector), Dist(user_vector, item_vector)
+        pass
 
     @abc.abstractmethod
-    def default_predictions(self):
-        return
+    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[Tuple[str, str, float]]:
+        pass
 
-    def get_average_embeddings(self, entities: List[Tuple[str, EntityType]]):
+    def get_embeddings(self, entities: List[Tuple[str, EntityType]]):
         users = list(filter(lambda x: x[1] == EntityType.USER, entities))
         items = list(filter(lambda x: x[1] == EntityType.ITEM, entities))
         user_vectors = None
@@ -196,6 +231,10 @@ class RecommendationBase(metaclass=abc.ABCMeta):
             embeddings = item_vectors
         else:
             raise ValueError("No Embeddings Found")
+        return embeddings
+
+    def get_average_embeddings(self, entities: List[Tuple[str, EntityType]]):
+        embeddings = self.get_embeddings(entities)
         return np.average(embeddings, axis=0)
 
     def find_similar_items(self, item: str, positive: List[Tuple[str, EntityType]], negative: List[Tuple[str, EntityType]]) \

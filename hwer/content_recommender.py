@@ -20,16 +20,33 @@ from collections import Counter
 import operator
 from tqdm import tqdm_notebook
 import fasttext
+from .recommendation_base import  EntityType
 from .utils import unit_length, build_user_item_dict, build_item_user_dict
 
 
 class ContentRecommendation(RecommendationBase):
-    def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], n_output_dims: int = 32,):
-        super().__init__(knn_params=knn_params, n_output_dims=n_output_dims)
+    def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
+                 n_output_dims: int = 32, biased: bool = True, bias_type: EntityType = EntityType.USER_ITEM):
+        super().__init__(knn_params=knn_params, rating_scale=rating_scale,
+                         n_output_dims=n_output_dims, biased=biased, bias_type=bias_type)
 
         self.embedding_mapper: dict[str, ContentEmbeddingBase] = embedding_mapper
 
-    def __build_item_only_embeddings__(self, item_ids: List[str], item_data: FeatureSet):
+    def __build_user_only_embeddings__(self, user_ids: List[str], user_data: FeatureSet):
+        user_embeddings = {}
+        for feature in user_data:
+            feature_name = feature.feature_name
+            if feature.feature_type != "id" and feature_name in self.user_only_features:
+                embedding = self.embedding_mapper[feature_name].fit_transform(feature)
+                assert embedding.shape[0] == len(user_ids)
+                user_embeddings[feature_name] = embedding
+
+        return user_embeddings
+
+    def __build_item_embeddings__(self, item_ids: List[str],
+                                  user_embeddings: Dict[str, np.ndarray],
+                                  item_data: FeatureSet,
+                                  user_item_affinities: List[Tuple[str, str, float]]):
         item_embeddings = {}
         for feature in item_data:
             if feature.feature_type == "id":
@@ -38,23 +55,7 @@ class ContentRecommendation(RecommendationBase):
             embedding = self.embedding_mapper[feature_name].fit_transform(feature)
             assert embedding.shape[0] == len(item_ids)
             item_embeddings[feature_name] = embedding
-        return item_embeddings
 
-    def __build_user_only_embeddings__(self, user_ids: List[str], user_data: FeatureSet):
-        user_embeddings = {}
-        for feature in user_data:
-            feature_name = feature.feature_name
-            if feature.feature_type == "id" or feature_name not in self.user_only_features:
-                continue
-            embedding = self.embedding_mapper[feature_name].fit_transform(feature)
-            assert embedding.shape[0] == len(user_ids)
-            user_embeddings[feature_name] = embedding
-        return user_embeddings
-
-    def __build_item_embeddings__(self, item_ids: List[str],
-                                  user_embeddings: Dict[str, np.ndarray],
-                                  item_embeddings: Dict[str, np.ndarray],
-                                  user_item_affinities: List[Tuple[str, str, float]]):
         item_user_dict: Dict[str, Dict[str, float]] = build_item_user_dict(user_item_affinities)
         for feature_name in self.user_only_features:
             user_embedding = user_embeddings[feature_name]
@@ -68,6 +69,7 @@ class ContentRecommendation(RecommendationBase):
                     user_indices = [self.user_id_to_index[user] for user in users]
                     user_ems = np.take(user_embedding, indices=user_indices, axis=0)
                     assert len(user_ems) > 0
+                    weights[weights == 0] = 1e-3
                     item_em = np.average(user_ems, axis=0, weights=weights)
                     item_embedding[i] = item_em
                 else:
@@ -87,10 +89,9 @@ class ContentRecommendation(RecommendationBase):
 
         for feature in user_data:
             feature_name = feature.feature_name
-            if feature.feature_type == "id" or feature_name in self.user_only_features:
-                continue
-            embedding = self.embedding_mapper[feature_name].transform(feature)
-            user_embeddings[feature_name] = embedding
+            if feature.feature_type != "id" and feature_name not in self.user_only_features:
+                embedding = self.embedding_mapper[feature_name].transform(feature)
+                user_embeddings[feature_name] = embedding
 
         # For features which are not in user_data take average of item_features, while for ones present follow above method
         # Assume some features are not present in Users
@@ -114,6 +115,7 @@ class ContentRecommendation(RecommendationBase):
                 item_indices = [self.item_id_to_index[item] for item in items]
                 item_ems = np.take(item_embedding, indices=item_indices, axis=0)
                 assert len(item_ems) > 0
+                weights[weights == 0] = 1e-3
                 item_em = np.average(item_ems, axis=0, weights=weights)
                 final_embedding = (embedding + item_em) / 2.0
                 user_embedding[i] = final_embedding
@@ -135,6 +137,7 @@ class ContentRecommendation(RecommendationBase):
                     item_indices = [self.item_id_to_index[item] for item in items]
                     item_ems = np.take(item_embedding, indices=item_indices, axis=0)
                     assert len(item_ems) > 0
+                    weights[weights == 0] = 1e-3
                     item_em = np.average(item_ems, axis=0, weights=weights)
                     user_embedding[i] = item_em
                 else:
@@ -164,12 +167,14 @@ class ContentRecommendation(RecommendationBase):
         all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)
         if self.n_output_dims < all_vectors.shape[1]:
             all_vectors = PCA(n_components=self.n_output_dims, ).fit_transform(all_vectors)
+        if self.n_output_dims > all_vectors.shape[1]:
+            raise AssertionError("Output Dims are higher than Total Feature Dims.")
         user_vectors = all_vectors[:user_vectors_length]
         item_vectors = all_vectors[user_vectors_length:]
 
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
-        return user_vectors,item_vectors
+        return user_vectors, item_vectors
 
     def __build_content_embeddings__(self,
                                      user_ids: List[str],
@@ -177,10 +182,10 @@ class ContentRecommendation(RecommendationBase):
                                      user_data: FeatureSet,
                                      item_data: FeatureSet,
                                      user_item_affinities: List[Tuple[str, str, float]]):
-        item_embeddings = self.__build_item_only_embeddings__(item_ids, item_data)
+
         user_embeddings = self.__build_user_only_embeddings__(user_ids, user_data)
         item_embeddings = self.__build_item_embeddings__(item_ids, user_embeddings,
-                                                         item_embeddings, user_item_affinities)
+                                                         item_data, user_item_affinities)
         user_embeddings, processed_features = self.__build_user_embeddings__(user_ids, user_data, item_data,
                                                                              user_embeddings, item_embeddings,
                                                                              user_item_affinities)
@@ -192,22 +197,20 @@ class ContentRecommendation(RecommendationBase):
     def fit(self,
             user_ids: List[str],
             item_ids: List[str],
+            user_item_affinities: List[Tuple[str, str, float]],
             **kwargs):
         """
-        Note: Users Features need to be a subset of item features for them to be embedded into same space
 
-        Currently Only supports text data, Support for Categorical and numerical data to be added using AutoEncoders
         :param user_ids:
         :param item_ids:
-        :param warm_start:
+        :param user_item_affinities:
         :param kwargs:
         :return:
         """
 
-        super().fit(user_ids, item_ids, **kwargs)
-        item_data: FeatureSet = kwargs["item_data"]
-        user_data: FeatureSet = kwargs["user_data"]
-        user_item_affinities: List[Tuple[str, str, float]] = kwargs["user_item_affinities"]
+        user_item_affinities = super().fit(user_ids, item_ids, user_item_affinities, **kwargs)
+        item_data: FeatureSet = kwargs["item_data"] if "item_data" in kwargs else FeatureSet([])
+        user_data: FeatureSet = kwargs["user_data"] if "user_data" in kwargs else FeatureSet([])
 
         user_vectors, item_vectors = self.__build_content_embeddings__(user_ids, item_ids,
                                                                        user_data, item_data, user_item_affinities)
@@ -220,6 +223,9 @@ class ContentRecommendation(RecommendationBase):
 
         self.fit_done = True
         return user_vectors, item_vectors
+
+    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[Tuple[str, str, float]]:
+        return [(u, i, self.mu) for u, i in user_item_pairs]
 
     def default_predictions(self):
         assert self.fit_done

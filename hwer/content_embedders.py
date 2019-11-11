@@ -14,6 +14,7 @@ from flair.embeddings import WordEmbeddings, FlairEmbeddings, DocumentPoolEmbedd
 from joblib import Parallel, delayed
 from tqdm import tqdm
 from typing import Type, Union
+from sklearn.preprocessing import StandardScaler
 
 
 class ContentEmbeddingBase(metaclass=abc.ABCMeta):
@@ -21,14 +22,16 @@ class ContentEmbeddingBase(metaclass=abc.ABCMeta):
         self.n_dims = n_dims
         self.make_unit_length = make_unit_length
         self.kwargs = kwargs
+        self.is_fit = False
 
     @abc.abstractmethod
     def fit(self, feature: Union[Feature, FeatureSet], **kwargs):
-        raise NotImplementedError()
+        assert not self.is_fit
+        self.is_fit = True
 
     @abc.abstractmethod
     def transform(self, feature: Union[Feature, FeatureSet], **kwargs) -> np.ndarray:
-        raise NotImplementedError()
+        assert self.is_fit
 
     def fit_transform(self, feature: Union[Feature, FeatureSet], **kwargs) -> np.ndarray:
         self.fit(feature, **kwargs)
@@ -44,7 +47,6 @@ class ContentEmbeddingBase(metaclass=abc.ABCMeta):
         return output
 
 
-# TODO: Support Multiple Categorical Variables at once to record their interactions
 class CategoricalEmbedding(ContentEmbeddingBase):
     def __init__(self, n_dims, make_unit_length=True, n_iters=50, **kwargs):
         super().__init__(n_dims, make_unit_length, **kwargs)
@@ -53,6 +55,7 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         self.ohe = None
 
     def fit(self, feature: Feature, **kwargs):
+        super().fit(feature, **kwargs)
         assert type(feature.values[0]) == str
         df = pd.DataFrame(data=feature.values, columns=["input"], dtype=str)
         # pd.DataFrame(data=np.array([feature.values]).reshape(-1,1))
@@ -96,6 +99,7 @@ class MultiCategoricalEmbedding(ContentEmbeddingBase):
         self.input_mapper = lambda x: " ".join(map(lambda y: "__" + str(y).strip() + "__", x))
 
     def fit(self, feature: Feature, **kwargs):
+        super().fit(feature, **kwargs)
         assert type(feature.values[0]) == list or type(feature.values[0]) == np.ndarray
         assert feature.feature_type == FeatureType.MULTI_CATEGORICAL
         df = pd.DataFrame(data=np.array(feature.values).T, columns=["input"])
@@ -141,6 +145,7 @@ class FasttextEmbedding(ContentEmbeddingBase):
                                                      dim=self.n_dims, epoch=10, lr=0.1, thread=os.cpu_count())
 
     def fit(self, feature: Feature, **kwargs):
+        super().fit(feature, **kwargs)
         assert feature.feature_type == FeatureType.STR
         if self.fasttext_file is None:
             df = pd.DataFrame(data=feature.values, columns=[feature.feature_name])
@@ -170,37 +175,52 @@ class NumericEmbedding(ContentEmbeddingBase):
         self.n_iters = n_iters
         self.scaler = None
         self.encoder = None
-        self.feature_names = None
+        self.standard_scaler = None
 
-    def fit(self, features: FeatureSet, **kwargs):
-        assert set(features.feature_types) == {FeatureType.NUMERIC}
-        self.feature_names = features.feature_names
-        df = pd.DataFrame(np.array([f.values for f in features.features]).T, columns=features.feature_names)
-        scaler = MinMaxScaler(feature_range=(-0.95, 0.95))
-        inputs = scaler.fit_transform(df)
-        self.scaler = scaler
-        outputs = np.copy(inputs)
-        if self.log:
-            outputs = np.concatenate((outputs, np.log(df)),axis=1)
-        if self.sqrt:
-            outputs = np.concatenate((outputs, np.sqrt(df)), axis=1)
+    def __prepare_inputs(self, inputs):
+        scaled_inputs = self.scaler.transform(inputs)
+        standardized_inputs = self.standard_scaler.transform(inputs)
+        outputs = np.concatenate((scaled_inputs, standardized_inputs), axis=1)
+        if self.log and np.sum(inputs <= 0) == 0:
+            outputs = np.concatenate((outputs, np.log(inputs)), axis=1)
+        if self.sqrt and np.sum(inputs <= 0) == 0:
+            outputs = np.concatenate((outputs, np.sqrt(inputs)), axis=1)
         if self.square:
-            outputs = np.concatenate((outputs, np.square(df)), axis=1)
+            outputs = np.concatenate((outputs, np.square(inputs)), axis=1)
         if self.percentile:
-            outputs = np.concatenate((outputs, rankdata(df, axis=0)/len(df)), axis=1)
+            outputs = np.concatenate((outputs, rankdata(inputs, axis=0) / len(inputs)), axis=1)
 
-        _, encoder = auto_encoder_transform(inputs, outputs, n_dims=self.n_dims, verbose=0,
+        inputs = outputs.copy()
+        return inputs
+
+    def fit(self, feature: Feature, **kwargs):
+        super().fit(feature, **kwargs)
+        assert feature.feature_type == FeatureType.NUMERIC
+        inputs = np.array(feature.values)
+        if len(inputs.shape) == 1:
+            inputs = inputs.reshape(-1, 1)
+        scaler = MinMaxScaler(feature_range=(-0.95, 0.95))
+        standard_scaler = StandardScaler()
+        _ = scaler.fit(inputs)
+        _ = standard_scaler.fit(inputs)
+        self.scaler = scaler
+        self.standard_scaler = standard_scaler
+
+        inputs = self.__prepare_inputs(inputs)
+
+        _, encoder = auto_encoder_transform(inputs, inputs.copy(), n_dims=self.n_dims, verbose=0,
                                             epochs=self.n_iters)
         self.encoder = encoder
 
-    def transform(self, features: FeatureSet, **kwargs) -> np.ndarray:
-        assert set(features.feature_types) == {FeatureType.NUMERIC}
-        assert self.feature_names == features.feature_names
-        df = pd.DataFrame(np.array([f.values for f in features.features]).T, columns=features.feature_names)
-        inputs = self.scaler.transform(df)
+    def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+        assert feature.feature_type == FeatureType.NUMERIC
+        inputs = np.array(feature.values)
+        if len(inputs.shape) == 1:
+            inputs = inputs.reshape(-1, 1)
+        inputs = self.__prepare_inputs(inputs)
         outputs = unit_length(self.encoder.predict(inputs),
                               axis=1) if self.make_unit_length else self.encoder.predict(inputs)
-        return self.check_output_dims(outputs, features.features[0])
+        return self.check_output_dims(outputs, feature)
 
 
 class FlairGlove100Embedding(ContentEmbeddingBase):
@@ -216,6 +236,7 @@ class FlairGlove100Embedding(ContentEmbeddingBase):
         return a.detach().numpy()
 
     def fit(self, feature: Feature, **kwargs):
+        super().fit(feature, **kwargs)
         assert feature.feature_type == FeatureType.STR
         return
 
@@ -239,6 +260,7 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
         return a.detach().numpy()
 
     def fit(self, feature: Feature, **kwargs):
+        super().fit(feature, **kwargs)
         assert feature.feature_type == FeatureType.STR
         return
 
