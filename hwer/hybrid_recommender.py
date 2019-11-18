@@ -130,12 +130,12 @@ class HybridRecommender(RecommendationBase):
         callbacks = [es, reduce_lr]
 
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks)
+                  validation_data=validation, callbacks=callbacks, verbose=2)
 
         K.set_value(model.optimizer.lr, lr)
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks)
+                  validation_data=train, callbacks=callbacks, verbose=2)
 
         return encoder.predict(
             tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size))
@@ -262,12 +262,12 @@ class HybridRecommender(RecommendationBase):
         callbacks = [es, reduce_lr]
 
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks)
+                  validation_data=validation, callbacks=callbacks, verbose=2)
 
         K.set_value(model.optimizer.lr, lr)
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks)
+                  validation_data=train, callbacks=callbacks, verbose=2)
 
         user_vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size))
@@ -403,12 +403,12 @@ class HybridRecommender(RecommendationBase):
         callbacks = [es, reduce_lr]
 
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks)
+                  validation_data=validation, callbacks=callbacks, verbose=2)
 
         K.set_value(model.optimizer.lr, lr)
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks)
+                  validation_data=train, callbacks=callbacks, verbose=2)
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn,
                                 "ratings_count_by_user": ratings_count_by_user,
@@ -482,7 +482,6 @@ class HybridRecommender(RecommendationBase):
                                                                      self.rating_scale, lr=lr, epochs=epochs,
                                                                      batch_size=batch_size)
         self.prediction_artifacts = prediction_artifacts
-        print("Built Prediction Network")
         if content_data_used:
             user_vectors = np.concatenate((user_content_vectors, user_vectors), axis=1)
             item_vectors = np.concatenate((item_content_vectors, item_vectors), axis=1)
@@ -564,3 +563,10 @@ class HybridRecommender(RecommendationBase):
         predictions = inverse_fn(predictions)
         predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
         return predictions
+
+    def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
+                            negative: List[Tuple[str, EntityType]] = None) -> List[Tuple[str, float]]:
+        results = super().find_items_for_user(user, positive, negative)
+        res, dist = zip(*results)
+        ratings = self.predict([(user, i) for i in res])
+        return list(sorted(zip(res, ratings), key=operator.itemgetter(1), reverse=True))
