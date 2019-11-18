@@ -39,7 +39,6 @@ google-pasta==0.1.7
 grpcio==1.24.1
 h5py==2.10.0
 hnswlib==0.3.2.0
--e git+git@github.com:faizanahemad/Hybrid-Weighted-Embedding-Recommender.git@a0788b8d21d70f236a4a479b57a6afbea3061018#egg=hwer
 hyperopt==0.2.2
 idna==2.8
 importlib-metadata==0.23
