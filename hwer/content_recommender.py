@@ -20,8 +20,11 @@ from collections import Counter
 import operator
 from tqdm import tqdm_notebook
 import fasttext
-from .recommendation_base import  EntityType
-from .utils import unit_length, build_user_item_dict, build_item_user_dict
+from .recommendation_base import EntityType
+from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy
+import tensorflow as tf
+from tensorflow import keras
+from sklearn.model_selection import train_test_split
 
 
 class ContentRecommendation(RecommendationBase):
@@ -224,8 +227,8 @@ class ContentRecommendation(RecommendationBase):
         self.fit_done = True
         return user_vectors, item_vectors
 
-    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[Tuple[str, str, float]]:
-        return [(u, i, self.mu) for u, i in user_item_pairs]
+    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+        return [self.mu + self.bu[u] + self.bi[i] for u, i in user_item_pairs]
 
     def default_predictions(self):
         assert self.fit_done

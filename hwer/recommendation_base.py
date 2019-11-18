@@ -176,8 +176,11 @@ class RecommendationBase(metaclass=abc.ABCMeta):
             **kwargs):
         # self.build_content_embeddings(item_data, user_item_affinities)
         assert not self.fit_done
-        assert len(user_ids) == len(set(user_ids))
-        assert len(item_ids) == len(set(item_ids))
+        user_set = set(user_ids)
+        item_set = set(item_ids)
+        assert len(user_ids) == len(user_set)
+        assert len(item_ids) == len(item_set)
+        assert len(list([(u, i, r) for u, i, r in user_item_affinities if u not in user_set or i not in item_set])) == 0
         self.__add_users__(user_ids)
         self.__add_items__(item_ids)
 
@@ -198,16 +201,11 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         return uid
 
-    def default_prediction(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[Tuple[str, str, float]]:
+    def default_prediction(self, user_item_pairs: List[Tuple[str, str]]) -> List[Tuple[str, str, float]]:
         return [(u, i, self.mu) for u, i in user_item_pairs]
 
-    def __build_rating_prediction_network__(self, user_vectors, item_vectors):
-        # Datagen based Keras tf2 DNN predictor.
-        # Input user_vector, item_vector, mu+bu+bi, bu, bi, mu+bi+bu+Dist(user_vector, item_vector), Dist(user_vector, item_vector)
-        pass
-
     @abc.abstractmethod
-    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[Tuple[str, str, float]]:
+    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         pass
 
     def get_embeddings(self, entities: List[Tuple[str, EntityType]]):

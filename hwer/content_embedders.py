@@ -233,7 +233,10 @@ class FlairGlove100Embedding(ContentEmbeddingBase):
         sentence = Sentence(clean_text(text))
         _ = self.embeddings.embed(sentence)
         a = sentence.get_embedding()
-        return a.detach().numpy()
+        result = a.detach().numpy()
+        if np.sum(result[0:5]) == 0:
+            result = np.random.randn(self.n_dims)
+        return result
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
@@ -257,7 +260,10 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
         sentence = Sentence(clean_text(text))
         _ = self.embeddings.embed(sentence)
         a = sentence.get_embedding()
-        return a.detach().numpy()
+        result = a.detach().numpy()
+        if np.sum(result[0:5]) == 0:
+            result = np.random.randn(self.n_dims)
+        return result
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)

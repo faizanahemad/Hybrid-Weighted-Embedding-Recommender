@@ -45,12 +45,15 @@ def unit_length(a, axis=0):
     return a/np.expand_dims(norm(a, axis=axis), axis=axis)
 
 
-def fasttext_get_sentence_vectorizer(fasttext_model:FastText):
-    def get_sentence_vector(text):
-        v = fasttext_model.get_sentence_vector(text)
-        v = unit_length(v)
-        return v
-    return get_sentence_vector
+def shuffle_copy(*args):
+    rng_state = np.random.get_state()
+    results = []
+    for arg in args:
+        res = np.copy(arg)
+        np.random.shuffle(res)
+        results.append(res)
+        np.random.set_state(rng_state)
+    return results[0] if len(args) == 1 else results
 
 
 def average_precision_v1(y_true, y_pred):
