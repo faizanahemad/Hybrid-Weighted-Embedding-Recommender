@@ -37,7 +37,7 @@ movies["runtime"] = movies["runtime"].fillna(0.0)
 
 # print(ratings[ratings["user_id"]=="1051"])
 
-check_working = True  # Setting to False does KFold CV for 5 folds
+check_working = False  # Setting to False does KFold CV for 5 folds
 if check_working:
     movies = movies.sample(100)
     ratings = ratings[(ratings.movie_id.isin(movies.movie_id))]

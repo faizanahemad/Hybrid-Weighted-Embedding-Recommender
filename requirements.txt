@@ -8,9 +8,6 @@ beautifulsoup4==4.8.1
 bidict==0.18.3
 bleach==3.1.0
 blis==0.4.1
-boto==2.49.0
-boto3==1.10.6
-botocore==1.13.6
 bpemb==0.3.0
 certifi==2019.9.11
 cffi==1.13.1
@@ -25,12 +22,9 @@ decorator==4.4.0
 defusedxml==0.6.0
 Deprecated==1.2.6
 dill==0.3.1.1
-docutils==0.15.2
 editdistance==0.5.3
-en-core-web-sm==2.2.0
 entrypoints==0.3
 fasttext==0.9.1
-fitsne==1.0.1
 flair==0.4.4
 future==0.18.2
 gast==0.2.2
@@ -121,7 +115,6 @@ segtok==1.5.7
 Send2Trash==1.5.0
 sentencepiece==0.1.83
 six==1.12.0
-sklearn==0.0
 smart-open==1.8.4
 sortedcontainers==2.1.0
 soupsieve==1.9.4
@@ -131,9 +124,6 @@ srsly==0.2.0
 statsmodels==0.10.1
 SudachiPy==0.4.0
 tabulate==0.8.5
-tensorboard==2.0.0
-tensorflow==2.0.0
-tensorflow-estimator==2.0.1
 termcolor==1.1.0
 terminado==0.8.2
 testpath==0.4.2
