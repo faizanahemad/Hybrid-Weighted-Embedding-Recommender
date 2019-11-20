@@ -35,14 +35,19 @@ movies["title_length"] = movies["title"].apply(len)
 movies["overview_length"] = movies["overview"].apply(len)
 movies["runtime"] = movies["runtime"].fillna(0.0)
 
-# ratings = ratings.head(5000)
+check_working = True  # Setting to False does KFold CV for 5 folds
+if check_working:
+    movies = movies.sample(50)
+    users = users.sample(50)
+    ratings = ratings[(ratings.movie_id.isin(movies.movie_id))&(ratings.user_id.isin(users.user_id))]
+    samples = min(5000, ratings.shape[0])
+    ratings = ratings.sample(samples)
+
+
 user_item_affinities = [(row[0], row[1], row[2]) for row in ratings.values]
 users_for_each_rating = [row[0] for row in ratings.values]
 
-
-check_working = False # Setting to False does KFold CV for 5 folds
 if check_working:
-
     embedding_mapper = {}
     embedding_mapper['gender'] = CategoricalEmbedding(n_dims=1)
     embedding_mapper['age'] = CategoricalEmbedding(n_dims=1)
@@ -69,11 +74,21 @@ if check_working:
     kwargs = {}
     kwargs['user_data'] = user_data
     kwargs['item_data'] = item_data
-    kwargs['epochs'] = 1
-    recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5), n_content_dims=4,
-                               n_collaborative_dims=4)
+    kwargs["hyperparameters"] = dict(combining_factor=0.5,
+                                     collaborative_params=dict(
+                                         prediction_network_params=dict(lr=0.001, epochs=1, batch_size=512,
+                                                                        network_width=2, network_depth=3),
+                                         item_item_params=dict(lr=0.001, epochs=1, batch_size=512, network_width=2,
+                                                               network_depth=2),
+                                         user_user_params=dict(lr=0.001, epochs=1, batch_size=512, network_width=2,
+                                                               network_depth=2),
+                                         user_item_params=dict(lr=0.001, epochs=1, batch_size=512, network_width=2,
+                                                               network_depth=2)))
 
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.8)
+    recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
+                               n_content_dims=32,
+                               n_collaborative_dims=32)
     user_vectors, item_vectors = recsys.fit(users.user_id.values, movies.movie_id.values,
                                             train_affinities, **kwargs)
 
@@ -84,7 +99,7 @@ if check_working:
 
     print(np.sqrt(np.mean(np.square(actuals - predictions))))
 
-    user_id = "1"
+    user_id = users.user_id.values[0]
     recommendations = recsys.find_items_for_user(user=user_id, positive=[], negative=[])
     res, dist = zip(*recommendations)
     print(recommendations[:10])
@@ -130,7 +145,13 @@ else:
         kwargs = {}
         kwargs['user_data'] = user_data
         kwargs['item_data'] = item_data
-        kwargs['epochs'] = 10
+
+        kwargs["hyperparameters"] = dict(combining_factor=0.5,
+                                         collaborative_params=dict(prediction_network_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=2, network_depth=3),
+                                                                   item_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=2, network_depth=3),
+                                                                   user_user_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=2, network_depth=3),
+                                                                   user_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=2, network_depth=3)))
+
         recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
                                    n_content_dims=32,
                                    n_collaborative_dims=32)

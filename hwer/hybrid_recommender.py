@@ -51,9 +51,12 @@ class HybridRecommender(RecommendationBase):
                                              n_output_dims: int,
                                              hyperparams: Dict) -> np.ndarray:
         train_affinities, validation_affinities = train_test_split(entity_entity_affinities, test_size=0.5)
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001,
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15,
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        network_width = hyperparams["network_width"] if "network_width" in hyperparams else 2
+        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
+
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
                 for i, j, r in affinities:
@@ -89,19 +92,17 @@ class HybridRecommender(RecommendationBase):
             # embeddings_constraint=tf.keras.constraints.unit_norm(axis=2)
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
-            item = tf.keras.layers.BatchNormalization()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
-            dense = keras.layers.Dense(embedding_size * 8, activation="relu", )
-            item = dense(item)
-            item = tf.keras.layers.Dropout(0.05)(item)
-            dense_0 = keras.layers.Dense(embedding_size * 8, activation="relu", )
-            item = dense_0(item)
-            item = tf.keras.layers.BatchNormalization()(item)
-            item = tf.keras.layers.Dropout(0.05)(item)
-            dense_1 = keras.layers.Dense(embedding_size * 8, activation="relu", )
-            item = dense_1(item)
-            dense_2 = keras.layers.Dense(embedding_size, activation="linear", )
-            item = dense_2(item)
+
+            for i in range(network_depth + 1):
+                if i < network_depth:
+                    dense = keras.layers.Dense(embedding_size * network_width, activation="relu", )
+                    item = dense(item)
+                    item = tf.keras.layers.BatchNormalization()(item)
+                    item = tf.keras.layers.Dropout(0.05)(item)
+                else:
+                    dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False)
+                    item = dense(item)
             item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
             item = K.l2_normalize(item, axis=-1)
             base_network = keras.Model(inputs=i1, outputs=item)
@@ -185,9 +186,11 @@ class HybridRecommender(RecommendationBase):
                                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                          n_output_dims: int,
                                          hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001,
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15,
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        network_width = hyperparams["network_width"] if "network_width" in hyperparams else 2
+        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
 
         max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
         n_input_dims = user_vectors.shape[1]
@@ -225,20 +228,17 @@ class HybridRecommender(RecommendationBase):
                                                 embeddings_initializer=embeddings_initializer)
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
-            item = tf.keras.layers.BatchNormalization()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
-            dense = keras.layers.Dense(embedding_size * 2, activation="relu", )
-            item = dense(item)
-            item = tf.keras.layers.Dropout(0.05)(item)
-            dense_0 = keras.layers.Dense(n_output_dims * 4, activation="relu", )
-            item = dense_0(item)
-            item = tf.keras.layers.BatchNormalization()(item)
-            item = tf.keras.layers.Dropout(0.05)(item)
-            dense_1 = keras.layers.Dense(n_output_dims * 2, activation="relu", )
-            item = dense_1(item)
-            dense_2 = keras.layers.Dense(n_output_dims, activation="linear", )
-            item = dense_2(item)
-            item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
+            embedding_size = max(embedding_size, n_output_dims)
+            for i in range(network_depth + 1):
+                if i < network_depth:
+                    dense = keras.layers.Dense(embedding_size * network_width, activation="relu", )
+                    item = dense(item)
+                    item = tf.keras.layers.BatchNormalization()(item)
+                    item = tf.keras.layers.Dropout(0.05)(item)
+                else:
+                    dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False)
+                    item = dense(item)
             item = K.l2_normalize(item, axis=-1)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
@@ -287,9 +287,11 @@ class HybridRecommender(RecommendationBase):
 
         # max_affinity = np.max([r for u, i, r in user_item_affinities])
         # min_affinity = np.min([r for u, i, r in user_item_affinities])
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001,
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15,
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        network_width = hyperparams["network_width"] if "network_width" in hyperparams else 2
+        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
 
         max_affinity = rating_scale[1]
         min_affinity = rating_scale[0]
@@ -376,10 +378,10 @@ class HybridRecommender(RecommendationBase):
         ratings_by_user = tf.keras.layers.Flatten()(input_5)
         ratings_by_item = tf.keras.layers.Flatten()(input_6)
 
-        user_content = keras.layers.Dense(n_content_dims * 4, activation="relu", )(user_content)
-        item_content = keras.layers.Dense(n_content_dims * 4, activation="relu", )(item_content)
-        user_collab = keras.layers.Dense(n_collaborative_dims * 4, activation="relu", )(user_collab)
-        item_collab = keras.layers.Dense(n_collaborative_dims * 4, activation="relu", )(item_collab)
+        user_content = keras.layers.Dense(n_content_dims * network_width, activation="relu", )(user_content)
+        item_content = keras.layers.Dense(n_content_dims * network_width, activation="relu", )(item_content)
+        user_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="relu", )(user_collab)
+        item_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="relu", )(item_collab)
 
         vectors = K.concatenate([user_content, item_content, user_collab, item_collab])
 
@@ -390,18 +392,20 @@ class HybridRecommender(RecommendationBase):
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
         n_dims = 2*(n_collaborative_dims*4) + 2*(n_content_dims*4) + 16
-        dense_representation = keras.layers.Dense(n_dims * 2, activation="relu", )(
-            dense_representation)
-        dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
-        dense_representation = keras.layers.Dense(n_dims * 2, activation="relu", )(
-            dense_representation)
-        dense_representation = tf.keras.layers.Dropout(0.1)(dense_representation)
+
+        for i in range(network_depth):
+
+            dense_representation = keras.layers.Dense(n_dims * network_width, activation="relu", )(
+                dense_representation)
+            dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
+            dense_representation = tf.keras.layers.Dropout(0.1)(dense_representation)
+
         dense_representation = keras.layers.Dense(128, activation="relu", )(
             dense_representation)
 
-        rating = keras.layers.Dense(1, activation="linear")(dense_representation)
+        rating = keras.layers.Dense(1, activation="tanh", use_bias=False)(dense_representation)
         rating = tf.keras.backend.constant(mean) + user_bias + item_bias + rating
-        rating = K.clip(rating, -1.1, 1.1)
+        rating = K.clip(rating, -1.01, 1.01)
         model = keras.Model(inputs=[input_user, input_item, input_1, input_2, input_3, input_4,
                                     input_5, input_6],
                             outputs=[rating])
@@ -439,8 +443,9 @@ class HybridRecommender(RecommendationBase):
 
         item_data: FeatureSet = kwargs["item_data"] if "item_data" in kwargs else FeatureSet([])
         user_data: FeatureSet = kwargs["user_data"] if "user_data" in kwargs else FeatureSet([])
+        hyperparameters = {} if "hyperparameters" not in kwargs else kwargs["hyperparameters"]
 
-        combining_factor: int = kwargs["combining_factor"] if "combining_factor" in kwargs else 0.5
+        combining_factor: int = hyperparameters["combining_factor"] if "combining_factor" in hyperparameters else 0.5
         alpha = combining_factor
         assert 0 <= alpha <= 1
         content_data_used = ("item_data" in kwargs or "user_data" in kwargs) and alpha > 0
@@ -453,7 +458,6 @@ class HybridRecommender(RecommendationBase):
         user_user_affinities: List[Tuple[str, str, bool]] = kwargs[
             "user_user_affinities"] if "user_user_affinities" in kwargs else list()
 
-        hyperparameters = {} if "hyperparameters" not in kwargs else kwargs["hyperparameters"]
         if content_data_used:
             super(type(self.cb), self.cb).fit(user_ids, item_ids, user_item_affinities, **kwargs)
             user_vectors, item_vectors = self.cb.__build_content_embeddings__(user_ids, item_ids,
