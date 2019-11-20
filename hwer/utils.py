@@ -338,8 +338,8 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
     bu = dict(zip(bu['user'], bu['mean']))
     # Stochastic Gradient Descent Taken from Surprise Lib
     lr = 0.001
-    reg = 0.01
-    n_epochs = 20
+    reg = 0.05
+    n_epochs = 10
     for dummy in range(n_epochs):
         for u, i, r in user_item_affinities:
             err = (r - (mean + bu[u]))
@@ -384,8 +384,8 @@ def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str,
     bi = dict(zip(bi['item'], bi['mean']))
     # Stochastic Gradient Descent Taken from Surprise Lib
     lr = 0.001
-    reg = 0.01
-    n_epochs = 20
+    reg = 0.05
+    n_epochs = 10
     for dummy in range(n_epochs):
         for u, i, r in user_item_affinities:
             err = (r - (mean + bu[u] + bi[i]))

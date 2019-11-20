@@ -35,14 +35,19 @@ movies["title_length"] = movies["title"].apply(len)
 movies["overview_length"] = movies["overview"].apply(len)
 movies["runtime"] = movies["runtime"].fillna(0.0)
 
+# print(ratings[ratings["user_id"]=="1051"])
+
 check_working = True  # Setting to False does KFold CV for 5 folds
 if check_working:
-    movies = movies.sample(50)
-    users = users.sample(50)
-    ratings = ratings[(ratings.movie_id.isin(movies.movie_id))&(ratings.user_id.isin(users.user_id))]
-    samples = min(5000, ratings.shape[0])
+    movies = movies.sample(100)
+    ratings = ratings[(ratings.movie_id.isin(movies.movie_id))]
+    user_counts = ratings.groupby(["user_id"])[["movie_id"]].count().reset_index()
+    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(100)
+    ratings = ratings.merge(user_counts[["user_id"]], on="user_id")
+    users = users[users["user_id"].isin(user_counts.user_id)]
+    ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]
+    samples = min(50000, ratings.shape[0])
     ratings = ratings.sample(samples)
-
 
 user_item_affinities = [(row[0], row[1], row[2]) for row in ratings.values]
 users_for_each_rating = [row[0] for row in ratings.values]
@@ -76,37 +81,47 @@ if check_working:
     kwargs['item_data'] = item_data
     kwargs["hyperparameters"] = dict(combining_factor=0.5,
                                      collaborative_params=dict(
-                                         prediction_network_params=dict(lr=0.001, epochs=1, batch_size=512,
-                                                                        network_width=2, network_depth=3),
-                                         item_item_params=dict(lr=0.001, epochs=1, batch_size=512, network_width=2,
-                                                               network_depth=2),
-                                         user_user_params=dict(lr=0.001, epochs=1, batch_size=512, network_width=2,
-                                                               network_depth=2),
-                                         user_item_params=dict(lr=0.001, epochs=1, batch_size=512, network_width=2,
-                                                               network_depth=2)))
+                                         prediction_network_params=dict(lr=0.001, epochs=5, batch_size=512,
+                                                                        network_width=4,
+                                                                        network_depth=3, verbose=1,
+                                                                        kernel_l1=0.0, kernel_l2=0.001,
+                                                                        activity_l1=0.0, activity_l2=0.0005),
+                                         item_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
+                                                               network_depth=2, verbose=1, kernel_l1=0.0,
+                                                               kernel_l2=0.001,
+                                                               activity_l1=0.0, activity_l2=0.0005),
+                                         user_user_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
+                                                               network_depth=2, verbose=1, kernel_l1=0.0,
+                                                               kernel_l2=0.001,
+                                                               activity_l1=0.0, activity_l2=0.0005),
+                                         user_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
+                                                               network_depth=3, verbose=1, kernel_l1=0.0,
+                                                               kernel_l2=0.001,
+                                                               activity_l1=0.0, activity_l2=0.0005)))
 
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.8)
     recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                               n_content_dims=32,
-                               n_collaborative_dims=32)
+                               n_content_dims=16,
+                               n_collaborative_dims=16)
     user_vectors, item_vectors = recsys.fit(users.user_id.values, movies.movie_id.values,
                                             train_affinities, **kwargs)
 
-    predictions = recsys.predict([(u, i) for u, i, r in validation_affinities[:10]])
-    actuals = np.array([r for u, i, r in validation_affinities[:10]])
+    predictions = recsys.predict([(u, i) for u, i, r in validation_affinities])
+    actuals = np.array([r for u, i, r in validation_affinities])
 
-    print(list(zip(actuals, predictions)))
+    print(list(zip(actuals[:10], predictions[:10])))
 
-    print(np.sqrt(np.mean(np.square(actuals - predictions))))
+    print("RMSE = %.4f" % (np.sqrt(np.mean(np.square(actuals - predictions)))))
 
     user_id = users.user_id.values[0]
     recommendations = recsys.find_items_for_user(user=user_id, positive=[], negative=[])
     res, dist = zip(*recommendations)
     print(recommendations[:10])
     recommended_movies = res[:10]
-    recommended_movies = movies[movies['movie_id'].isin(recommended_movies)][["title","genres","year","keywords","overview"]]
+    recommended_movies = movies[movies['movie_id'].isin(recommended_movies)][
+        ["title", "genres", "year", "keywords", "overview"]]
     actual_movies = ratings[ratings.user_id == user_id]["movie_id"].values
-    actual_movies = movies[movies['movie_id'].isin(actual_movies)][["title","genres","year","keywords","overview"]]
+    actual_movies = movies[movies['movie_id'].isin(actual_movies)][["title", "genres", "year", "keywords", "overview"]]
     print(recommended_movies)
     print(actual_movies)
 else:
@@ -147,16 +162,30 @@ else:
         kwargs['item_data'] = item_data
 
         kwargs["hyperparameters"] = dict(combining_factor=0.5,
-                                         collaborative_params=dict(prediction_network_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=2, network_depth=3),
-                                                                   item_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=2, network_depth=3),
-                                                                   user_user_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=2, network_depth=3),
-                                                                   user_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=2, network_depth=3)))
+                                         collaborative_params=dict(
+                                             prediction_network_params=dict(lr=0.001, epochs=5, batch_size=512,
+                                                                            network_width=4,
+                                                                            network_depth=3, verbose=2,
+                                                                            kernel_l1=0.0, kernel_l2=0.001,
+                                                                            activity_l1=0.0, activity_l2=0.0005),
+                                             item_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
+                                                                   network_depth=2, verbose=2, kernel_l1=0.0,
+                                                                   kernel_l2=0.001,
+                                                                   activity_l1=0.0, activity_l2=0.0005),
+                                             user_user_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
+                                                                   network_depth=2, verbose=2, kernel_l1=0.0,
+                                                                   kernel_l2=0.001,
+                                                                   activity_l1=0.0, activity_l2=0.0005),
+                                             user_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
+                                                                   network_depth=3, verbose=2, kernel_l1=0.0,
+                                                                   kernel_l2=0.001,
+                                                                   activity_l1=0.0, activity_l2=0.0005)))
 
         recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
                                    n_content_dims=32,
                                    n_collaborative_dims=32)
         _, _ = recsys.fit(users.user_id.values, movies.movie_id.values,
-                                                train_affinities, **kwargs)
+                          train_affinities, **kwargs)
 
         predictions = recsys.predict([(u, i) for u, i, r in validation_affinities])
         actuals = np.array([r for u, i, r in validation_affinities])
@@ -167,4 +196,4 @@ else:
     results = pd.DataFrame(results, columns=["rmse", "mae"])
     print(results)
     mean_rmse, mean_mae = results.mean().values
-    print("Final RMSE = %.4f, MAE = %.4f"%(mean_rmse, mean_mae))
+    print("Final RMSE = %.4f, MAE = %.4f" % (mean_rmse, mean_mae))

@@ -56,6 +56,11 @@ class HybridRecommender(RecommendationBase):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         network_width = hyperparams["network_width"] if "network_width" in hyperparams else 2
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
+        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
+        kernel_l1 = hyperparams["kernel_l1"] if "kernel_l1" in hyperparams else 0.001
+        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
+        activity_l1 = hyperparams["activity_l1"] if "activity_l1" in hyperparams else 0.0005
+        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
@@ -96,12 +101,16 @@ class HybridRecommender(RecommendationBase):
 
             for i in range(network_depth + 1):
                 if i < network_depth:
-                    dense = keras.layers.Dense(embedding_size * network_width, activation="relu", )
+                    dense = keras.layers.Dense(embedding_size * network_width, activation="relu",
+                                               kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                               activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
                     item = dense(item)
                     item = tf.keras.layers.BatchNormalization()(item)
                     item = tf.keras.layers.Dropout(0.05)(item)
                 else:
-                    dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False)
+                    dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
+                                               kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                               activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
                     item = dense(item)
             item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
             item = K.l2_normalize(item, axis=-1)
@@ -133,12 +142,12 @@ class HybridRecommender(RecommendationBase):
         callbacks = [es, reduce_lr]
 
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks, verbose=2)
+                  validation_data=validation, callbacks=callbacks, verbose=verbose)
 
         K.set_value(model.optimizer.lr, lr)
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks, verbose=2)
+                  validation_data=train, callbacks=callbacks, verbose=verbose)
 
         return encoder.predict(
             tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size))
@@ -191,11 +200,21 @@ class HybridRecommender(RecommendationBase):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         network_width = hyperparams["network_width"] if "network_width" in hyperparams else 2
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
+        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
+        kernel_l1 = hyperparams["kernel_l1"] if "kernel_l1" in hyperparams else 0.001
+        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
+        activity_l1 = hyperparams["activity_l1"] if "activity_l1" in hyperparams else 0.0005
+        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
 
-        max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
+        # max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
+        max_affinity = np.max([r for u, i, r in user_item_affinities])
+        min_affinity = np.min([r for u, i, r in user_item_affinities])
+        user_item_affinities = [(u, i, (2 * 0.9*(r - min_affinity) / (max_affinity - min_affinity)) - 0.9) for u, i, r in
+                                user_item_affinities]
+
         n_input_dims = user_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
-        user_item_affinities = [(u, i, r / max_affinity) for u, i, r in user_item_affinities]
+        # user_item_affinities = [(u, i, r / max_affinity) for u, i, r in user_item_affinities]
         train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.5)
         total_users = len(user_ids)
 
@@ -232,12 +251,16 @@ class HybridRecommender(RecommendationBase):
             embedding_size = max(embedding_size, n_output_dims)
             for i in range(network_depth + 1):
                 if i < network_depth:
-                    dense = keras.layers.Dense(embedding_size * network_width, activation="relu", )
+                    dense = keras.layers.Dense(embedding_size * network_width, activation="relu",
+                                               kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                               activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
                     item = dense(item)
                     item = tf.keras.layers.BatchNormalization()(item)
                     item = tf.keras.layers.Dropout(0.05)(item)
                 else:
-                    dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False)
+                    dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False,
+                                               kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                               activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
                     item = dense(item)
             item = K.l2_normalize(item, axis=-1)
             base_network = keras.Model(inputs=i1, outputs=item)
@@ -265,12 +288,12 @@ class HybridRecommender(RecommendationBase):
         callbacks = [es, reduce_lr]
 
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks, verbose=2)
+                  validation_data=validation, callbacks=callbacks, verbose=verbose)
 
         K.set_value(model.optimizer.lr, lr)
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks, verbose=2)
+                  validation_data=train, callbacks=callbacks, verbose=verbose)
 
         user_vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size))
@@ -292,6 +315,11 @@ class HybridRecommender(RecommendationBase):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         network_width = hyperparams["network_width"] if "network_width" in hyperparams else 2
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
+        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
+        kernel_l1 = hyperparams["kernel_l1"] if "kernel_l1" in hyperparams else 0.001
+        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
+        activity_l1 = hyperparams["activity_l1"] if "activity_l1" in hyperparams else 0.0005
+        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
 
         max_affinity = rating_scale[1]
         min_affinity = rating_scale[0]
@@ -304,9 +332,13 @@ class HybridRecommender(RecommendationBase):
                                 user_item_affinities]
         inverse_fn = np.vectorize(lambda r: ((r + 1) / 2) * (max_affinity - min_affinity) + min_affinity)
         mean, bu, bi, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
+        # print(bu, "\n", bi, "\n", np.max(list(bu.values())), np.max(list(bi.values())))
+        # print(mean, np.mean([r for u, i, r in user_item_affinities]), "\n",
+        #       max_affinity, np.max([r for u, i, r in user_item_affinities]), "\n",
+        #       min_affinity, np.min([r for u, i, r in user_item_affinities]))
 
-        bu = np.array([bu[u] if u in bu else np.random.rand()*0.1 for u in user_ids])
-        bi = np.array([bi[i] if i in bi else np.random.rand()*0.1 for i in item_ids])
+        bu = np.array([bu[u] if u in bu else np.random.rand()*0.01 for u in user_ids])
+        bi = np.array([bi[i] if i in bi else np.random.rand()*0.01 for i in item_ids])
 
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
@@ -323,8 +355,8 @@ class HybridRecommender(RecommendationBase):
                     user_collab = user_vectors[user]
                     item_collab = item_vectors[item]
 
-                    ratings_by_user = ratings_count_by_user[i]
-                    ratings_by_item = ratings_count_by_item[j]
+                    ratings_by_user = np.log1p((ratings_count_by_user[i] + 10.0)/10.0)
+                    ratings_by_item = np.log1p((ratings_count_by_item[j] + 10.0)/10.0)
                     yield (user, item, user_content, item_content, user_collab, item_collab,
                            ratings_by_user, ratings_by_item), r
 
@@ -378,10 +410,18 @@ class HybridRecommender(RecommendationBase):
         ratings_by_user = tf.keras.layers.Flatten()(input_5)
         ratings_by_item = tf.keras.layers.Flatten()(input_6)
 
-        user_content = keras.layers.Dense(n_content_dims * network_width, activation="relu", )(user_content)
-        item_content = keras.layers.Dense(n_content_dims * network_width, activation="relu", )(item_content)
-        user_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="relu", )(user_collab)
-        item_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="relu", )(item_collab)
+        user_content = keras.layers.Dense(n_content_dims * network_width, activation="relu",
+                                          kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                          activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(user_content)
+        item_content = keras.layers.Dense(n_content_dims * network_width, activation="relu",
+                                          kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                          activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(item_content)
+        user_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="relu",
+                                         kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                         activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(user_collab)
+        item_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="relu",
+                                         kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                         activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(item_collab)
 
         vectors = K.concatenate([user_content, item_content, user_collab, item_collab])
 
@@ -395,12 +435,15 @@ class HybridRecommender(RecommendationBase):
 
         for i in range(network_depth):
 
-            dense_representation = keras.layers.Dense(n_dims * network_width, activation="relu", )(
-                dense_representation)
+            dense_representation = keras.layers.Dense(n_dims * network_width, activation="relu",
+                                                      kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                                      activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(dense_representation)
             dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
             dense_representation = tf.keras.layers.Dropout(0.1)(dense_representation)
 
-        dense_representation = keras.layers.Dense(128, activation="relu", )(
+        dense_representation = keras.layers.Dense(128, activation="relu",
+                                                  kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                                  activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             dense_representation)
 
         rating = keras.layers.Dense(1, activation="tanh", use_bias=False)(dense_representation)
@@ -419,12 +462,12 @@ class HybridRecommender(RecommendationBase):
         callbacks = [es, reduce_lr]
 
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks, verbose=2)
+                  validation_data=validation, callbacks=callbacks, verbose=verbose)
 
         K.set_value(model.optimizer.lr, lr)
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks, verbose=2)
+                  validation_data=train, callbacks=callbacks, verbose=verbose)
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn,
                                 "ratings_count_by_user": ratings_count_by_user,
@@ -537,8 +580,8 @@ class HybridRecommender(RecommendationBase):
                     user_collab = user_content.reshape((-1, len(user_collab)))
                     item_collab = user_content.reshape((-1, len(item_collab)))
 
-                    ratings_by_user = ratings_count_by_user[i]
-                    ratings_by_item = ratings_count_by_item[j]
+                    ratings_by_user = np.log1p((ratings_count_by_user[i] + 10.0) / 10.0)
+                    ratings_by_item = np.log1p((ratings_count_by_item[j] + 10.0) / 10.0)
                     yield [np.array([user_idx], dtype=int), np.array([item_idx], dtype=int),
                            user_content, item_content, user_collab, item_collab,
                            np.array([ratings_by_user], dtype=float), np.array([ratings_by_item], dtype=float)]
