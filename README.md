@@ -73,27 +73,31 @@ pip install -r requirements.txt
 
 # References
 
+### Interesting Papers
+- [Deep Reinforcement Learning based Recommendation with Explicit User-Item Interactions Modeling](https://arxiv.org/pdf/1810.12027.pdf)
+
 ### Datasets and Downloads
-    - https://github.com/celiao/tmdbsimple/
-    - https://www.kaggle.com/tmdb/tmdb-movie-metadata#tmdb_5000_movies.csv
-    - http://www.cs.cmu.edu/~ark/personas/ and https://github.com/askmeegs/movies
-    - https://www.kaggle.com/jrobischon/wikipedia-movie-plots/data#
-    - https://github.com/markriedl/WikiPlots
-    - https://www.kaggle.com/rounakbanik/the-movies-dataset or [Google Drive Mirror](https://drive.google.com/open?id=1aBT4ojTiY-2I5NxUJAq2R1BtxbU7mpIQ)
+- https://github.com/celiao/tmdbsimple/
+- https://www.kaggle.com/tmdb/tmdb-movie-metadata#tmdb_5000_movies.csv
+- http://www.cs.cmu.edu/~ark/personas/ and https://github.com/askmeegs/movies
+- https://www.kaggle.com/jrobischon/wikipedia-movie-plots/data#
+- https://github.com/markriedl/WikiPlots
+- https://www.kaggle.com/c/yelp-recsys-2013/data
+- https://www.kaggle.com/rounakbanik/the-movies-dataset or [Google Drive Mirror](https://drive.google.com/open?id=1aBT4ojTiY-2I5NxUJAq2R1BtxbU7mpIQ)
 
 ### Misc References
-    - http://stevehanov.ca/blog/?id=145
+- http://stevehanov.ca/blog/?id=145
     
 ### Dimensionality Reduction
-    - https://github.com/DmitryUlyanov/Multicore-TSNE
-    - https://github.com/lmcinnes/umap
-    - https://github.com/KlugerLab/FIt-SNE https://pypi.org/project/fitsne/0.1.10/
-    - https://stats.stackexchange.com/questions/402668/intuitive-explanation-of-how-umap-works-compared-to-t-sne
-    - https://github.com/nmslib/hnswlib
+- https://github.com/DmitryUlyanov/Multicore-TSNE
+- https://github.com/lmcinnes/umap
+- https://github.com/KlugerLab/FIt-SNE https://pypi.org/project/fitsne/0.1.10/
+- https://stats.stackexchange.com/questions/402668/intuitive-explanation-of-how-umap-works-compared-to-t-sne
+- https://github.com/nmslib/hnswlib
 
     
 ### Metrics
-    - https://stackoverflow.com/questions/34252298/why-rank-based-recommendation-use-ndcg
+- https://stackoverflow.com/questions/34252298/why-rank-based-recommendation-use-ndcg
     
 
  

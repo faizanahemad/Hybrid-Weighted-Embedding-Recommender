@@ -149,7 +149,7 @@ class ContentRecommendation(RecommendationBase):
             processed_features.append(feature_name)
         return user_embeddings, processed_features
 
-    def __concat_feature_vectors__(self, processed_features, item_embeddings, user_embeddings):
+    def __concat_feature_vectors__(self, processed_features, item_embeddings, user_embeddings, n_output_dims):
         # Unit Vectorise Features
         for feature_name in processed_features:
             item_embedding = unit_length(item_embeddings[feature_name], axis=1)
@@ -168,9 +168,9 @@ class ContentRecommendation(RecommendationBase):
         # PCA
         user_vectors_length = len(user_vectors)
         all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)
-        if self.n_output_dims < all_vectors.shape[1]:
-            all_vectors = PCA(n_components=self.n_output_dims, ).fit_transform(all_vectors)
-        if self.n_output_dims > all_vectors.shape[1]:
+        if n_output_dims < all_vectors.shape[1]:
+            all_vectors = PCA(n_components=n_output_dims, ).fit_transform(all_vectors)
+        if n_output_dims > all_vectors.shape[1]:
             raise AssertionError("Output Dims are higher than Total Feature Dims.")
         user_vectors = all_vectors[:user_vectors_length]
         item_vectors = all_vectors[user_vectors_length:]
@@ -184,7 +184,8 @@ class ContentRecommendation(RecommendationBase):
                                      item_ids: List[str],
                                      user_data: FeatureSet,
                                      item_data: FeatureSet,
-                                     user_item_affinities: List[Tuple[str, str, float]]):
+                                     user_item_affinities: List[Tuple[str, str, float]],
+                                     n_output_dims):
 
         user_embeddings = self.__build_user_only_embeddings__(user_ids, user_data)
         item_embeddings = self.__build_item_embeddings__(item_ids, user_embeddings,
@@ -194,7 +195,7 @@ class ContentRecommendation(RecommendationBase):
                                                                              user_item_affinities)
 
         user_vectors, item_vectors = self.__concat_feature_vectors__(processed_features, item_embeddings,
-                                                                     user_embeddings)
+                                                                     user_embeddings, n_output_dims)
         return user_vectors, item_vectors
 
     def fit(self,
@@ -216,7 +217,8 @@ class ContentRecommendation(RecommendationBase):
         user_data: FeatureSet = kwargs["user_data"] if "user_data" in kwargs else FeatureSet([])
 
         user_vectors, item_vectors = self.__build_content_embeddings__(user_ids, item_ids,
-                                                                       user_data, item_data, user_item_affinities)
+                                                                       user_data, item_data, user_item_affinities,
+                                                                       self.n_output_dims)
 
         _, _ = self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
 

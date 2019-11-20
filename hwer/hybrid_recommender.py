@@ -49,11 +49,11 @@ class HybridRecommender(RecommendationBase):
                                              entity_id_to_index: Dict[str, int],
                                              vectors: np.ndarray,
                                              n_output_dims: int,
-                                             lr=0.001,
-                                             epochs=15,
-                                             batch_size=512) -> np.ndarray:
+                                             hyperparams: Dict) -> np.ndarray:
         train_affinities, validation_affinities = train_test_split(entity_entity_affinities, test_size=0.5)
-
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001,
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15,
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
                 for i, j, r in affinities:
@@ -89,12 +89,14 @@ class HybridRecommender(RecommendationBase):
             # embeddings_constraint=tf.keras.constraints.unit_norm(axis=2)
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
+            item = tf.keras.layers.BatchNormalization()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
             dense = keras.layers.Dense(embedding_size * 8, activation="relu", )
             item = dense(item)
             item = tf.keras.layers.Dropout(0.05)(item)
             dense_0 = keras.layers.Dense(embedding_size * 8, activation="relu", )
             item = dense_0(item)
+            item = tf.keras.layers.BatchNormalization()(item)
             item = tf.keras.layers.Dropout(0.05)(item)
             dense_1 = keras.layers.Dense(embedding_size * 8, activation="relu", )
             item = dense_1(item)
@@ -145,38 +147,35 @@ class HybridRecommender(RecommendationBase):
                                            user_user_affinities: List[Tuple[str, str, bool]],
                                            user_ids: List[str], item_ids: List[str],
                                            user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                           lr=0.001,
-                                           epochs=15,
-                                           batch_size=512) -> Tuple[np.ndarray, np.ndarray]:
+                                           hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
+
         if len(item_item_affinities) > 0:
+            item_item_params = {} if "item_item_params" not in hyperparams else hyperparams["item_item_params"]
+
             item_vectors = self.__entity_entity_affinities_trainer__(entity_ids=item_ids,
                                                                      entity_entity_affinities=item_item_affinities,
                                                                      entity_id_to_index=self.item_id_to_index,
                                                                      vectors=item_vectors,
                                                                      n_output_dims=self.n_content_dims,
-                                                                     lr=lr,
-                                                                     epochs=epochs,
-                                                                     batch_size=batch_size)
+                                                                     hyperparams=item_item_params)
 
         if len(user_user_affinities) > 0:
+            user_user_params = {} if "user_user_params" not in hyperparams else hyperparams["user_user_params"]
             user_vectors = self.__entity_entity_affinities_trainer__(entity_ids=user_ids,
                                                                      entity_entity_affinities=user_user_affinities,
                                                                      entity_id_to_index=self.user_id_to_index,
                                                                      vectors=user_vectors,
                                                                      n_output_dims=self.n_content_dims,
-                                                                     lr=lr,
-                                                                     epochs=epochs,
-                                                                     batch_size=batch_size)
+                                                                     hyperparams=user_user_params)
 
         if len(user_item_affinities) > 0:
+            user_item_params = {} if "user_item_params" not in hyperparams else hyperparams["user_item_params"]
             user_vectors, item_vectors = self.__user_item_affinities_trainer__(user_ids, item_ids, user_item_affinities,
                                                                                user_vectors, item_vectors,
                                                                                self.user_id_to_index,
                                                                                self.item_id_to_index,
                                                                                self.n_collaborative_dims,
-                                                                               lr=lr,
-                                                                               epochs=epochs,
-                                                                               batch_size=batch_size)
+                                                                               user_item_params)
         return user_vectors, item_vectors
 
     def __user_item_affinities_trainer__(self,
@@ -185,9 +184,11 @@ class HybridRecommender(RecommendationBase):
                                          user_vectors: np.ndarray, item_vectors: np.ndarray,
                                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                          n_output_dims: int,
-                                         lr=0.001,
-                                         epochs=15,
-                                         batch_size=512) -> Tuple[np.ndarray, np.ndarray]:
+                                         hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001,
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15,
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+
         max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
         n_input_dims = user_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
@@ -224,12 +225,14 @@ class HybridRecommender(RecommendationBase):
                                                 embeddings_initializer=embeddings_initializer)
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
+            item = tf.keras.layers.BatchNormalization()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
             dense = keras.layers.Dense(embedding_size * 2, activation="relu", )
             item = dense(item)
             item = tf.keras.layers.Dropout(0.05)(item)
             dense_0 = keras.layers.Dense(n_output_dims * 4, activation="relu", )
             item = dense_0(item)
+            item = tf.keras.layers.BatchNormalization()(item)
             item = tf.keras.layers.Dropout(0.05)(item)
             dense_1 = keras.layers.Dense(n_output_dims * 2, activation="relu", )
             item = dense_1(item)
@@ -280,14 +283,19 @@ class HybridRecommender(RecommendationBase):
                                      user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
                                      user_vectors: np.ndarray, item_vectors: np.ndarray,
                                      user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                     rating_scale: Tuple[float, float], lr=0.001, epochs=15, batch_size=512):
+                                     rating_scale: Tuple[float, float], hyperparams: Dict):
 
         # max_affinity = np.max([r for u, i, r in user_item_affinities])
         # min_affinity = np.min([r for u, i, r in user_item_affinities])
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001,
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15,
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+
         max_affinity = rating_scale[1]
         min_affinity = rating_scale[0]
         n_content_dims = user_content_vectors.shape[1]
         n_collaborative_dims = user_vectors.shape[1]
+
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
         user_item_affinities = [(u, i, (2 * (r - min_affinity) / (max_affinity - min_affinity)) - 1) for u, i, r in
@@ -368,10 +376,10 @@ class HybridRecommender(RecommendationBase):
         ratings_by_user = tf.keras.layers.Flatten()(input_5)
         ratings_by_item = tf.keras.layers.Flatten()(input_6)
 
-        user_content = keras.layers.Dense(n_content_dims * 2, activation="relu", )(user_content)
-        item_content = keras.layers.Dense(n_content_dims * 2, activation="relu", )(item_content)
-        user_collab = keras.layers.Dense(n_collaborative_dims * 2, activation="relu", )(user_collab)
-        item_collab = keras.layers.Dense(n_collaborative_dims * 2, activation="relu", )(item_collab)
+        user_content = keras.layers.Dense(n_content_dims * 4, activation="relu", )(user_content)
+        item_content = keras.layers.Dense(n_content_dims * 4, activation="relu", )(item_content)
+        user_collab = keras.layers.Dense(n_collaborative_dims * 4, activation="relu", )(user_collab)
+        item_collab = keras.layers.Dense(n_collaborative_dims * 4, activation="relu", )(item_collab)
 
         vectors = K.concatenate([user_content, item_content, user_collab, item_collab])
 
@@ -380,11 +388,15 @@ class HybridRecommender(RecommendationBase):
         meta_data = keras.layers.Dense(16, activation="relu", )(meta_data)
 
         dense_representation = K.concatenate([meta_data, vectors])
-        dense_representation = keras.layers.Dense(n_collaborative_dims * 4 * 4, activation="relu", )(
+        dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
+        n_dims = 2*(n_collaborative_dims*4) + 2*(n_content_dims*4) + 16
+        dense_representation = keras.layers.Dense(n_dims * 2, activation="relu", )(
             dense_representation)
-        dense_representation = keras.layers.Dense(n_collaborative_dims * 4 * 4, activation="relu", )(
+        dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
+        dense_representation = keras.layers.Dense(n_dims * 2, activation="relu", )(
             dense_representation)
-        dense_representation = keras.layers.Dense(n_collaborative_dims * 4 * 4, activation="relu", )(
+        dense_representation = tf.keras.layers.Dropout(0.1)(dense_representation)
+        dense_representation = keras.layers.Dense(128, activation="relu", )(
             dense_representation)
 
         rating = keras.layers.Dense(1, activation="linear")(dense_representation)
@@ -441,11 +453,12 @@ class HybridRecommender(RecommendationBase):
         user_user_affinities: List[Tuple[str, str, bool]] = kwargs[
             "user_user_affinities"] if "user_user_affinities" in kwargs else list()
 
+        hyperparameters = {} if "hyperparameters" not in kwargs else kwargs["hyperparameters"]
         if content_data_used:
             super(type(self.cb), self.cb).fit(user_ids, item_ids, user_item_affinities, **kwargs)
             user_vectors, item_vectors = self.cb.__build_content_embeddings__(user_ids, item_ids,
                                                                               user_data, item_data,
-                                                                              user_normalized_affinities)
+                                                                              user_normalized_affinities, self.n_content_dims)
         else:
             user_vectors, item_vectors = np.random.rand((len(user_ids), self.n_content_dims)), np.random.rand(
                 (len(item_ids), self.n_content_dims))
@@ -453,34 +466,31 @@ class HybridRecommender(RecommendationBase):
         user_content_vectors, item_content_vectors = user_vectors.copy(), item_vectors.copy()
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1] == self.n_content_dims
 
-        lr = kwargs["lr"] if "lr" in kwargs else 0.005
-        epochs = kwargs["epochs"] if "epochs" in kwargs else 1
-        batch_size = kwargs["batch_size"] if "batch_size" in kwargs else 1024
-        print("lr = ", lr, ", epochs = ", epochs, ", batch_size = ",batch_size )
+        collaborative_params = {} if "collaborative_params" not in hyperparameters else hyperparameters["collaborative_params"]
         user_vectors, item_vectors = self.__build_collaborative_embeddings__(user_normalized_affinities,
                                                                              item_item_affinities,
                                                                              user_user_affinities, user_ids, item_ids,
                                                                              user_vectors, item_vectors,
-                                                                             lr=lr, epochs=epochs, batch_size=batch_size)
+                                                                             collaborative_params)
 
         user_content_vectors, item_content_vectors = user_content_vectors * alpha, item_content_vectors * alpha
         user_vectors, item_vectors = user_vectors * (1 - alpha), item_vectors * (1 - alpha)
         assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
+        prediction_network_params = {} if "prediction_network_params" not in collaborative_params else collaborative_params[
+            "prediction_network_params"]
         if content_data_used:
 
             prediction_artifacts = self.__build_prediction_network__(user_ids, item_ids, user_item_affinities,
                                                                      user_content_vectors, item_content_vectors,
                                                                      user_vectors, item_vectors,
                                                                      self.user_id_to_index, self.item_id_to_index,
-                                                                     self.rating_scale, lr=lr, epochs=epochs,
-                                                                     batch_size=batch_size)
+                                                                     self.rating_scale, prediction_network_params)
         else:
             prediction_artifacts = self.__build_prediction_network__(user_ids, item_ids, user_item_affinities,
                                                                      user_vectors, item_vectors,
                                                                      user_vectors, item_vectors,
                                                                      self.user_id_to_index, self.item_id_to_index,
-                                                                     self.rating_scale, lr=lr, epochs=epochs,
-                                                                     batch_size=batch_size)
+                                                                     self.rating_scale, prediction_network_params)
         self.prediction_artifacts = prediction_artifacts
         if content_data_used:
             user_vectors = np.concatenate((user_content_vectors, user_vectors), axis=1)
@@ -499,7 +509,6 @@ class HybridRecommender(RecommendationBase):
         inverse_fn = self.prediction_artifacts["inverse_fn"]
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
         ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
-        batch_size = self.prediction_artifacts["batch_size"]
 
         def generate_prediction_samples(affinities: List[Tuple[str, str]],
                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],

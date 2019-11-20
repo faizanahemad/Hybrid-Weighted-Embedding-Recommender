@@ -18,6 +18,20 @@ import nmslib
 import re
 
 
+def locality_preserving_dimensionality_reduction(data: np.ndarray, n_neighbors=100, max_similarity=0.1, ):
+    """
+    Create lower dimensional embeddings such that ranking is maintained for `n_neighbors` or till `max_similarity` is reached for points neighboring anchor
+    Use negative sampling, We only support cosine distances
+    :param data:
+    :param n_neighbors:
+    :param max_similarity:
+    :return:
+    """
+    # Anchor,
+    num_points = data.shape[0]
+    n_init_dims = data.shape[1]
+
+
 def get_nms_query_method(data, k=1000,
                          index_time_params={'M': 15, 'indexThreadQty': 16, 'efConstruction': 200, 'post': 0, 'delaunay_type': 1}):
     query_time_params = {'efSearch': k}
