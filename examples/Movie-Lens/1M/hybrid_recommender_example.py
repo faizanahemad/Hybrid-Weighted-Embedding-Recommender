@@ -50,17 +50,17 @@ check_working = True  # Setting to False does KFold CV for 5 folds
 enable_kfold = True
 if check_working:
     movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
-    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(200)
+    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(300)
     movies = movies[movies["movie_id"].isin(movie_counts.movie_id)]
 
     ratings = ratings[(ratings.movie_id.isin(movie_counts.movie_id))]
 
     user_counts = ratings.groupby(["user_id"])[["movie_id"]].count().reset_index()
-    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(200)
+    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(300)
     ratings = ratings.merge(user_counts[["user_id"]], on="user_id")
     users = users[users["user_id"].isin(user_counts.user_id)]
     ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]
-    samples = min(50000, ratings.shape[0])
+    samples = min(40000, ratings.shape[0])
     ratings = ratings.sample(samples)
     print("Total Samples Taken = %s" % (ratings.shape[0]))
 
@@ -75,6 +75,7 @@ def test_surprise(train, test, algo=["svd","baseline","svdpp"], algo_params={}, 
     trainset = Dataset.load_from_df(train, reader).build_full_trainset()
     # testset = Dataset.load_from_df(test, reader).build_full_trainset().build_anti_testset()
     testset = Dataset.load_from_df(test, reader).build_full_trainset().build_testset()
+    trainset_for_testing = trainset.build_testset()
 
     def use_algo(algo,name):
         start = time.time()
@@ -84,13 +85,18 @@ def test_surprise(train, test, algo=["svd","baseline","svdpp"], algo_params={}, 
         total_time = end - start
         rmse = accuracy.rmse(predictions, verbose=False)
         mae = accuracy.mae(predictions, verbose=False)
-        return {"algo": name, "rmse": rmse, "mae":mae, "time":total_time}
+
+        predictions = algo.test(trainset_for_testing)
+        train_rmse = accuracy.rmse(predictions, verbose=False)
+        train_mae = accuracy.mae(predictions, verbose=False)
+        return {"algo": name, "rmse": rmse, "mae": mae,
+                "train_rmse": train_rmse, "train_mae": train_mae, "time":total_time}
 
     algo_map = {"svd": SVD(**(algo_params["svd"] if "svd" in algo_params else {})),
                 "svdpp": SVDpp(**(algo_params["svdpp"] if "svdpp" in algo_params else {})),
                 "baseline": BaselineOnly(bsl_options={'method':'sgd'})}
-
-    return list(map(lambda a: use_algo(algo_map[a], a), algo))
+    results = list(map(lambda a: use_algo(algo_map[a], a), algo))
+    return results
 
 
 def display_results(results: List[Dict[str, Any]]):
@@ -100,7 +106,15 @@ def display_results(results: List[Dict[str, Any]]):
     print(df)
 
 
-if not enable_kfold:
+def get_prediction_details(recsys, affinities):
+    predictions = recsys.predict([(u, i) for u, i, r in affinities])
+    actuals = np.array([r for u, i, r in affinities])
+    rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
+    mae = np.mean(np.abs(actuals - predictions))
+    return predictions, rmse, mae
+
+
+def test_once(train_affinities, validation_affinities):
     embedding_mapper = {}
     embedding_mapper['gender'] = CategoricalEmbedding(n_dims=1)
     embedding_mapper['age'] = CategoricalEmbedding(n_dims=1)
@@ -124,30 +138,31 @@ if not enable_kfold:
                  values=movies[["title_length", "overview_length", "runtime"]].values)
     item_data = FeatureSet([i1, i2, i3])
 
+    kfold_multiplier = 2 if enable_kfold else 1
+
     kwargs = {}
     kwargs['user_data'] = user_data
     kwargs['item_data'] = item_data
     kwargs["hyperparameters"] = dict(combining_factor=0.5,
                                      collaborative_params=dict(
-                                         prediction_network_params=dict(lr=0.001, epochs=5, batch_size=512,
-                                                                        network_width=4,
-                                                                        network_depth=3, verbose=1,
+                                         prediction_network_params=dict(lr=0.001, epochs=10*kfold_multiplier, batch_size=512,
+                                                                        network_width=2,
+                                                                        network_depth=2*kfold_multiplier, verbose=1,
                                                                         kernel_l1=0.0, kernel_l2=0.01,
                                                                         activity_l1=0.0, activity_l2=0.00),
-                                         item_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
-                                                               network_depth=2, verbose=1, kernel_l1=0.0,
+                                         item_item_params=dict(lr=0.001, epochs=10*kfold_multiplier, batch_size=512, network_width=4,
+                                                               network_depth=2*kfold_multiplier, verbose=1, kernel_l1=0.0,
                                                                kernel_l2=0.01,
                                                                activity_l1=0.0, activity_l2=0.0),
-                                         user_user_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
-                                                               network_depth=2, verbose=1, kernel_l1=0.0,
+                                         user_user_params=dict(lr=0.001, epochs=10*kfold_multiplier, batch_size=512, network_width=4,
+                                                               network_depth=2*kfold_multiplier, verbose=1, kernel_l1=0.0,
                                                                kernel_l2=0.01,
                                                                activity_l1=0.0, activity_l2=0.0),
-                                         user_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
-                                                               network_depth=3, verbose=1, kernel_l1=0.0,
+                                         user_item_params=dict(lr=0.001, epochs=10*kfold_multiplier, batch_size=512, network_width=2,
+                                                               network_depth=2*kfold_multiplier, verbose=1, kernel_l1=0.0,
                                                                kernel_l2=0.01,
                                                                activity_l1=0.0, activity_l2=0.0)))
 
-    train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25)
     results = test_surprise(train_affinities, validation_affinities)
     recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
                                n_content_dims=8,
@@ -156,17 +171,19 @@ if not enable_kfold:
     user_vectors, item_vectors = recsys.fit(users.user_id.values, movies.movie_id.values,
                                             train_affinities, **kwargs)
 
-    predictions = recsys.predict([(u, i) for u, i, r in validation_affinities])
     end = time.time()
-    actuals = np.array([r for u, i, r in validation_affinities])
-    print(list(zip(actuals[:10], predictions[:10])))
-
-    rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
-    mae = np.mean(np.abs(actuals - predictions))
     total_time = end - start
-    results.append({"algo":"hybrid", "rmse":rmse, "mae":mae, "time":total_time})
+    predictions, rmse, mae = get_prediction_details(recsys, validation_affinities)
+    _, train_rmse, train_mae = get_prediction_details(recsys, train_affinities)
+    results.append({"algo": "hybrid", "rmse": rmse, "mae": mae,
+                    "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time})
     display_results(results)
+    return recsys, results
 
+
+if not enable_kfold:
+    train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25)
+    recsys, results = test_once(train_affinities, validation_affinities)
     user_id = users.user_id.values[0]
     recommendations = recsys.find_items_for_user(user=user_id, positive=[], negative=[])
     res, dist = zip(*recommendations)
@@ -187,69 +204,10 @@ else:
         train_affinities, validation_affinities = X[train_index], X[test_index]
         train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
         validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
-
-        embedding_mapper = {}
-        embedding_mapper['gender'] = CategoricalEmbedding(n_dims=1)
-        embedding_mapper['age'] = CategoricalEmbedding(n_dims=1)
-        embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=2)
-        embedding_mapper['zip'] = CategoricalEmbedding(n_dims=2)
-
-        embedding_mapper['text'] = FlairGlove100Embedding()
-        embedding_mapper['numeric'] = NumericEmbedding(2)
-        embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=2)
-
-        u1 = Feature(feature_name="gender", feature_type=FeatureType.CATEGORICAL, values=users.gender.values)
-        u2 = Feature(feature_name="age", feature_type=FeatureType.CATEGORICAL, values=users.age.astype(str).values)
-        u3 = Feature(feature_name="occupation", feature_type=FeatureType.CATEGORICAL,
-                     values=users.occupation.astype(str).values)
-        u4 = Feature(feature_name="zip", feature_type=FeatureType.CATEGORICAL, values=users.zip.astype(str).values)
-        user_data = FeatureSet([u1, u2, u3, u4])
-
-        i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=movies.text.values)
-        i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=movies.genres.values)
-        i3 = Feature(feature_name="numeric", feature_type=FeatureType.NUMERIC,
-                     values=movies[["title_length", "overview_length", "runtime"]].values)
-        item_data = FeatureSet([i1, i2, i3])
-
-        kwargs = {}
-        kwargs['user_data'] = user_data
-        kwargs['item_data'] = item_data
-
-        kwargs["hyperparameters"] = dict(combining_factor=0.5,
-                                         collaborative_params=dict(
-                                             prediction_network_params=dict(lr=0.002, epochs=10, batch_size=512,
-                                                                            network_width=4,
-                                                                            network_depth=3, verbose=2,
-                                                                            kernel_l1=0.0, kernel_l2=0.0001,
-                                                                            activity_l1=0.0, activity_l2=0.0),
-                                             item_item_params=dict(lr=0.002, epochs=10, batch_size=512, network_width=4,
-                                                                   network_depth=2, verbose=2, kernel_l1=0.0,
-                                                                   kernel_l2=0.0001,
-                                                                   activity_l1=0.0, activity_l2=0.0),
-                                             user_user_params=dict(lr=0.002, epochs=10, batch_size=512, network_width=4,
-                                                                   network_depth=2, verbose=2, kernel_l1=0.0,
-                                                                   kernel_l2=0.0001,
-                                                                   activity_l1=0.0, activity_l2=0.0),
-                                             user_item_params=dict(lr=0.002, epochs=10, batch_size=512, network_width=4,
-                                                                   network_depth=3, verbose=2, kernel_l1=0.0,
-                                                                   kernel_l2=0.0001,
-                                                                   activity_l1=0.0, activity_l2=0.0)))
-
-        recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                   n_content_dims=16,
-                                   n_collaborative_dims=16)
-        start = time.time()
-        _, _ = recsys.fit(users.user_id.values, movies.movie_id.values,
-                          train_affinities, **kwargs)
-
-        predictions = recsys.predict([(u, i) for u, i, r in validation_affinities])
-        end = time.time()
-        total_time = end - start
-        results = test_surprise(train_affinities, validation_affinities)
-        actuals = np.array([r for u, i, r in validation_affinities])
-        rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
-        mae = np.mean(np.abs(actuals - predictions))
-        results.append({"algo": "hybrid", "rmse": rmse, "mae": mae, "time": total_time})
-        display_results(results)
+        recsys, res = test_once(train_affinities, validation_affinities)
+        results.extend(res)
+        print("#"*80)
     display_results(results)
+
+
 

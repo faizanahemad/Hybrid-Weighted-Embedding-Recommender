@@ -137,14 +137,20 @@ class HybridRecommender(RecommendationBase):
         model.compile(optimizer=adam,
                       loss=['mean_squared_error'])
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=8, verbose=0, )
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=2, min_lr=0.0001)
+        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=3, verbose=0,
+                                              restore_best_weights=True)
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=1, min_lr=0.0001)
         callbacks = [es, reduce_lr]
 
         model.fit(train, epochs=epochs,
                   validation_data=validation, callbacks=callbacks, verbose=verbose)
 
         K.set_value(model.optimizer.lr, lr)
+
+        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=3, verbose=0,
+                                              restore_best_weights=True)
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=1, min_lr=0.0001)
+        callbacks = [es, reduce_lr]
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
@@ -283,14 +289,20 @@ class HybridRecommender(RecommendationBase):
         model.compile(optimizer=adam,
                       loss=['mean_squared_error'])
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=4, verbose=0, )
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=2, min_lr=0.0001)
+        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=3, verbose=0,
+                                              restore_best_weights=True)
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=1, min_lr=0.0001)
         callbacks = [es, reduce_lr]
 
         model.fit(train, epochs=epochs,
                   validation_data=validation, callbacks=callbacks, verbose=verbose)
 
         K.set_value(model.optimizer.lr, lr)
+
+        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=3, verbose=0,
+                                              restore_best_weights=True)
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=1, min_lr=0.0001)
+        callbacks = [es, reduce_lr]
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
@@ -328,9 +340,18 @@ class HybridRecommender(RecommendationBase):
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
-        user_item_affinities = [(u, i, (2 * (r - min_affinity) / (max_affinity - min_affinity)) - 1) for u, i, r in
+        user_item_affinities = [(u, i, (4 * (r - min_affinity) / (max_affinity - min_affinity)) - 2) for u, i, r in
                                 user_item_affinities]
-        inverse_fn = np.vectorize(lambda r: ((r + 1) / 2) * (max_affinity - min_affinity) + min_affinity)
+        inverse_fn = np.vectorize(lambda r: ((r + 2) / 4) * (max_affinity - min_affinity) + min_affinity)
+
+        # ratings = np.array([r for u, i, r in user_item_affinities])
+        # mean = np.mean(ratings)
+        # std = np.std(ratings)
+        # user_item_affinities = [(u, i, (r - mean) / (2*std)) for u, i, r in
+        #                         user_item_affinities]
+        # inverse_fn = np.vectorize(lambda r: r*2*std + mean)
+
+        # inverse_fn = np.vectorize(lambda r: r)
         mean, bu, bi, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
         # print(bu, "\n", bi, "\n", np.max(list(bu.values())), np.max(list(bi.values())))
         # print(mean, np.mean([r for u, i, r in user_item_affinities]), "\n",
@@ -458,7 +479,7 @@ class HybridRecommender(RecommendationBase):
                                     kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                     activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(dense_representation)
         rating = tf.keras.backend.constant(mean) + user_bias + item_bias + rating
-        rating = K.clip(rating, -1.0, 1.0)
+        # rating = K.clip(rating, -1.0, 1.0)
         model = keras.Model(inputs=[input_user, input_item, input_1, input_2, input_3, input_4,
                                     input_5, input_6],
                             outputs=[rating])
@@ -467,14 +488,19 @@ class HybridRecommender(RecommendationBase):
         model.compile(optimizer=adam,
                       loss=['mean_squared_error'])
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=4, verbose=0, )
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=2, min_lr=0.0001)
+        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=3, verbose=0, restore_best_weights=True)
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=1, min_lr=0.0001)
         callbacks = [es, reduce_lr]
 
         model.fit(train, epochs=epochs,
                   validation_data=validation, callbacks=callbacks, verbose=verbose)
 
         K.set_value(model.optimizer.lr, lr)
+
+        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=3, verbose=0,
+                                              restore_best_weights=True)
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=1, min_lr=0.0001)
+        callbacks = [es, reduce_lr]
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
