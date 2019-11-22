@@ -418,24 +418,24 @@ class HybridRecommender(RecommendationBase):
         ratings_by_user = tf.keras.layers.Flatten()(input_5)
         ratings_by_item = tf.keras.layers.Flatten()(input_6)
 
-        user_content = keras.layers.Dense(n_content_dims * network_width, activation="relu",
+        user_content = keras.layers.Dense(n_content_dims * network_width, activation="tanh",
                                           kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                           activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(user_content)
-        item_content = keras.layers.Dense(n_content_dims * network_width, activation="relu",
+        item_content = keras.layers.Dense(n_content_dims * network_width, activation="tanh",
                                           kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                           activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(item_content)
-        user_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="relu",
+        user_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="tanh",
                                          kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                          activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(user_collab)
-        item_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="relu",
+        item_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="tanh",
                                          kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                          activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(item_collab)
 
         vectors = K.concatenate([user_content, item_content, user_collab, item_collab])
 
-        counts_data = keras.layers.Dense(8, activation="relu")(K.concatenate([ratings_by_user, ratings_by_item]))
+        counts_data = keras.layers.Dense(8, activation="tanh")(K.concatenate([ratings_by_user, ratings_by_item]))
         meta_data = K.concatenate([counts_data, user_item_content_similarity, user_item_collab_similarity])
-        meta_data = keras.layers.Dense(16, activation="relu", )(meta_data)
+        meta_data = keras.layers.Dense(16, activation="tanh", )(meta_data)
 
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
