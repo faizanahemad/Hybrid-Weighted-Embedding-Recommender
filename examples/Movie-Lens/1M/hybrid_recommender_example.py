@@ -147,19 +147,19 @@ def test_once(train_affinities, validation_affinities):
                                      collaborative_params=dict(
                                          prediction_network_params=dict(lr=0.001, epochs=10*kfold_multiplier, batch_size=512,
                                                                         network_width=2,
-                                                                        network_depth=2*kfold_multiplier, verbose=1,
+                                                                        network_depth=2*kfold_multiplier, verbose=2,
                                                                         kernel_l1=0.0, kernel_l2=0.01,
                                                                         activity_l1=0.0, activity_l2=0.00),
                                          item_item_params=dict(lr=0.001, epochs=10*kfold_multiplier, batch_size=512, network_width=4,
-                                                               network_depth=2*kfold_multiplier, verbose=1, kernel_l1=0.0,
+                                                               network_depth=2*kfold_multiplier, verbose=2, kernel_l1=0.0,
                                                                kernel_l2=0.01,
                                                                activity_l1=0.0, activity_l2=0.0),
                                          user_user_params=dict(lr=0.001, epochs=10*kfold_multiplier, batch_size=512, network_width=4,
-                                                               network_depth=2*kfold_multiplier, verbose=1, kernel_l1=0.0,
+                                                               network_depth=2*kfold_multiplier, verbose=2, kernel_l1=0.0,
                                                                kernel_l2=0.01,
                                                                activity_l1=0.0, activity_l2=0.0),
                                          user_item_params=dict(lr=0.001, epochs=10*kfold_multiplier, batch_size=512, network_width=2,
-                                                               network_depth=2*kfold_multiplier, verbose=1, kernel_l1=0.0,
+                                                               network_depth=2*kfold_multiplier, verbose=2, kernel_l1=0.0,
                                                                kernel_l2=0.01,
                                                                activity_l1=0.0, activity_l2=0.0)))
 
