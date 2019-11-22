@@ -3,9 +3,18 @@ from sklearn.model_selection import StratifiedKFold
 import pandas as pd
 import warnings
 warnings.filterwarnings('ignore')
+from typing import List, Dict, Tuple, Sequence, Type, Set, Optional, Any
 import numpy as np
+import time
+import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
+from surprise import SVD, SVDpp
+from surprise import accuracy
+from surprise import BaselineOnly
+from surprise import Dataset
+from surprise import Reader
+from surprise.model_selection import cross_validate
 from ast import literal_eval
 
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
@@ -37,22 +46,61 @@ movies["runtime"] = movies["runtime"].fillna(0.0)
 
 # print(ratings[ratings["user_id"]=="1051"])
 
-check_working = False  # Setting to False does KFold CV for 5 folds
+check_working = True  # Setting to False does KFold CV for 5 folds
+enable_kfold = True
 if check_working:
-    movies = movies.sample(100)
-    ratings = ratings[(ratings.movie_id.isin(movies.movie_id))]
+    movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
+    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(200)
+    movies = movies[movies["movie_id"].isin(movie_counts.movie_id)]
+
+    ratings = ratings[(ratings.movie_id.isin(movie_counts.movie_id))]
+
     user_counts = ratings.groupby(["user_id"])[["movie_id"]].count().reset_index()
-    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(100)
+    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(200)
     ratings = ratings.merge(user_counts[["user_id"]], on="user_id")
     users = users[users["user_id"].isin(user_counts.user_id)]
     ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]
     samples = min(50000, ratings.shape[0])
     ratings = ratings.sample(samples)
+    print("Total Samples Taken = %s" % (ratings.shape[0]))
 
 user_item_affinities = [(row[0], row[1], row[2]) for row in ratings.values]
 users_for_each_rating = [row[0] for row in ratings.values]
 
-if check_working:
+
+def test_surprise(train, test, algo=["svd","baseline","svdpp"], algo_params={}, rating_scale=(1, 5)):
+    train = pd.DataFrame(train)
+    test = pd.DataFrame(test)
+    reader = Reader(rating_scale=rating_scale)
+    trainset = Dataset.load_from_df(train, reader).build_full_trainset()
+    # testset = Dataset.load_from_df(test, reader).build_full_trainset().build_anti_testset()
+    testset = Dataset.load_from_df(test, reader).build_full_trainset().build_testset()
+
+    def use_algo(algo,name):
+        start = time.time()
+        algo.fit(trainset)
+        predictions = algo.test(testset)
+        end = time.time()
+        total_time = end - start
+        rmse = accuracy.rmse(predictions, verbose=False)
+        mae = accuracy.mae(predictions, verbose=False)
+        return {"algo": name, "rmse": rmse, "mae":mae, "time":total_time}
+
+    algo_map = {"svd": SVD(**(algo_params["svd"] if "svd" in algo_params else {})),
+                "svdpp": SVDpp(**(algo_params["svdpp"] if "svdpp" in algo_params else {})),
+                "baseline": BaselineOnly(bsl_options={'method':'sgd'})}
+
+    return list(map(lambda a: use_algo(algo_map[a], a), algo))
+
+
+def display_results(results: List[Dict[str, Any]]):
+    df = pd.DataFrame.from_records(results)
+    df = df.groupby(['algo']).mean()
+    df['time'] = df['time'].apply(lambda s: str(datetime.timedelta(seconds=s)))
+    print(df)
+
+
+if not enable_kfold:
     embedding_mapper = {}
     embedding_mapper['gender'] = CategoricalEmbedding(n_dims=1)
     embedding_mapper['age'] = CategoricalEmbedding(n_dims=1)
@@ -84,34 +132,40 @@ if check_working:
                                          prediction_network_params=dict(lr=0.001, epochs=5, batch_size=512,
                                                                         network_width=4,
                                                                         network_depth=3, verbose=1,
-                                                                        kernel_l1=0.0, kernel_l2=0.001,
-                                                                        activity_l1=0.0, activity_l2=0.0005),
+                                                                        kernel_l1=0.0, kernel_l2=0.01,
+                                                                        activity_l1=0.0, activity_l2=0.00),
                                          item_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
                                                                network_depth=2, verbose=1, kernel_l1=0.0,
-                                                               kernel_l2=0.001,
-                                                               activity_l1=0.0, activity_l2=0.0005),
+                                                               kernel_l2=0.01,
+                                                               activity_l1=0.0, activity_l2=0.0),
                                          user_user_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
                                                                network_depth=2, verbose=1, kernel_l1=0.0,
-                                                               kernel_l2=0.001,
-                                                               activity_l1=0.0, activity_l2=0.0005),
+                                                               kernel_l2=0.01,
+                                                               activity_l1=0.0, activity_l2=0.0),
                                          user_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
                                                                network_depth=3, verbose=1, kernel_l1=0.0,
-                                                               kernel_l2=0.001,
-                                                               activity_l1=0.0, activity_l2=0.0005)))
+                                                               kernel_l2=0.01,
+                                                               activity_l1=0.0, activity_l2=0.0)))
 
-    train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.8)
+    train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25)
+    results = test_surprise(train_affinities, validation_affinities)
     recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                               n_content_dims=16,
-                               n_collaborative_dims=16)
+                               n_content_dims=8,
+                               n_collaborative_dims=8)
+    start = time.time()
     user_vectors, item_vectors = recsys.fit(users.user_id.values, movies.movie_id.values,
                                             train_affinities, **kwargs)
 
     predictions = recsys.predict([(u, i) for u, i, r in validation_affinities])
+    end = time.time()
     actuals = np.array([r for u, i, r in validation_affinities])
-
     print(list(zip(actuals[:10], predictions[:10])))
 
-    print("RMSE = %.4f" % (np.sqrt(np.mean(np.square(actuals - predictions)))))
+    rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
+    mae = np.mean(np.abs(actuals - predictions))
+    total_time = end - start
+    results.append({"algo":"hybrid", "rmse":rmse, "mae":mae, "time":total_time})
+    display_results(results)
 
     user_id = users.user_id.values[0]
     recommendations = recsys.find_items_for_user(user=user_id, positive=[], negative=[])
@@ -163,37 +217,39 @@ else:
 
         kwargs["hyperparameters"] = dict(combining_factor=0.5,
                                          collaborative_params=dict(
-                                             prediction_network_params=dict(lr=0.001, epochs=5, batch_size=512,
+                                             prediction_network_params=dict(lr=0.002, epochs=10, batch_size=512,
                                                                             network_width=4,
                                                                             network_depth=3, verbose=2,
-                                                                            kernel_l1=0.0, kernel_l2=0.001,
-                                                                            activity_l1=0.0, activity_l2=0.0005),
-                                             item_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
+                                                                            kernel_l1=0.0, kernel_l2=0.0001,
+                                                                            activity_l1=0.0, activity_l2=0.0),
+                                             item_item_params=dict(lr=0.002, epochs=10, batch_size=512, network_width=4,
                                                                    network_depth=2, verbose=2, kernel_l1=0.0,
-                                                                   kernel_l2=0.001,
-                                                                   activity_l1=0.0, activity_l2=0.0005),
-                                             user_user_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
+                                                                   kernel_l2=0.0001,
+                                                                   activity_l1=0.0, activity_l2=0.0),
+                                             user_user_params=dict(lr=0.002, epochs=10, batch_size=512, network_width=4,
                                                                    network_depth=2, verbose=2, kernel_l1=0.0,
-                                                                   kernel_l2=0.001,
-                                                                   activity_l1=0.0, activity_l2=0.0005),
-                                             user_item_params=dict(lr=0.001, epochs=5, batch_size=512, network_width=4,
+                                                                   kernel_l2=0.0001,
+                                                                   activity_l1=0.0, activity_l2=0.0),
+                                             user_item_params=dict(lr=0.002, epochs=10, batch_size=512, network_width=4,
                                                                    network_depth=3, verbose=2, kernel_l1=0.0,
-                                                                   kernel_l2=0.001,
-                                                                   activity_l1=0.0, activity_l2=0.0005)))
+                                                                   kernel_l2=0.0001,
+                                                                   activity_l1=0.0, activity_l2=0.0)))
 
         recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                   n_content_dims=32,
-                                   n_collaborative_dims=32)
+                                   n_content_dims=16,
+                                   n_collaborative_dims=16)
+        start = time.time()
         _, _ = recsys.fit(users.user_id.values, movies.movie_id.values,
                           train_affinities, **kwargs)
 
         predictions = recsys.predict([(u, i) for u, i, r in validation_affinities])
+        end = time.time()
+        total_time = end - start
+        results = test_surprise(train_affinities, validation_affinities)
         actuals = np.array([r for u, i, r in validation_affinities])
         rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
         mae = np.mean(np.abs(actuals - predictions))
-        print("RMSE = %.4f, MAE = %.4f" % (rmse, mae))
-        results.append([rmse, mae])
-    results = pd.DataFrame(results, columns=["rmse", "mae"])
-    print(results)
-    mean_rmse, mean_mae = results.mean().values
-    print("Final RMSE = %.4f, MAE = %.4f" % (mean_rmse, mean_mae))
+        results.append({"algo": "hybrid", "rmse": rmse, "mae": mae, "time": total_time})
+        display_results(results)
+    display_results(results)
+

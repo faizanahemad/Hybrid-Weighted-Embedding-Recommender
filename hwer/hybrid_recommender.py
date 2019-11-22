@@ -390,6 +390,14 @@ class HybridRecommender(RecommendationBase):
         item_bias = keras.layers.Embedding(len(item_ids), 1, input_length=1,
                                            embeddings_initializer=item_initializer)(item)
 
+        user_bias = keras.layers.Dense(1, activation="linear",
+                                       kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                       activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=0.01))(user_bias)
+
+        item_bias = keras.layers.Dense(1, activation="linear",
+                           kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                           activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=0.01))(item_bias)
+
         input_1 = keras.Input(shape=(n_content_dims,))
         input_2 = keras.Input(shape=(n_content_dims,))
         input_3 = keras.Input(shape=(n_collaborative_dims,))
@@ -435,20 +443,22 @@ class HybridRecommender(RecommendationBase):
 
         for i in range(network_depth):
 
-            dense_representation = keras.layers.Dense(n_dims * network_width, activation="relu",
+            dense_representation = keras.layers.Dense(n_dims * network_width, activation="tanh",
                                                       kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                                       activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(dense_representation)
             dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
             dense_representation = tf.keras.layers.Dropout(0.1)(dense_representation)
 
-        dense_representation = keras.layers.Dense(128, activation="relu",
+        dense_representation = keras.layers.Dense(128, activation="tanh",
                                                   kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                                   activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             dense_representation)
 
-        rating = keras.layers.Dense(1, activation="tanh", use_bias=False)(dense_representation)
+        rating = keras.layers.Dense(1, activation="linear", use_bias=True,
+                                    kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                    activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(dense_representation)
         rating = tf.keras.backend.constant(mean) + user_bias + item_bias + rating
-        rating = K.clip(rating, -1.01, 1.01)
+        rating = K.clip(rating, -1.0, 1.0)
         model = keras.Model(inputs=[input_user, input_item, input_1, input_2, input_3, input_4,
                                     input_5, input_6],
                             outputs=[rating])
@@ -474,8 +484,6 @@ class HybridRecommender(RecommendationBase):
                                 "ratings_count_by_item": ratings_count_by_item,
                                 "batch_size": batch_size}
         return prediction_artifacts
-
-        # add regularization to dense layer weights,  add batchnorm
 
     def fit(self,
             user_ids: List[str],
