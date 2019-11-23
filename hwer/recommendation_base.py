@@ -76,7 +76,7 @@ class FeatureSet:
 
 class RecommendationBase(metaclass=abc.ABCMeta):
     def __init__(self, knn_params: dict, rating_scale: Tuple[float, float],
-                 n_output_dims: int = 32, biased: bool = True, bias_type: EntityType = EntityType.USER_ITEM):
+                 n_output_dims: int = 32):
         self.users_set = set()
         self.items_set = set()
 
@@ -97,12 +97,9 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         self.n_output_dims = n_output_dims
         self.rating_scale = rating_scale
-        self.biased = biased
-        self.bias_type = bias_type
-        assert bias_type == EntityType.USER_ITEM or bias_type == EntityType.USER
         self.mu: Optional[int] = None
-        self.bu = defaultdict(int)
-        self.bi = defaultdict(int)
+        self.bu = defaultdict(float)
+        self.bi = defaultdict(float)
         self.spread: Optional[int] = None
 
     def __add_users__(self, users: List[str]):
@@ -190,19 +187,11 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.item_features = [feature.feature_name for feature in item_data if feature.feature_type != FeatureType.ID]
         self.item_only_features = list(set(self.item_features) - set(self.user_features))
         self.user_only_features = list(set(self.user_features) - set(self.item_features))
-        uid = user_item_affinities
-        if self.biased:
-            if self.bias_type == EntityType.USER:
-                self.mu, self.bu, self.bi, self.spread, uid = normalize_affinity_scores_by_user(user_item_affinities)
-            elif self.bias_type == EntityType.USER_ITEM:
-                self.mu, self.bu, self.bi, self.spread, uid = normalize_affinity_scores_by_user_item(user_item_affinities)
-        else:
-            self.mu, self.spread, uid = get_mean_rating(user_item_affinities), self.rating_scale[1] - self.rating_scale[0], user_item_affinities
-
+        self.mu, self.bu, self.bi, self.spread, uid = normalize_affinity_scores_by_user_item(user_item_affinities)
         return uid
 
     def default_prediction(self, user_item_pairs: List[Tuple[str, str]]) -> List[Tuple[str, str, float]]:
-        return [(u, i, self.mu) for u, i in user_item_pairs]
+        return [(u, i, self.mu + self.bu[u] + self.bi[i]) for u, i in user_item_pairs]
 
     @abc.abstractmethod
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:

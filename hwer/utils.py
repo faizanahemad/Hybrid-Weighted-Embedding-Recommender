@@ -16,6 +16,7 @@ import tensorflow as tf
 from sklearn.model_selection import train_test_split
 import nmslib
 import re
+from collections import defaultdict
 
 
 def locality_preserving_dimensionality_reduction(data: np.ndarray, n_neighbors=100, max_similarity=0.1, ):
@@ -336,6 +337,8 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
     uid["rating"] = uid["rating"] - uid["mean"]
 
     bu = dict(zip(bu['user'], bu['mean']))
+    bu = defaultdict(float, bu)
+
     # Stochastic Gradient Descent Taken from Surprise Lib
     lr = 0.001
     reg = 0.05
@@ -347,9 +350,7 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
 
     uid = [[u, i, r - (mean + bu[u])] for u, i, r in user_item_affinities]
     uid = pd.DataFrame(uid, columns=["user", "item", "rating"])
-    unique_items = uid["item"].unique()
-    bi = dict(zip(unique_items, [0]*len(unique_items)))
-
+    bi = defaultdict(float)
     # Calculating Spreads
     spread = max(uid["rating"].max(), np.abs(uid["rating"].min()))
 
@@ -382,6 +383,8 @@ def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str,
 
     bu = dict(zip(bu['user'], bu['mean']))
     bi = dict(zip(bi['item'], bi['mean']))
+    bu = defaultdict(float, bu)
+    bi = defaultdict(float, bi)
     # Stochastic Gradient Descent Taken from Surprise Lib
     lr = 0.001
     reg = 0.05

@@ -12,6 +12,7 @@ import numpy as np
 import re
 from bidict import bidict
 from joblib import Parallel, delayed
+from collections import defaultdict
 import gc
 import sys
 import os
@@ -29,15 +30,16 @@ import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
 import tensorflow.keras.backend as K
+from scipy.stats import describe
 
 
 class HybridRecommender(RecommendationBase):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
-                 n_content_dims: int = 32, n_collaborative_dims: int = 32, biased: bool = True):
+                 n_content_dims: int = 32, n_collaborative_dims: int = 32):
         super().__init__(knn_params=knn_params, rating_scale=rating_scale,
-                         n_output_dims=n_content_dims + n_collaborative_dims, biased=biased, bias_type=EntityType.USER)
+                         n_output_dims=n_content_dims + n_collaborative_dims)
         self.cb = ContentRecommendation(embedding_mapper, knn_params, rating_scale,
-                                        n_content_dims, biased, bias_type=EntityType.USER)
+                                        n_content_dims,)
         self.n_content_dims = n_content_dims
         self.n_collaborative_dims = n_collaborative_dims
         self.content_data_used = None
@@ -344,9 +346,29 @@ class HybridRecommender(RecommendationBase):
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
-        user_item_affinities = [(u, i, (4 * (r - min_affinity) / (max_affinity - min_affinity)) - 2) for u, i, r in
+        ###
+        mean, bu, bi, _, user_item_affinities = normalize_affinity_scores_by_user_item(user_item_affinities)
+        ratings = np.array([r - (mean + bu[u] + bi[i]) for u, i, r in user_item_affinities])
+        min_affinity = np.min(ratings)
+        max_affinity = np.max(ratings)
+        user_item_affinities = [(u, i, (2 * (r - min_affinity) / (max_affinity - min_affinity)) - 1) for u, i, r in
                                 user_item_affinities]
-        inverse_fn = np.vectorize(lambda r: ((r + 2) / 4) * (max_affinity - min_affinity) + min_affinity)
+
+        def inverse_fn(user_item_predictions):
+            def inner(u, i, r):
+                rscaled = ((r + 1) / 2) * (max_affinity - min_affinity) + min_affinity
+                rnew = rscaled + mean + bu[u] + bi[i]
+                # print("Predictions Inverse:: DNN-R =", r," Converted R =", rnew," Scaled R =", rscaled," Min Max = ",max_affinity,min_affinity, mean + bu[u] + bi[i])
+                return rnew
+            return np.array([inner(u, i, r) for u, i, r in user_item_predictions])
+
+        ###
+
+        # user_item_affinities = [(u, i, (4 * (r - min_affinity) / (max_affinity - min_affinity)) - 2) for u, i, r in
+        #                         user_item_affinities]
+        # inverse_fn = np.vectorize(lambda u, i, r: ((r + 2) / 4) * (max_affinity - min_affinity) + min_affinity)
+
+        ###
 
         # ratings = np.array([r for u, i, r in user_item_affinities])
         # mean = np.mean(ratings)
@@ -356,14 +378,15 @@ class HybridRecommender(RecommendationBase):
         # inverse_fn = np.vectorize(lambda r: r*2*std + mean)
 
         # inverse_fn = np.vectorize(lambda r: r)
-        mean, bu, bi, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
+        mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
+        # print("Mean, Mu = ", mean, mu,min_affinity,max_affinity, describe([r for u, i, r in user_item_affinities]))
         # print(bu, "\n", bi, "\n", np.max(list(bu.values())), np.max(list(bi.values())))
         # print(mean, np.mean([r for u, i, r in user_item_affinities]), "\n",
         #       max_affinity, np.max([r for u, i, r in user_item_affinities]), "\n",
         #       min_affinity, np.min([r for u, i, r in user_item_affinities]))
 
-        bu = np.array([bu[u] if u in bu else np.random.rand()*0.01 for u in user_ids])
-        bi = np.array([bi[i] if i in bi else np.random.rand()*0.01 for i in item_ids])
+        user_bias = np.array([user_bias[u] if u in user_bias else np.random.rand()*0.01 for u in user_ids])
+        item_bias = np.array([item_bias[i] if i in item_bias else np.random.rand()*0.01 for i in item_ids])
 
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
@@ -407,11 +430,11 @@ class HybridRecommender(RecommendationBase):
         user = tf.keras.layers.Flatten()(input_user)
         item = tf.keras.layers.Flatten()(input_item)
 
-        embeddings_initializer = tf.keras.initializers.Constant(bu)
+        embeddings_initializer = tf.keras.initializers.Constant(user_bias)
         user_bias = keras.layers.Embedding(len(user_ids), 1, input_length=1,
                                            embeddings_initializer=embeddings_initializer)(user)
 
-        item_initializer = tf.keras.initializers.Constant(bi)
+        item_initializer = tf.keras.initializers.Constant(item_bias)
         item_bias = keras.layers.Embedding(len(item_ids), 1, input_length=1,
                                            embeddings_initializer=item_initializer)(item)
 
@@ -468,7 +491,7 @@ class HybridRecommender(RecommendationBase):
 
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
-        n_dims = 2*(n_collaborative_dims*4) + 2*(n_content_dims*4) + 16
+        n_dims = 2*(n_collaborative_dims*4) + 2*(n_content_dims*4) + 8
 
         for i in range(network_depth):
 
@@ -486,7 +509,7 @@ class HybridRecommender(RecommendationBase):
         rating = keras.layers.Dense(1, activation="linear", use_bias=True,
                                     kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                     activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(dense_representation)
-        rating = tf.keras.backend.constant(mean) + user_bias + item_bias + rating
+        rating = tf.keras.backend.constant(mu) + user_bias + item_bias + rating
         # rating = K.clip(rating, -1.0, 1.0)
         model = keras.Model(inputs=[input_user, input_item, input_1, input_2, input_3, input_4,
                                     input_5, input_6],
@@ -512,6 +535,7 @@ class HybridRecommender(RecommendationBase):
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
+        print("Train Loss = ",model.evaluate(train), "validation Loss = ", model.evaluate(validation))
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn,
                                 "ratings_count_by_user": ratings_count_by_user,
@@ -524,7 +548,8 @@ class HybridRecommender(RecommendationBase):
             item_ids: List[str],
             user_item_affinities: List[Tuple[str, str, float]],
             **kwargs):
-        user_normalized_affinities = super().fit(user_ids, item_ids, user_item_affinities, **kwargs)
+        _ = super().fit(user_ids, item_ids, user_item_affinities, **kwargs)
+        _, _, _, _, user_normalized_affinities = normalize_affinity_scores_by_user(user_item_affinities)
 
         item_data: FeatureSet = kwargs["item_data"] if "item_data" in kwargs else FeatureSet([])
         user_data: FeatureSet = kwargs["user_data"] if "user_data" in kwargs else FeatureSet([])
@@ -657,8 +682,8 @@ class HybridRecommender(RecommendationBase):
                                               ratings_count_by_user, ratings_count_by_item)
 
         predictions = model.predict_generator(datagen(), steps=len(user_item_pairs)).reshape((-1))
-
-        predictions = inverse_fn(predictions)
+        users, items = zip(*user_item_pairs)
+        predictions = inverse_fn([(u, i, r) for u, i, r in zip(users, items, predictions)])
         predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
         return predictions
 

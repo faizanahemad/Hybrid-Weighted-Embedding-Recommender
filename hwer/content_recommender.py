@@ -29,9 +29,9 @@ from sklearn.model_selection import train_test_split
 
 class ContentRecommendation(RecommendationBase):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
-                 n_output_dims: int = 32, biased: bool = True, bias_type: EntityType = EntityType.USER_ITEM):
+                 n_output_dims: int = 32):
         super().__init__(knn_params=knn_params, rating_scale=rating_scale,
-                         n_output_dims=n_output_dims, biased=biased, bias_type=bias_type)
+                         n_output_dims=n_output_dims)
 
         self.embedding_mapper: dict[str, ContentEmbeddingBase] = embedding_mapper
 
