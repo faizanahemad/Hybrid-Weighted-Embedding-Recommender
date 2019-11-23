@@ -61,6 +61,7 @@ class HybridRecommender(RecommendationBase):
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
         activity_l1 = hyperparams["activity_l1"] if "activity_l1" in hyperparams else 0.0005
         activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
+        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
@@ -106,7 +107,7 @@ class HybridRecommender(RecommendationBase):
                                                activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
                     item = dense(item)
                     item = tf.keras.layers.BatchNormalization()(item)
-                    item = tf.keras.layers.Dropout(0.05)(item)
+                    item = tf.keras.layers.Dropout(dropout)(item)
                 else:
                     dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
                                                kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
@@ -211,6 +212,7 @@ class HybridRecommender(RecommendationBase):
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
         activity_l1 = hyperparams["activity_l1"] if "activity_l1" in hyperparams else 0.0005
         activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
+        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
 
         # max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
         max_affinity = np.max([r for u, i, r in user_item_affinities])
@@ -262,7 +264,7 @@ class HybridRecommender(RecommendationBase):
                                                activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
                     item = dense(item)
                     item = tf.keras.layers.BatchNormalization()(item)
-                    item = tf.keras.layers.Dropout(0.05)(item)
+                    item = tf.keras.layers.Dropout(dropout)(item)
                 else:
                     dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False,
                                                kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
@@ -332,6 +334,8 @@ class HybridRecommender(RecommendationBase):
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
         activity_l1 = hyperparams["activity_l1"] if "activity_l1" in hyperparams else 0.0005
         activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
+        bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.01
+        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
 
         max_affinity = rating_scale[1]
         min_affinity = rating_scale[0]
@@ -412,12 +416,12 @@ class HybridRecommender(RecommendationBase):
                                            embeddings_initializer=item_initializer)(item)
 
         user_bias = keras.layers.Dense(1, activation="linear",
-                                       kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
-                                       activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=0.01))(user_bias)
+                                       kernel_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=0.0),
+                                       activity_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=bias_regularizer))(user_bias)
 
         item_bias = keras.layers.Dense(1, activation="linear",
-                           kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
-                           activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=0.01))(item_bias)
+                                       kernel_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=0.0),
+                                       activity_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=bias_regularizer))(item_bias)
 
         input_1 = keras.Input(shape=(n_content_dims,))
         input_2 = keras.Input(shape=(n_content_dims,))
@@ -451,6 +455,10 @@ class HybridRecommender(RecommendationBase):
         item_collab = keras.layers.Dense(n_collaborative_dims * network_width, activation="tanh",
                                          kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                          activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(item_collab)
+        user_content = tf.keras.layers.Dropout(dropout)(user_content)
+        item_content = tf.keras.layers.Dropout(dropout)(item_content)
+        user_collab = tf.keras.layers.Dropout(dropout)(user_collab)
+        item_collab = tf.keras.layers.Dropout(dropout)(item_collab)
 
         vectors = K.concatenate([user_content, item_content, user_collab, item_collab])
 
@@ -468,9 +476,9 @@ class HybridRecommender(RecommendationBase):
                                                       kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                                       activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(dense_representation)
             dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
-            dense_representation = tf.keras.layers.Dropout(0.1)(dense_representation)
+            dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
 
-        dense_representation = keras.layers.Dense(128, activation="tanh",
+        dense_representation = keras.layers.Dense(n_dims * network_width * 4, activation="tanh",
                                                   kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                                   activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             dense_representation)
