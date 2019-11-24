@@ -535,7 +535,7 @@ class HybridRecommender(RecommendationBase):
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
-        print("Train Loss = ",model.evaluate(train), "validation Loss = ", model.evaluate(validation))
+        # print("Train Loss = ",model.evaluate(train), "validation Loss = ", model.evaluate(validation))
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn,
                                 "ratings_count_by_user": ratings_count_by_user,
@@ -642,7 +642,7 @@ class HybridRecommender(RecommendationBase):
                     user_collab = user_vectors[user]
                     item_collab = item_vectors[item]
 
-                    user_content = user_content.reshape((-1,len(user_content)))
+                    user_content = user_content.reshape((-1, len(user_content)))
                     item_content = user_content.reshape((-1, len(item_content)))
                     user_collab = user_content.reshape((-1, len(user_collab)))
                     item_collab = user_content.reshape((-1, len(item_collab)))

@@ -81,6 +81,17 @@ class HybridRecommenderSVDpp(HybridRecommender):
         svd_model = SVDpp(**svdpp)
         svd_model.fit(svd_train)
 
+        svd_inner_users = [svd_model.trainset.to_inner_uid(u) for u in user_ids]
+        svd_known_users = [svd_model.trainset.knows_user(u) for u in svd_inner_users]
+        svd_uv = np.vstack([svd_model.pu[u] if k else np.random.rand(svdpp['n_factors'])*0.001 for u, k in zip(svd_inner_users, svd_known_users)])
+
+        svd_inner_items = [svd_model.trainset.to_inner_iid(i) for i in item_ids]
+        svd_known_items = [svd_model.trainset.knows_item(i) for i in svd_inner_items]
+        svd_iv = np.vstack([svd_model.qi[i] if k else np.random.rand(svdpp['n_factors']) * 0.001 for i, k in
+                            zip(svd_inner_items, svd_known_items)])
+
+        n_svd_dims = svd_uv.shape[1]
+        assert svd_iv.shape[1] == svd_uv.shape[1]
         svd_predictions = svd_model.test(svd_train.build_testset())
         user_item_affinities = [(p.uid, p.iid, p.r_ui - p.est) for p in svd_predictions]
 
@@ -118,19 +129,21 @@ class HybridRecommenderSVDpp(HybridRecommender):
                     item_content = item_content_vectors[item]
                     user_collab = user_vectors[user]
                     item_collab = item_vectors[item]
+                    user_svd = svd_uv[user]
+                    item_svd = svd_iv[item]
 
                     ratings_by_user = np.log1p((ratings_count_by_user[i] + 10.0) / 10.0)
                     ratings_by_item = np.log1p((ratings_count_by_item[j] + 10.0) / 10.0)
                     yield (user, item, user_content, item_content, user_collab, item_collab,
-                           ratings_by_user, ratings_by_item), r
+                           user_svd, item_svd, ratings_by_user, ratings_by_item), r
 
             return generator
 
         output_shapes = (
-            ((), (), (n_content_dims), (n_content_dims), (n_collaborative_dims), (n_collaborative_dims), (), ()),
+            ((), (), (n_content_dims), (n_content_dims), (n_collaborative_dims), (n_collaborative_dims), (n_svd_dims),(n_svd_dims), (), ()),
             ())
         output_types = (
-        (tf.int64, tf.int64, (tf.float64), (tf.float64), (tf.float64), (tf.float64), tf.float64, tf.float64),
+        (tf.int64, tf.int64, (tf.float64), (tf.float64), (tf.float64), (tf.float64),(tf.float64),(tf.float64), tf.float64, tf.float64),
         tf.float64)
 
         train = tf.data.Dataset.from_generator(generate_training_samples(train_affinities),
@@ -171,15 +184,23 @@ class HybridRecommenderSVDpp(HybridRecommender):
         input_3 = keras.Input(shape=(n_collaborative_dims,))
         input_4 = keras.Input(shape=(n_collaborative_dims,))
 
+        input_svd_uv = keras.Input(shape=(n_svd_dims,))
+        input_svd_iv = keras.Input(shape=(n_svd_dims,))
+
         user_content = tf.keras.layers.Flatten()(input_1)
         item_content = tf.keras.layers.Flatten()(input_2)
         user_collab = tf.keras.layers.Flatten()(input_3)
         item_collab = tf.keras.layers.Flatten()(input_4)
+        user_svd = tf.keras.layers.Flatten()(input_svd_uv)
+        item_svd = tf.keras.layers.Flatten()(input_svd_iv)
 
         user_item_content_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_content, item_content])
         user_item_collab_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_collab, item_collab])
+        user_item_svd_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_svd, item_svd])
+
         user_item_content_similarity = tf.keras.layers.Flatten()(user_item_content_similarity)
         user_item_content_similarity = tf.keras.layers.Flatten()(user_item_content_similarity)
+        user_item_svd_similarity = tf.keras.layers.Flatten()(user_item_svd_similarity)
         input_5 = keras.Input(shape=(1,))
         input_6 = keras.Input(shape=(1,))
 
@@ -202,15 +223,25 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                          kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                          activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             item_collab)
+        user_svd = keras.layers.Dense(n_svd_dims * network_width, activation="tanh",
+                                         kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                         activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
+            user_svd)
+        item_svd = keras.layers.Dense(n_svd_dims * network_width, activation="tanh",
+                                         kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                         activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
+            item_svd)
         user_content = tf.keras.layers.Dropout(dropout)(user_content)
         item_content = tf.keras.layers.Dropout(dropout)(item_content)
         user_collab = tf.keras.layers.Dropout(dropout)(user_collab)
         item_collab = tf.keras.layers.Dropout(dropout)(item_collab)
+        user_svd = tf.keras.layers.Dropout(dropout)(user_svd)
+        item_svd = tf.keras.layers.Dropout(dropout)(item_svd)
 
-        vectors = K.concatenate([user_content, item_content, user_collab, item_collab])
+        vectors = K.concatenate([user_content, item_content, user_collab, item_collab, user_svd, item_svd])
 
         counts_data = keras.layers.Dense(8, activation="tanh")(K.concatenate([ratings_by_user, ratings_by_item]))
-        meta_data = K.concatenate([counts_data, user_item_content_similarity, user_item_collab_similarity])
+        meta_data = K.concatenate([counts_data, user_item_content_similarity, user_item_collab_similarity, user_item_svd_similarity])
         meta_data = keras.layers.Dense(16, activation="tanh", )(meta_data)
 
         dense_representation = K.concatenate([meta_data, vectors])
@@ -240,7 +271,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
             dense_representation)
         rating = tf.keras.backend.constant(mu) + user_bias + item_bias + rating
         # rating = K.clip(rating, -1.0, 1.0)
-        model = keras.Model(inputs=[input_user, input_item, input_1, input_2, input_3, input_4,
+        model = keras.Model(inputs=[input_user, input_item, input_1, input_2, input_3, input_4, input_svd_uv, input_svd_iv,
                                     input_5, input_6],
                             outputs=[rating])
 
@@ -265,10 +296,87 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
-        print("Train Loss = ", model.evaluate(train), "validation Loss = ", model.evaluate(validation))
+        # print("Train Loss = ", model.evaluate(train), "validation Loss = ", model.evaluate(validation))
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn,
                                 "ratings_count_by_user": ratings_count_by_user,
                                 "ratings_count_by_item": ratings_count_by_item,
-                                "batch_size": batch_size}
+                                "batch_size": batch_size, "svd_uv": svd_uv, "svd_iv": svd_iv}
         return prediction_artifacts
+
+    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+        model = self.prediction_artifacts["model"]
+        inverse_fn = self.prediction_artifacts["inverse_fn"]
+        ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
+        ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
+        svd_uv = self.prediction_artifacts["svd_uv"]
+        svd_iv = self.prediction_artifacts["svd_iv"]
+
+        def generate_prediction_samples(affinities: List[Tuple[str, str]],
+                                        user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                        user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
+                                        user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                        svd_uv: np.ndarray, svd_iv: np.ndarray,
+                                        ratings_count_by_user: Counter, ratings_count_by_item: Counter):
+            def generator():
+                for i, j in affinities:
+                    user_idx = self.user_id_to_index[i]
+                    item_idx = self.item_id_to_index[j]
+
+                    user = user_id_to_index[i]
+                    item = item_id_to_index[j]
+
+                    user_content = user_content_vectors[user]
+                    item_content = item_content_vectors[item]
+                    user_collab = user_vectors[user]
+                    item_collab = item_vectors[item]
+                    user_svd = svd_uv[user]
+                    item_svd = svd_iv[item]
+
+                    user_content = user_content.reshape((-1,len(user_content)))
+                    item_content = user_content.reshape((-1, len(item_content)))
+                    user_collab = user_content.reshape((-1, len(user_collab)))
+                    item_collab = user_content.reshape((-1, len(item_collab)))
+
+                    user_svd = user_svd.reshape((-1, len(user_svd)))
+                    item_svd = item_svd.reshape((-1, len(item_svd)))
+
+                    ratings_by_user = np.log1p((ratings_count_by_user[i] + 10.0) / 10.0)
+                    ratings_by_item = np.log1p((ratings_count_by_item[j] + 10.0) / 10.0)
+                    yield [np.array([user_idx], dtype=int), np.array([item_idx], dtype=int),
+                           user_content, item_content, user_collab, item_collab, user_svd, item_svd,
+                           np.array([ratings_by_user], dtype=float), np.array([ratings_by_item], dtype=float)]
+
+            return generator
+
+        user_ids = list(set([u for u, i in user_item_pairs]))
+        item_ids = list(set([i for u, i in user_item_pairs]))
+        user_vectors = self.get_embeddings([(u, EntityType.USER) for u in user_ids])
+        item_vectors = self.get_embeddings([(i, EntityType.ITEM) for i in item_ids])
+
+        user_id_to_index = bidict(zip(user_ids, list(range(len(user_ids)))))
+        item_id_to_index = bidict(zip(item_ids, list(range(len(item_ids)))))
+        user_vectors = np.array(user_vectors)
+        item_vectors = np.array(item_vectors)
+        assert user_vectors.shape[0]
+        if self.content_data_used:
+            user_content_vectors = user_vectors[:, :self.n_content_dims]
+            item_content_vectors = item_vectors[:, :self.n_content_dims]
+            assert user_content_vectors.shape[1] == item_content_vectors.shape[1] == self.n_content_dims
+            user_vectors = user_vectors[:, self.n_content_dims:]
+            item_vectors = item_vectors[:, self.n_content_dims:]
+        else:
+            user_content_vectors = user_vectors
+            item_content_vectors = item_vectors
+
+        datagen = generate_prediction_samples(user_item_pairs,
+                                              user_id_to_index, item_id_to_index,
+                                              user_content_vectors, item_content_vectors,
+                                              user_vectors, item_vectors, svd_uv, svd_iv,
+                                              ratings_count_by_user, ratings_count_by_item)
+
+        predictions = model.predict_generator(datagen(), steps=len(user_item_pairs)).reshape((-1))
+        users, items = zip(*user_item_pairs)
+        predictions = inverse_fn([(u, i, r) for u, i, r in zip(users, items, predictions)])
+        predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
+        return predictions
