@@ -65,7 +65,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
         bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.01
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
-        svdpp = hyperparams["svdpp"] if "svdpp" in hyperparams else {"n_factors":10, "n_epochs":10}
+        svdpp = hyperparams["svdpp"] if "svdpp" in hyperparams else {"n_factors": 20, "n_epochs": 20}
 
         max_affinity = rating_scale[1]
         min_affinity = rating_scale[0]
@@ -113,7 +113,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
         user_bias = np.array([user_bias[u] if u in user_bias else np.random.rand() * 0.01 for u in user_ids])
         item_bias = np.array([item_bias[i] if i in item_bias else np.random.rand() * 0.01 for i in item_ids])
-        print("Mu = ", mu, " User Bias = ", np.abs(np.max(user_bias)), " Item Bias = ", np.abs(np.max(item_bias)))
+        # print("Mu = ", mu, " User Bias = ", np.abs(np.max(user_bias)), " Item Bias = ", np.abs(np.max(item_bias)))
 
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
@@ -158,16 +158,13 @@ class HybridRecommenderSVDpp(HybridRecommender):
         input_user = keras.Input(shape=(1,))
         input_item = keras.Input(shape=(1,))
 
-        user = tf.keras.layers.Flatten()(input_user)
-        item = tf.keras.layers.Flatten()(input_item)
-
         embeddings_initializer = tf.keras.initializers.Constant(user_bias)
         user_bias = keras.layers.Embedding(len(user_ids), 1, input_length=1,
-                                           embeddings_initializer=embeddings_initializer)(user)
+                                           embeddings_initializer=embeddings_initializer)(input_user)
 
         item_initializer = tf.keras.initializers.Constant(item_bias)
         item_bias = keras.layers.Embedding(len(item_ids), 1, input_length=1,
-                                           embeddings_initializer=item_initializer)(item)
+                                           embeddings_initializer=item_initializer)(input_item)
 
         user_bias = keras.layers.Dense(1, activation="linear",
                                        kernel_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=0.0),
@@ -187,25 +184,22 @@ class HybridRecommenderSVDpp(HybridRecommender):
         input_svd_uv = keras.Input(shape=(n_svd_dims,))
         input_svd_iv = keras.Input(shape=(n_svd_dims,))
 
-        user_content = tf.keras.layers.Flatten()(input_1)
-        item_content = tf.keras.layers.Flatten()(input_2)
-        user_collab = tf.keras.layers.Flatten()(input_3)
-        item_collab = tf.keras.layers.Flatten()(input_4)
-        user_svd = tf.keras.layers.Flatten()(input_svd_uv)
-        item_svd = tf.keras.layers.Flatten()(input_svd_iv)
+        user_content = input_1
+        item_content = input_2
+        user_collab = input_3
+        item_collab = input_4
+        user_svd = input_svd_uv
+        item_svd = input_svd_iv
 
         user_item_content_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_content, item_content])
         user_item_collab_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_collab, item_collab])
         user_item_svd_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_svd, item_svd])
 
-        user_item_content_similarity = tf.keras.layers.Flatten()(user_item_content_similarity)
-        user_item_content_similarity = tf.keras.layers.Flatten()(user_item_content_similarity)
-        user_item_svd_similarity = tf.keras.layers.Flatten()(user_item_svd_similarity)
         input_5 = keras.Input(shape=(1,))
         input_6 = keras.Input(shape=(1,))
 
-        ratings_by_user = tf.keras.layers.Flatten()(input_5)
-        ratings_by_item = tf.keras.layers.Flatten()(input_6)
+        ratings_by_user = input_5
+        ratings_by_item = input_6
 
         user_content = keras.layers.Dense(n_content_dims * network_width, activation="tanh",
                                           kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),

@@ -427,16 +427,13 @@ class HybridRecommender(RecommendationBase):
         input_user = keras.Input(shape=(1,))
         input_item = keras.Input(shape=(1,))
 
-        user = tf.keras.layers.Flatten()(input_user)
-        item = tf.keras.layers.Flatten()(input_item)
-
         embeddings_initializer = tf.keras.initializers.Constant(user_bias)
         user_bias = keras.layers.Embedding(len(user_ids), 1, input_length=1,
-                                           embeddings_initializer=embeddings_initializer)(user)
+                                           embeddings_initializer=embeddings_initializer)(input_user)
 
         item_initializer = tf.keras.initializers.Constant(item_bias)
         item_bias = keras.layers.Embedding(len(item_ids), 1, input_length=1,
-                                           embeddings_initializer=item_initializer)(item)
+                                           embeddings_initializer=item_initializer)(input_item)
 
         user_bias = keras.layers.Dense(1, activation="linear",
                                        kernel_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=0.0),
@@ -451,20 +448,18 @@ class HybridRecommender(RecommendationBase):
         input_3 = keras.Input(shape=(n_collaborative_dims,))
         input_4 = keras.Input(shape=(n_collaborative_dims,))
 
-        user_content = tf.keras.layers.Flatten()(input_1)
-        item_content = tf.keras.layers.Flatten()(input_2)
-        user_collab = tf.keras.layers.Flatten()(input_3)
-        item_collab = tf.keras.layers.Flatten()(input_4)
+        user_content = input_1
+        item_content = input_2
+        user_collab = input_3
+        item_collab = input_4
 
         user_item_content_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_content, item_content])
         user_item_collab_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_collab, item_collab])
-        user_item_content_similarity = tf.keras.layers.Flatten()(user_item_content_similarity)
-        user_item_content_similarity = tf.keras.layers.Flatten()(user_item_content_similarity)
         input_5 = keras.Input(shape=(1,))
         input_6 = keras.Input(shape=(1,))
 
-        ratings_by_user = tf.keras.layers.Flatten()(input_5)
-        ratings_by_item = tf.keras.layers.Flatten()(input_6)
+        ratings_by_user = input_5
+        ratings_by_item = input_6
 
         user_content = keras.layers.Dense(n_content_dims * network_width, activation="tanh",
                                           kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
