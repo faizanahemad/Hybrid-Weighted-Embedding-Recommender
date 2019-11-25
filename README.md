@@ -87,6 +87,14 @@ pip install -r requirements.txt
 
 ### Misc References
 - http://stevehanov.ca/blog/?id=145
+
+### Triplet Loss
+- https://www.tensorflow.org/addons/tutorials/losses_triplet
+- https://github.com/noelcodella/tripletloss-keras-tensorflow/blob/master/tripletloss.py
+- https://github.com/AdrianUng/keras-triplet-loss-mnist/blob/master/Triplet_loss_KERAS_semi_hard_from_TF.ipynb
+- https://github.com/keras-team/keras/issues/9498
+- https://github.com/maciejkula/triplet_recommendations_keras
+- https://towardsdatascience.com/lossless-triplet-loss-7e932f990b24
     
 ### Dimensionality Reduction
 - https://github.com/DmitryUlyanov/Multicore-TSNE
