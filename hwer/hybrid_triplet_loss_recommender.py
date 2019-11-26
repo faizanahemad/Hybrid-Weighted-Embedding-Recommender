@@ -25,7 +25,7 @@ import fasttext
 from .recommendation_base import EntityType
 from .content_recommender import ContentRecommendation
 from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
-    normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item
+    normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, UnitLengthRegularization
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
@@ -153,20 +153,20 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
             item = tf.keras.layers.Flatten()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
 
-            for i in range(network_depth + 1):
-                if i < network_depth:
-                    dense = keras.layers.Dense(embedding_size * network_width, activation="relu",
-                                               kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
-                                               activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
-                    item = dense(item)
-                    item = tf.keras.layers.BatchNormalization()(item)
-                    item = tf.keras.layers.Dropout(dropout)(item)
-                else:
-                    dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
-                                               kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
-                                               activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
-                    item = dense(item)
-            item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
+            for i in range(network_depth):
+
+                dense = keras.layers.Dense(embedding_size * network_width, activation="relu",
+                                           kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                           activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
+                item = dense(item)
+                item = tf.keras.layers.BatchNormalization()(item)
+                item = tf.keras.layers.Dropout(dropout)(item)
+
+            dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
+                                       kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                       activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
+            item = dense(item)
+            item = UnitLengthRegularization(l1=0.0001, l2=0.001)(item)
             item = K.l2_normalize(item, axis=-1)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
@@ -339,19 +339,20 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
             item = tf.keras.layers.Flatten()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
             embedding_size = max(embedding_size, n_output_dims)
-            for i in range(network_depth + 1):
-                if i < network_depth:
-                    dense = keras.layers.Dense(embedding_size * network_width, activation="relu",
-                                               kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
-                                               activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
-                    item = dense(item)
-                    item = tf.keras.layers.BatchNormalization()(item)
-                    item = tf.keras.layers.Dropout(dropout)(item)
-                else:
-                    dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False,
-                                               kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
-                                               activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
-                    item = dense(item)
+            for i in range(network_depth):
+
+                dense = keras.layers.Dense(embedding_size * network_width, activation="relu",
+                                           kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                           activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
+                item = dense(item)
+                item = tf.keras.layers.BatchNormalization()(item)
+                item = tf.keras.layers.Dropout(dropout)(item)
+
+            dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False,
+                                       kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                       activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))
+            item = dense(item)
+            item = UnitLengthRegularization(l1=0.0001, l2=0.001)(item)
             item = K.l2_normalize(item, axis=-1)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network

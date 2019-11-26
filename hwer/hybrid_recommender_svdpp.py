@@ -309,7 +309,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
         counts_data = keras.layers.Dense(8, activation="tanh")(K.concatenate([ratings_by_user, ratings_by_item]))
         meta_data = K.concatenate(
             [counts_data, user_item_content_similarity, user_item_collab_similarity, user_item_svd_similarity])
-        meta_data = keras.layers.Dense(16, activation="tanh", )(meta_data)
+        meta_data = keras.layers.Dense(16 * network_width, activation="tanh", )(meta_data)
+        meta_data = keras.layers.Dense(16 * network_width, activation="tanh", )(meta_data)
 
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
@@ -317,7 +318,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         print("dense shape = ", dense_representation.shape, ", Meta Data Shape= ", meta_data.shape, ", vector shape =",vectors.shape, ", N_dims = ", n_dims,)
 
         for i in range(network_depth):
-            dense_representation = keras.layers.Dense(n_dims * network_width, activation="tanh",
+            dense_representation = keras.layers.Dense(n_dims, activation="tanh",
                                                       kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1,
                                                                                                   l2=kernel_l2),
                                                       activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1,
@@ -326,7 +327,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
             dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
             dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
 
-        dense_representation = keras.layers.Dense(int(n_dims * network_width/2), activation="tanh",
+        dense_representation = keras.layers.Dense(int(n_dims/2), activation="tanh",
                                                   kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1,
                                                                                               l2=kernel_l2),
                                                   activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1,
