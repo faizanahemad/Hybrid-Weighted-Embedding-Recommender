@@ -141,6 +141,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         max_affinity = np.max(ratings)
         user_item_affinities = [(u, i, (2 * (r - min_affinity) / (max_affinity - min_affinity)) - 1) for u, i, r in
                                 user_item_affinities]
+        mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
 
         def inverse_fn(user_item_predictions):
             def inner(r):
@@ -155,7 +156,6 @@ class HybridRecommenderSVDpp(HybridRecommender):
             # we can plot
             return rscaled + svd_predictions
 
-        mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
         user_bias = np.array([user_bias[u] if u in user_bias else np.random.rand() * 0.01 for u in user_ids])
         item_bias = np.array([item_bias[i] if i in item_bias else np.random.rand() * 0.01 for i in item_ids])
         print("Mu = ", mu, " User Bias = ", np.abs(np.max(user_bias)), " Item Bias = ", np.abs(np.max(item_bias)))
@@ -228,6 +228,11 @@ class HybridRecommenderSVDpp(HybridRecommender):
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
 
+        def custom_loss(user_layer, item_layer):
+            def loss(y_true, y_pred):
+                return K.mean(K.square(y_pred - y_true) + bias_regularizer*(K.square(user_layer) + K.square(item_layer)), axis=-1)
+            return loss
+
         mu, user_bias, item_bias, inverse_fn, train, validation, \
         n_svd_dims, ratings_count_by_user, ratings_count_by_item, \
         svd_uv, svd_iv = self.__build_dataset__(user_ids, item_ids, user_item_affinities,
@@ -235,8 +240,6 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                                 user_vectors, item_vectors,
                                                 user_id_to_index, item_id_to_index,
                                                 rating_scale, hyperparams)
-        svd_dims = svd_uv.shape[1]
-
         input_user = keras.Input(shape=(1,))
         input_item = keras.Input(shape=(1,))
 
@@ -323,7 +326,6 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
-        n_dims = 2 * (n_collaborative_dims * 4) + 2 * (n_content_dims * 4) + 8
         n_dims = dense_representation.shape[1]
         print("dense shape = ", dense_representation.shape, ", Meta Data Shape= ", meta_data.shape, ", vector shape =",vectors.shape, ", N_dims = ", n_dims,)
 
@@ -337,14 +339,14 @@ class HybridRecommenderSVDpp(HybridRecommender):
             dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
             dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
 
-        dense_representation = keras.layers.Dense(n_dims * network_width * 4, activation="tanh",
+        dense_representation = keras.layers.Dense(int(n_dims * network_width/2), activation="tanh",
                                                   kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1,
                                                                                               l2=kernel_l2),
                                                   activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1,
                                                                                                 l2=activity_l2))(
             dense_representation)
 
-        rating = keras.layers.Dense(1, activation="linear", use_bias=True,
+        rating = keras.layers.Dense(1, activation="tanh", use_bias=True,
                                     kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                     activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             dense_representation)
