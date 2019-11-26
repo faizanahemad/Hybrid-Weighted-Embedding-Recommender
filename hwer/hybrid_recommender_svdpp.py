@@ -7,6 +7,7 @@ from .content_embedders import ContentEmbeddingBase
 import tensorflow as tf
 import time
 import matplotlib.pyplot as plt
+from sklearn.model_selection import StratifiedKFold
 import pandas as pd
 import numpy as np
 import re
@@ -35,7 +36,6 @@ from surprise import SVD, SVDpp
 from surprise import Dataset
 from surprise import Reader
 
-
 from .hybrid_recommender import HybridRecommender
 
 
@@ -44,91 +44,98 @@ class HybridRecommenderSVDpp(HybridRecommender):
                  n_content_dims: int = 32, n_collaborative_dims: int = 32):
         super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims)
 
-    def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
-                                     user_item_affinities: List[Tuple[str, str, float]],
-                                     user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
-                                     user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                     user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                     rating_scale: Tuple[float, float], hyperparams: Dict):
+    def __build_svd_model__(self, user_item_affinities, svdpp, rating_scale, user_ids, item_ids, n_folds=1):
+        models = []
+        svd_uv, svd_iv = None, None
+        affinities = []
+        reader = Reader(rating_scale=rating_scale)
+        rng_state = np.random.get_state()
+        random_int = np.random.randint(1e8)
+        assert n_folds >= 1
 
-        # max_affinity = np.max([r for u, i, r in user_item_affinities])
-        # min_affinity = np.min([r for u, i, r in user_item_affinities])
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
+        def train_svd(train_affinities, ):
+            svd_train = pd.DataFrame(train_affinities)
+            svd_train = Dataset.load_from_df(svd_train, reader).build_full_trainset()
+            np.random.set_state(rng_state)
+            svd_model = SVDpp(random_state=random_int, **svdpp)
+            svd_model.fit(svd_train)
+
+            svd_inner_users = [svd_model.trainset.to_inner_uid(u) if svd_model.trainset.knows_user(u) else ""
+                               for
+                               u in user_ids]
+            svd_known_users = [svd_model.trainset.knows_user(u) for u in svd_inner_users]
+            svd_uv_1 = np.vstack([svd_model.pu[u] if k else np.random.rand(svdpp['n_factors']) * 0.001 for u, k in
+                                  zip(svd_inner_users, svd_known_users)])
+
+            svd_inner_items = [svd_model.trainset.to_inner_iid(i) if svd_model.trainset.knows_item(i) else ""
+                               for
+                               i in item_ids]
+            svd_known_items = [svd_model.trainset.knows_item(i) for i in svd_inner_items]
+            svd_iv_1 = np.vstack([svd_model.qi[i] if k else np.random.rand(svdpp['n_factors']) * 0.001 for i, k in
+                                  zip(svd_inner_items, svd_known_items)])
+            return svd_model, svd_uv_1, svd_iv_1
+
+        if n_folds == 1:
+            svd_model, svd_uv, svd_iv = train_svd(user_item_affinities)
+            svd_validation = pd.DataFrame(user_item_affinities)
+            svd_validation = Dataset.load_from_df(svd_validation, reader).build_full_trainset().build_testset()
+            svd_predictions = svd_model.test(svd_validation)
+            validation_affinities = [(p.uid, p.iid, p.r_ui - p.est) for p in svd_predictions]
+            affinities = validation_affinities
+            models.append(svd_model)
+
+        else:
+            user_item_affinities = np.array(user_item_affinities)
+            users_for_each_rating = np.array([u for u, i, r in user_item_affinities])
+            X,y = user_item_affinities, users_for_each_rating
+            skf = StratifiedKFold(n_splits=n_folds)
+            for train_index, test_index in skf.split(X, y):
+                train_affinities, validation_affinities = X[train_index], X[test_index]
+                train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
+                svd_model, svd_uv_1, svd_iv_1 = train_svd(train_affinities)
+                models.append(svd_model)
+                if svd_uv is None:
+                    svd_uv = svd_uv_1
+                else:
+                    svd_uv = np.concatenate((svd_uv, svd_uv_1), axis=1)
+
+                if svd_iv is None:
+                    svd_iv = svd_iv_1
+                else:
+                    svd_iv = np.concatenate((svd_iv, svd_iv_1), axis=1)
+
+                validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
+                svd_validation = pd.DataFrame(validation_affinities)
+                svd_validation = Dataset.load_from_df(svd_validation, reader).build_full_trainset().build_testset()
+                svd_predictions = svd_model.test(svd_validation)
+                validation_affinities = [(p.uid, p.iid, p.r_ui - p.est) for p in svd_predictions]
+                affinities.extend(validation_affinities)
+
+        #
+
+        return models, svd_uv, svd_iv, affinities
+
+    def __build_dataset__(self, user_ids: List[str], item_ids: List[str],
+                          user_item_affinities: List[Tuple[str, str, float]],
+                          user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
+                          user_vectors: np.ndarray, item_vectors: np.ndarray,
+                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                          rating_scale: Tuple[float, float], hyperparams: Dict):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        network_width = hyperparams["network_width"] if "network_width" in hyperparams else 2
-        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
-        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-        kernel_l1 = hyperparams["kernel_l1"] if "kernel_l1" in hyperparams else 0.001
-        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        activity_l1 = hyperparams["activity_l1"] if "activity_l1" in hyperparams else 0.0005
-        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
-        bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.01
-        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
-        svdpp = hyperparams["svdpp"] if "svdpp" in hyperparams else {"n_factors": 10, "n_epochs": 20}
-
-        max_affinity = rating_scale[1]
-        min_affinity = rating_scale[0]
+        svdpp = hyperparams["svdpp"] if "svdpp" in hyperparams else {"n_factors": 8, "n_epochs": 10}
+        n_svd_folds = hyperparams["n_svd_folds"] if "n_svd_folds" in hyperparams else 5
         n_content_dims = user_content_vectors.shape[1]
         n_collaborative_dims = user_vectors.shape[1]
+        max_affinity = rating_scale[1]
+        min_affinity = rating_scale[0]
 
-        assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
-        assert user_vectors.shape[1] == item_vectors.shape[1]
-        train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.5)
-
-        def build_svd_model(train_affinities, validation_affinities, svdpp, user_ids, item_ids):
-            reader = Reader(rating_scale=rating_scale)
-            svd_train_1 = pd.DataFrame(train_affinities)
-            svd_train_1 = Dataset.load_from_df(svd_train_1, reader).build_full_trainset()
-            rng_state = np.random.get_state()
-            random_int = np.random.randint(1e8)
-            np.random.set_state(rng_state)
-            svd_model_1 = SVDpp(random_state=random_int, **svdpp)
-            svd_model_1.fit(svd_train_1)
-
-            svd_inner_users_1 = [svd_model_1.trainset.to_inner_uid(u) if svd_model_1.trainset.knows_user(u) else "" for u in user_ids]
-            svd_known_users_1 = [svd_model_1.trainset.knows_user(u) for u in svd_inner_users_1]
-            svd_uv_1 = np.vstack([svd_model_1.pu[u] if k else np.random.rand(svdpp['n_factors'])*0.001 for u, k in zip(svd_inner_users_1, svd_known_users_1)])
-
-            svd_inner_items_1 = [svd_model_1.trainset.to_inner_iid(i) if svd_model_1.trainset.knows_item(i) else "" for i in item_ids]
-            svd_known_items_1 = [svd_model_1.trainset.knows_item(i) for i in svd_inner_items_1]
-            svd_iv_1 = np.vstack([svd_model_1.qi[i] if k else np.random.rand(svdpp['n_factors']) * 0.001 for i, k in
-                                zip(svd_inner_items_1, svd_known_items_1)])
-
-            #
-            svd_train_2 = pd.DataFrame(validation_affinities)
-            svd_train_2 = Dataset.load_from_df(svd_train_2, reader).build_full_trainset()
-            np.random.set_state(rng_state)
-            svd_model_2 = SVDpp(random_state=random_int, **svdpp)
-            svd_model_2.fit(svd_train_2)
-            svd_inner_users_2 = [svd_model_2.trainset.to_inner_uid(u) if svd_model_2.trainset.knows_user(u) else "" for
-                                 u in user_ids]
-            svd_known_users_2 = [svd_model_2.trainset.knows_user(u) for u in svd_inner_users_2]
-            svd_uv_2 = np.vstack([svd_model_2.pu[u] if k else np.random.rand(svdpp['n_factors']) * 0.001 for u, k in
-                                  zip(svd_inner_users_2, svd_known_users_2)])
-
-            svd_inner_items_2 = [svd_model_2.trainset.to_inner_iid(i) if svd_model_2.trainset.knows_item(i) else "" for
-                                 i in item_ids]
-            svd_known_items_2 = [svd_model_2.trainset.knows_item(i) for i in svd_inner_items_2]
-            svd_iv_2 = np.vstack([svd_model_2.qi[i] if k else np.random.rand(svdpp['n_factors']) * 0.001 for i, k in
-                                  zip(svd_inner_items_2, svd_known_items_2)])
-            #
-            svd_predictions = svd_model_2.test(svd_train_1.build_testset())
-            train_affinities = [(p.uid, p.iid, p.r_ui - p.est) for p in svd_predictions]
-
-            svd_predictions = svd_model_1.test(svd_train_2.build_testset())
-            validation_affinities = [(p.uid, p.iid, p.r_ui - p.est) for p in svd_predictions]
-
-            svd_uv = np.concatenate((svd_uv_1, svd_uv_2), axis=1)
-            svd_iv = np.concatenate((svd_iv_1, svd_iv_2), axis=1)
-            return svd_model_1, svd_model_2, svd_uv, svd_iv, train_affinities, validation_affinities
-
-        svd_model_1, svd_model_2, svd_uv, svd_iv, train_affinities, validation_affinities = build_svd_model(train_affinities, validation_affinities, svdpp, user_ids, item_ids)
+        models, svd_uv, svd_iv, user_item_affinities = self.__build_svd_model__(
+            user_item_affinities, svdpp, rating_scale, user_ids, item_ids, n_svd_folds)
+        assert len(models) == n_svd_folds
 
         n_svd_dims = svd_uv.shape[1]
         assert svd_iv.shape[1] == svd_uv.shape[1]
         ###
-        user_item_affinities = list(train_affinities) + list(validation_affinities)
         ratings = np.array([r for u, i, r in user_item_affinities])
         min_affinity = np.min(ratings)
         max_affinity = np.max(ratings)
@@ -139,17 +146,23 @@ class HybridRecommenderSVDpp(HybridRecommender):
             def inner(r):
                 rscaled = ((r + 1) / 2) * (max_affinity - min_affinity) + min_affinity
                 return rscaled
+
             rscaled = np.array([inner(r) for u, i, r in user_item_predictions])
-            svd_predictions = np.array([(svd_model_1.predict(u, i).est + svd_model_2.predict(u, i).est)/2 for u, i, r in user_item_predictions])
+            svd_predictions = np.array(
+                [[model.predict(u, i).est for model in models] for u, i, r in
+                 user_item_predictions])
+            svd_predictions = np.array(svd_predictions).mean(axis=1)
+            # we can plot
             return rscaled + svd_predictions
 
         mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
         user_bias = np.array([user_bias[u] if u in user_bias else np.random.rand() * 0.01 for u in user_ids])
         item_bias = np.array([item_bias[i] if i in item_bias else np.random.rand() * 0.01 for i in item_ids])
-        # print("Mu = ", mu, " User Bias = ", np.abs(np.max(user_bias)), " Item Bias = ", np.abs(np.max(item_bias)))
+        print("Mu = ", mu, " User Bias = ", np.abs(np.max(user_bias)), " Item Bias = ", np.abs(np.max(item_bias)))
 
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
+        train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.5)
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
@@ -171,11 +184,13 @@ class HybridRecommenderSVDpp(HybridRecommender):
             return generator
 
         output_shapes = (
-            ((), (), (n_content_dims), (n_content_dims), (n_collaborative_dims), (n_collaborative_dims), (n_svd_dims),(n_svd_dims), (), ()),
+            ((), (), (n_content_dims), (n_content_dims), (n_collaborative_dims), (n_collaborative_dims), (n_svd_dims),
+             (n_svd_dims), (), ()),
             ())
         output_types = (
-        (tf.int64, tf.int64, (tf.float64), (tf.float64), (tf.float64), (tf.float64),(tf.float64),(tf.float64), tf.float64, tf.float64),
-        tf.float64)
+            (tf.int64, tf.int64, (tf.float64), (tf.float64), (tf.float64), (tf.float64), (tf.float64), (tf.float64),
+             tf.float64, tf.float64),
+            tf.float64)
 
         train = tf.data.Dataset.from_generator(generate_training_samples(train_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
@@ -185,6 +200,42 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         train = train.shuffle(batch_size).batch(batch_size)
         validation = validation.shuffle(batch_size).batch(batch_size)
+        return mu, user_bias, item_bias, inverse_fn, train, validation, n_svd_dims, ratings_count_by_user, ratings_count_by_item, svd_uv, svd_iv
+
+    def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
+                                     user_item_affinities: List[Tuple[str, str, float]],
+                                     user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
+                                     user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                     user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                     rating_scale: Tuple[float, float], hyperparams: Dict):
+
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        network_width = hyperparams["network_width"] if "network_width" in hyperparams else 2
+        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
+        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
+        kernel_l1 = hyperparams["kernel_l1"] if "kernel_l1" in hyperparams else 0.001
+        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
+        activity_l1 = hyperparams["activity_l1"] if "activity_l1" in hyperparams else 0.0005
+        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
+        bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.01
+        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
+
+        n_content_dims = user_content_vectors.shape[1]
+        n_collaborative_dims = user_vectors.shape[1]
+
+        assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
+        assert user_vectors.shape[1] == item_vectors.shape[1]
+
+        mu, user_bias, item_bias, inverse_fn, train, validation, \
+        n_svd_dims, ratings_count_by_user, ratings_count_by_item, \
+        svd_uv, svd_iv = self.__build_dataset__(user_ids, item_ids, user_item_affinities,
+                                                user_content_vectors, item_content_vectors,
+                                                user_vectors, item_vectors,
+                                                user_id_to_index, item_id_to_index,
+                                                rating_scale, hyperparams)
+        svd_dims = svd_uv.shape[1]
 
         input_user = keras.Input(shape=(1,))
         input_item = keras.Input(shape=(1,))
@@ -249,12 +300,12 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                          activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             item_collab)
         user_svd = keras.layers.Dense(n_svd_dims * network_width, activation="tanh",
-                                         kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
-                                         activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
+                                      kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                      activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             user_svd)
         item_svd = keras.layers.Dense(n_svd_dims * network_width, activation="tanh",
-                                         kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
-                                         activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
+                                      kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
+                                      activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             item_svd)
         user_content = tf.keras.layers.Dropout(dropout)(user_content)
         item_content = tf.keras.layers.Dropout(dropout)(item_content)
@@ -266,13 +317,15 @@ class HybridRecommenderSVDpp(HybridRecommender):
         vectors = K.concatenate([user_content, item_content, user_collab, item_collab, user_svd, item_svd])
 
         counts_data = keras.layers.Dense(8, activation="tanh")(K.concatenate([ratings_by_user, ratings_by_item]))
-        meta_data = K.concatenate([counts_data, user_item_content_similarity, user_item_collab_similarity, user_item_svd_similarity])
+        meta_data = K.concatenate(
+            [counts_data, user_item_content_similarity, user_item_collab_similarity, user_item_svd_similarity])
         meta_data = keras.layers.Dense(16, activation="tanh", )(meta_data)
 
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
         n_dims = 2 * (n_collaborative_dims * 4) + 2 * (n_content_dims * 4) + 8
-        print("dense shape = ", dense_representation.shape, n_dims)
+        n_dims = dense_representation.shape[1]
+        print("dense shape = ", dense_representation.shape, ", Meta Data Shape= ", meta_data.shape, ", vector shape =",vectors.shape, ", N_dims = ", n_dims,)
 
         for i in range(network_depth):
             dense_representation = keras.layers.Dense(n_dims * network_width, activation="tanh",
@@ -297,9 +350,10 @@ class HybridRecommenderSVDpp(HybridRecommender):
             dense_representation)
         rating = tf.keras.backend.constant(mu) + user_bias + item_bias + rating
         # rating = K.clip(rating, -1.0, 1.0)
-        model = keras.Model(inputs=[input_user, input_item, input_1, input_2, input_3, input_4, input_svd_uv, input_svd_iv,
-                                    input_5, input_6],
-                            outputs=[rating])
+        model = keras.Model(
+            inputs=[input_user, input_item, input_1, input_2, input_3, input_4, input_svd_uv, input_svd_iv,
+                    input_5, input_6],
+            outputs=[rating])
 
         adam = tf.keras.optimizers.Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.01, amsgrad=False)
         model.compile(optimizer=adam,
@@ -322,6 +376,9 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
+
+        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size)
+        model.fit(full_dataset, epochs=1, verbose=verbose)
         # print("Train Loss = ", model.evaluate(train), "validation Loss = ", model.evaluate(validation))
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn,
@@ -359,7 +416,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
                     user_svd = svd_uv[user]
                     item_svd = svd_iv[item]
 
-                    user_content = user_content.reshape((-1,len(user_content)))
+                    user_content = user_content.reshape((-1, len(user_content)))
                     item_content = user_content.reshape((-1, len(item_content)))
                     user_collab = user_content.reshape((-1, len(user_collab)))
                     item_collab = user_content.reshape((-1, len(item_collab)))
