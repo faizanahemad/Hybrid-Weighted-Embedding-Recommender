@@ -65,7 +65,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
         bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.01
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
-        svdpp = hyperparams["svdpp"] if "svdpp" in hyperparams else {"n_factors": 20, "n_epochs": 20}
+        svdpp = hyperparams["svdpp"] if "svdpp" in hyperparams else {"n_factors": 10, "n_epochs": 20}
 
         max_affinity = rating_scale[1]
         min_affinity = rating_scale[0]
@@ -74,28 +74,61 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
+        train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.5)
 
-        svd_train = pd.DataFrame(user_item_affinities)
-        reader = Reader(rating_scale=rating_scale)
-        svd_train = Dataset.load_from_df(svd_train, reader).build_full_trainset()
-        svd_model = SVDpp(**svdpp)
-        svd_model.fit(svd_train)
+        def build_svd_model(train_affinities, validation_affinities, svdpp, user_ids, item_ids):
+            reader = Reader(rating_scale=rating_scale)
+            svd_train_1 = pd.DataFrame(train_affinities)
+            svd_train_1 = Dataset.load_from_df(svd_train_1, reader).build_full_trainset()
+            rng_state = np.random.get_state()
+            random_int = np.random.randint(1e8)
+            np.random.set_state(rng_state)
+            svd_model_1 = SVDpp(random_state=random_int, **svdpp)
+            svd_model_1.fit(svd_train_1)
 
-        svd_inner_users = [svd_model.trainset.to_inner_uid(u) for u in user_ids]
-        svd_known_users = [svd_model.trainset.knows_user(u) for u in svd_inner_users]
-        svd_uv = np.vstack([svd_model.pu[u] if k else np.random.rand(svdpp['n_factors'])*0.001 for u, k in zip(svd_inner_users, svd_known_users)])
+            svd_inner_users_1 = [svd_model_1.trainset.to_inner_uid(u) if svd_model_1.trainset.knows_user(u) else "" for u in user_ids]
+            svd_known_users_1 = [svd_model_1.trainset.knows_user(u) for u in svd_inner_users_1]
+            svd_uv_1 = np.vstack([svd_model_1.pu[u] if k else np.random.rand(svdpp['n_factors'])*0.001 for u, k in zip(svd_inner_users_1, svd_known_users_1)])
 
-        svd_inner_items = [svd_model.trainset.to_inner_iid(i) for i in item_ids]
-        svd_known_items = [svd_model.trainset.knows_item(i) for i in svd_inner_items]
-        svd_iv = np.vstack([svd_model.qi[i] if k else np.random.rand(svdpp['n_factors']) * 0.001 for i, k in
-                            zip(svd_inner_items, svd_known_items)])
+            svd_inner_items_1 = [svd_model_1.trainset.to_inner_iid(i) if svd_model_1.trainset.knows_item(i) else "" for i in item_ids]
+            svd_known_items_1 = [svd_model_1.trainset.knows_item(i) for i in svd_inner_items_1]
+            svd_iv_1 = np.vstack([svd_model_1.qi[i] if k else np.random.rand(svdpp['n_factors']) * 0.001 for i, k in
+                                zip(svd_inner_items_1, svd_known_items_1)])
+
+            #
+            svd_train_2 = pd.DataFrame(validation_affinities)
+            svd_train_2 = Dataset.load_from_df(svd_train_2, reader).build_full_trainset()
+            np.random.set_state(rng_state)
+            svd_model_2 = SVDpp(random_state=random_int, **svdpp)
+            svd_model_2.fit(svd_train_2)
+            svd_inner_users_2 = [svd_model_2.trainset.to_inner_uid(u) if svd_model_2.trainset.knows_user(u) else "" for
+                                 u in user_ids]
+            svd_known_users_2 = [svd_model_2.trainset.knows_user(u) for u in svd_inner_users_2]
+            svd_uv_2 = np.vstack([svd_model_2.pu[u] if k else np.random.rand(svdpp['n_factors']) * 0.001 for u, k in
+                                  zip(svd_inner_users_2, svd_known_users_2)])
+
+            svd_inner_items_2 = [svd_model_2.trainset.to_inner_iid(i) if svd_model_2.trainset.knows_item(i) else "" for
+                                 i in item_ids]
+            svd_known_items_2 = [svd_model_2.trainset.knows_item(i) for i in svd_inner_items_2]
+            svd_iv_2 = np.vstack([svd_model_2.qi[i] if k else np.random.rand(svdpp['n_factors']) * 0.001 for i, k in
+                                  zip(svd_inner_items_2, svd_known_items_2)])
+            #
+            svd_predictions = svd_model_2.test(svd_train_1.build_testset())
+            train_affinities = [(p.uid, p.iid, p.r_ui - p.est) for p in svd_predictions]
+
+            svd_predictions = svd_model_1.test(svd_train_2.build_testset())
+            validation_affinities = [(p.uid, p.iid, p.r_ui - p.est) for p in svd_predictions]
+
+            svd_uv = np.concatenate((svd_uv_1, svd_uv_2), axis=1)
+            svd_iv = np.concatenate((svd_iv_1, svd_iv_2), axis=1)
+            return svd_model_1, svd_model_2, svd_uv, svd_iv, train_affinities, validation_affinities
+
+        svd_model_1, svd_model_2, svd_uv, svd_iv, train_affinities, validation_affinities = build_svd_model(train_affinities, validation_affinities, svdpp, user_ids, item_ids)
 
         n_svd_dims = svd_uv.shape[1]
         assert svd_iv.shape[1] == svd_uv.shape[1]
-        svd_predictions = svd_model.test(svd_train.build_testset())
-        user_item_affinities = [(p.uid, p.iid, p.r_ui - p.est) for p in svd_predictions]
-
         ###
+        user_item_affinities = list(train_affinities) + list(validation_affinities)
         ratings = np.array([r for u, i, r in user_item_affinities])
         min_affinity = np.min(ratings)
         max_affinity = np.max(ratings)
@@ -107,7 +140,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
                 rscaled = ((r + 1) / 2) * (max_affinity - min_affinity) + min_affinity
                 return rscaled
             rscaled = np.array([inner(r) for u, i, r in user_item_predictions])
-            svd_predictions = np.array([svd_model.predict(u, i).est for u, i, r in user_item_predictions])
+            svd_predictions = np.array([(svd_model_1.predict(u, i).est + svd_model_2.predict(u, i).est)/2 for u, i, r in user_item_predictions])
             return rscaled + svd_predictions
 
         mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
@@ -117,8 +150,6 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
-
-        train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.5)
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
@@ -241,6 +272,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
         n_dims = 2 * (n_collaborative_dims * 4) + 2 * (n_content_dims * 4) + 8
+        print("dense shape = ", dense_representation.shape, n_dims)
 
         for i in range(network_depth):
             dense_representation = keras.layers.Dense(n_dims * network_width, activation="tanh",
@@ -273,7 +305,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         model.compile(optimizer=adam,
                       loss=['mean_squared_error'])
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=3, verbose=0,
+        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=2, verbose=0,
                                               restore_best_weights=True)
         reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=1, min_lr=0.0001)
         callbacks = [es, reduce_lr]
@@ -283,7 +315,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         K.set_value(model.optimizer.lr, lr)
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=3, verbose=0,
+        es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=2, verbose=0,
                                               restore_best_weights=True)
         reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=1, min_lr=0.0001)
         callbacks = [es, reduce_lr]
