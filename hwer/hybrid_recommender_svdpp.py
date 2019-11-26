@@ -228,11 +228,6 @@ class HybridRecommenderSVDpp(HybridRecommender):
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
 
-        def custom_loss(user_layer, item_layer):
-            def loss(y_true, y_pred):
-                return K.mean(K.square(y_pred - y_true) + bias_regularizer*(K.square(user_layer) + K.square(item_layer)), axis=-1)
-            return loss
-
         mu, user_bias, item_bias, inverse_fn, train, validation, \
         n_svd_dims, ratings_count_by_user, ratings_count_by_item, \
         svd_uv, svd_iv = self.__build_dataset__(user_ids, item_ids, user_item_affinities,
@@ -250,16 +245,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
         item_initializer = tf.keras.initializers.Constant(item_bias)
         item_bias = keras.layers.Embedding(len(item_ids), 1, input_length=1,
                                            embeddings_initializer=item_initializer)(input_item)
-
-        user_bias = keras.layers.Dense(1, activation="linear",
-                                       kernel_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=0.0),
-                                       activity_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=bias_regularizer))(
-            user_bias)
-
-        item_bias = keras.layers.Dense(1, activation="linear",
-                                       kernel_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=0.0),
-                                       activity_regularizer=keras.regularizers.l1_l2(l1=0.0, l2=bias_regularizer))(
-            item_bias)
+        user_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_bias)
+        item_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_bias)
 
         input_1 = keras.Input(shape=(n_content_dims,))
         input_2 = keras.Input(shape=(n_content_dims,))

@@ -13,6 +13,8 @@ from scipy.special import comb
 from sklearn.utils import shuffle
 from tensorflow import keras
 import tensorflow as tf
+import tensorflow.keras.backend as K
+from tensorflow import keras
 from sklearn.model_selection import train_test_split
 import nmslib
 import re
@@ -34,7 +36,8 @@ def locality_preserving_dimensionality_reduction(data: np.ndarray, n_neighbors=1
 
 
 def get_nms_query_method(data, k=1000,
-                         index_time_params={'M': 15, 'indexThreadQty': 16, 'efConstruction': 200, 'post': 0, 'delaunay_type': 1}):
+                         index_time_params={'M': 15, 'indexThreadQty': 16, 'efConstruction': 200, 'post': 0,
+                                            'delaunay_type': 1}):
     query_time_params = {'efSearch': k}
     nms_index = nmslib.init(method='hnsw', space='cosinesimil')
     nms_index.addDataPointBatch(data)
@@ -57,7 +60,7 @@ def log_base_n(arr, base):
 
 
 def unit_length(a, axis=0):
-    return a/np.expand_dims(norm(a, axis=axis), axis=axis)
+    return a / np.expand_dims(norm(a, axis=axis), axis=axis)
 
 
 def shuffle_copy(*args):
@@ -122,6 +125,7 @@ def mean_average_precision_by_users(y_true: Dict[str, List[str]], y_pred: Dict[s
         sn.append(average_precision(y, yp))
     return np.mean(sn)
 
+
 def ndcg(y_true: List[str], y_pred: List[str]):
     y_pred = np.array(y_pred)
     if len(y_pred.shape) == 2:
@@ -145,7 +149,7 @@ def measure_array_dist_element_displacement(X1, X2):
 
     assert len(X1) == len(X2)
     diff = 0.
-    elem_to_index = {e:i for i,e in enumerate(X1)}
+    elem_to_index = {e: i for i, e in enumerate(X1)}
     for index, element in enumerate(X2):
         actual_index = elem_to_index[element]
         diff += abs(index - actual_index)
@@ -155,7 +159,7 @@ def measure_array_dist_element_displacement(X1, X2):
 
 def measure_array_dist_inversions(X1, X2):
     def merge_sort_inv_counter(arr):
-        return _merge_sort_counter(arr,[0]*len(arr),0,len(arr)-1)
+        return _merge_sort_counter(arr, [0] * len(arr), 0, len(arr) - 1)
 
     def _merge_sort_counter(arr, temp_arr, left, right):
         inv_count = 0
@@ -201,16 +205,16 @@ def measure_array_dist_inversions(X1, X2):
     X1 = list(X1)
     X2 = list(X2)
     assert len(X1) == len(X2)
-    elem_to_index_unsorted= {e: i for i, e in enumerate(X2)}
+    elem_to_index_unsorted = {e: i for i, e in enumerate(X2)}
     unsorted = [elem_to_index_unsorted[e] for e in X1]
-    return merge_sort_inv_counter(unsorted)/comb(len(X1),2)
+    return merge_sort_inv_counter(unsorted) / comb(len(X1), 2)
 
 
 def compare_embedding_global_distance_mismatches(high_dim_embeddigs, low_dim_embeddings, n_point_pairs=5):
     assert high_dim_embeddigs.shape[0] == low_dim_embeddings.shape[0]
-    shuf_ind = np.array([],dtype=int)
+    shuf_ind = np.array([], dtype=int)
     for i in range(n_point_pairs):
-        shuf_ind = np.concatenate((shuf_ind,np.array(shuffle(list(range(len(high_dim_embeddigs)))))))
+        shuf_ind = np.concatenate((shuf_ind, np.array(shuffle(list(range(len(high_dim_embeddigs)))))))
 
     def point_pair_distances(X, order):
         distances = np.sum(np.square(X[list(reversed(order))] - X[order]), axis=1)
@@ -218,9 +222,10 @@ def compare_embedding_global_distance_mismatches(high_dim_embeddigs, low_dim_emb
 
     def get_sorted_distances(X):
         distances = point_pair_distances(X, shuf_ind)
-        sd, si = zip(*list(sorted(zip(distances, range(len(distances))), key=lambda x:x[0])))
+        sd, si = zip(*list(sorted(zip(distances, range(len(distances))), key=lambda x: x[0])))
         si = np.array(si)
         return si
+
     sd1 = get_sorted_distances(high_dim_embeddigs)
     sd2 = get_sorted_distances(low_dim_embeddings)
     score = measure_array_dist_element_displacement(sd1, sd2)
@@ -228,22 +233,22 @@ def compare_embedding_global_distance_mismatches(high_dim_embeddigs, low_dim_emb
     return score, score2
 
 
-def auto_encoder_transform(Inputs, Outputs, n_dims=32,verbose=1,epochs=25 ):
+def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=1, epochs=25):
     loss = "mean_squared_error"
     initial_dims = Inputs.shape[1]
-    avg_value = 1.0/np.sqrt(initial_dims)
+    avg_value = 1.0 / np.sqrt(initial_dims)
     es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=5, verbose=0, )
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=4, min_lr=0.0001)
     input_layer = tf.keras.Input(shape=(Inputs.shape[1],))
     # encoded = tf.keras.layers.GaussianNoise(0.01)(input_layer)
     encoded = tf.keras.layers.Dense(n_dims * 4, activation='elu')(input_layer)
-    encoded = tf.keras.layers.GaussianNoise(0.01*avg_value)(encoded)
+    encoded = tf.keras.layers.GaussianNoise(0.01 * avg_value)(encoded)
     encoded = tf.keras.layers.Dense(n_dims * 2, activation='elu')(encoded)
     # encoded = tf.keras.layers.GaussianNoise(0.01)(encoded)
     encoded = tf.keras.layers.Dense(n_dims, activation='elu')(encoded)
 
     decoded = tf.keras.layers.Dense(n_dims * 2, activation='elu')(encoded)
-    decoded = tf.keras.layers.GaussianNoise(0.01*avg_value)(decoded)
+    decoded = tf.keras.layers.GaussianNoise(0.01 * avg_value)(decoded)
     decoded = tf.keras.layers.Dense(n_dims * 4, activation='elu')(decoded)
     decoded = tf.keras.layers.Dense(Outputs.shape[1], activation='elu')(decoded)
 
@@ -251,7 +256,7 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32,verbose=1,epochs=25 ):
     encoder = tf.keras.Model(input_layer, encoded)
     adam = tf.keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.05, amsgrad=False)
     autoencoder.compile(optimizer=adam, loss=loss)
-    X1,X2, Y1,Y2 = train_test_split(Inputs, Outputs, test_size=0.5)
+    X1, X2, Y1, Y2 = train_test_split(Inputs, Outputs, test_size=0.5)
     autoencoder.fit(X1, Y1,
                     epochs=epochs,
                     batch_size=4096,
@@ -295,6 +300,7 @@ def repeat_args_wrapper(func):
         for arg in args:
             results.append(func(arg, **kwargs))
         return results[0] if len(results) == 1 else results
+
     return wrapper
 
 
@@ -323,7 +329,7 @@ def get_mean_rating(user_item_affinities: List[Tuple[str, str, float]]) -> float
     return mean
 
 
-def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str, float]],) \
+def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str, float]], ) \
         -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
     uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
     # Calculating Biases
@@ -360,7 +366,7 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
     return mean, bu, bi, spread, uid
 
 
-def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str, str, float]],) \
+def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str, str, float]], ) \
         -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
     uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
     # Calculating Biases
@@ -426,3 +432,45 @@ def is_2d_array(x):
 unit_length = repeat_args_wrapper(unit_length)
 average_precision = average_precision_v2
 
+
+class UnitLengthRegularizer(keras.regularizers.Regularizer):
+    """Regularizer for Making Vectors Unit Length.
+    Arguments:
+      l1: Float; L1 regularization factor.
+      l2: Float; L2 regularization factor.
+    """
+
+    def __init__(self, l1=0., l2=0.):  # pylint: disable=redefined-outer-name
+        self.l1 = K.cast_to_floatx(l1)
+        self.l2 = K.cast_to_floatx(l2)
+
+    def __call__(self, x):
+        if not self.l1 and not self.l2:
+            return K.constant(0.)
+        regularization = 0.
+        x = 1 - K.sqrt(K.sum(K.square(x)))
+        if self.l1:
+            regularization += self.l1 * K.abs(x)
+        if self.l2:
+            regularization += self.l2 * K.square(x)
+        return regularization
+
+    def get_config(self):
+        return {'l1': float(self.l1), 'l2': float(self.l2)}
+
+
+class UnitLengthRegularization(keras.layers.Layer):
+    def __init__(self, l1=0., l2=0., **kwargs):
+        super(UnitLengthRegularization, self).__init__(
+            activity_regularizer=UnitLengthRegularizer(l1=l1, l2=l2), **kwargs)
+        self.supports_masking = True
+        self.l1 = l1
+        self.l2 = l2
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
+    def get_config(self):
+        config = {'l1': self.l1, 'l2': self.l2}
+        base_config = super(UnitLengthRegularization, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
