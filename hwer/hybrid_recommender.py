@@ -473,7 +473,7 @@ class HybridRecommender(RecommendationBase):
 
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
-        n_dims = 2*(n_collaborative_dims*4) + 2*(n_content_dims*4) + 8
+        n_dims = dense_representation.shape[1]
 
         for i in range(network_depth):
 
@@ -483,7 +483,7 @@ class HybridRecommender(RecommendationBase):
             dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
             dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
 
-        dense_representation = keras.layers.Dense(n_dims * network_width * 4, activation="tanh",
+        dense_representation = keras.layers.Dense(int(n_dims * network_width/2), activation="tanh",
                                                   kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                                   activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             dense_representation)

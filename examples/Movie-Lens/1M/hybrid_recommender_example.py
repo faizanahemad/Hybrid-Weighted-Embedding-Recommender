@@ -176,14 +176,14 @@ def error_analysis(error_df, title):
 
 def test_once(train_affinities, validation_affinities, algo="hybrid-svdpp"):
     embedding_mapper = {}
-    embedding_mapper['gender'] = CategoricalEmbedding(n_dims=1)
-    embedding_mapper['age'] = CategoricalEmbedding(n_dims=1)
-    embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=2)
+    embedding_mapper['gender'] = CategoricalEmbedding(n_dims=2)
+    embedding_mapper['age'] = CategoricalEmbedding(n_dims=2)
+    embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=4)
     embedding_mapper['zip'] = CategoricalEmbedding(n_dims=2)
 
     embedding_mapper['text'] = FlairGlove100Embedding()
-    embedding_mapper['numeric'] = NumericEmbedding(2)
-    embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=2)
+    embedding_mapper['numeric'] = NumericEmbedding(4)
+    embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
 
     u1 = Feature(feature_name="gender", feature_type=FeatureType.CATEGORICAL, values=users.gender.values)
     u2 = Feature(feature_name="age", feature_type=FeatureType.CATEGORICAL, values=users.age.astype(str).values)
