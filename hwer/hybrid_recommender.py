@@ -26,7 +26,7 @@ from .recommendation_base import EntityType
 from .content_recommender import ContentRecommendation
 from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
     normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, UnitLengthRegularizer, \
-    UnitLengthRegularization
+    UnitLengthRegularization, RatingPredRegularization
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
@@ -368,20 +368,6 @@ class HybridRecommender(RecommendationBase):
 
         ###
 
-        # user_item_affinities = [(u, i, (4 * (r - min_affinity) / (max_affinity - min_affinity)) - 2) for u, i, r in
-        #                         user_item_affinities]
-        # inverse_fn = np.vectorize(lambda u, i, r: ((r + 2) / 4) * (max_affinity - min_affinity) + min_affinity)
-
-        ###
-
-        # ratings = np.array([r for u, i, r in user_item_affinities])
-        # mean = np.mean(ratings)
-        # std = np.std(ratings)
-        # user_item_affinities = [(u, i, (r - mean) / (2*std)) for u, i, r in
-        #                         user_item_affinities]
-        # inverse_fn = np.vectorize(lambda r: r*2*std + mean)
-
-        # inverse_fn = np.vectorize(lambda r: r)
         mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
         # print("Mean, Mu = ", mean, mu,min_affinity,max_affinity, describe([r for u, i, r in user_item_affinities]))
         # print(bu, "\n", bi, "\n", np.max(list(bu.values())), np.max(list(bi.values())))
@@ -441,6 +427,8 @@ class HybridRecommender(RecommendationBase):
 
         user_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_bias)
         item_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_bias)
+        user_bias = tf.keras.layers.Flatten()(user_bias)
+        item_bias = tf.keras.layers.Flatten()(item_bias)
 
         input_1 = keras.Input(shape=(n_content_dims,))
         input_2 = keras.Input(shape=(n_content_dims,))
@@ -480,7 +468,7 @@ class HybridRecommender(RecommendationBase):
         vectors = K.concatenate([user_content, item_content, user_collab, item_collab])
 
         counts_data = keras.layers.Dense(8, activation="tanh")(K.concatenate([ratings_by_user, ratings_by_item]))
-        meta_data = K.concatenate([counts_data, user_item_content_similarity, user_item_collab_similarity])
+        meta_data = K.concatenate([counts_data, user_item_content_similarity, user_item_collab_similarity, item_bias, user_bias])
         meta_data = keras.layers.Dense(16, activation="tanh", )(meta_data)
 
         dense_representation = K.concatenate([meta_data, vectors])
@@ -504,6 +492,7 @@ class HybridRecommender(RecommendationBase):
                                     kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1, l2=kernel_l2),
                                     activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(dense_representation)
         rating = tf.keras.backend.constant(mu) + user_bias + item_bias + rating
+        rating = RatingPredRegularization(l1=0.01, l2=0.001)(rating)
         # rating = K.clip(rating, -1.0, 1.0)
         model = keras.Model(inputs=[input_user, input_item, input_1, input_2, input_3, input_4,
                                     input_5, input_6],

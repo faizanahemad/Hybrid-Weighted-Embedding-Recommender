@@ -26,7 +26,7 @@ import fasttext
 from .recommendation_base import EntityType
 from .content_recommender import ContentRecommendation
 from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
-    normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item
+    normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, RatingPredRegularization
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
@@ -247,6 +247,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                            embeddings_initializer=item_initializer)(input_item)
         user_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_bias)
         item_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_bias)
+        user_bias = tf.keras.layers.Flatten()(user_bias)
+        item_bias = tf.keras.layers.Flatten()(item_bias)
 
         input_1 = keras.Input(shape=(n_content_dims,))
         input_2 = keras.Input(shape=(n_content_dims,))
@@ -308,14 +310,14 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         counts_data = keras.layers.Dense(8, activation="tanh")(K.concatenate([ratings_by_user, ratings_by_item]))
         meta_data = K.concatenate(
-            [counts_data, user_item_content_similarity, user_item_collab_similarity, user_item_svd_similarity])
+            [counts_data, user_item_content_similarity, user_item_collab_similarity, user_item_svd_similarity, item_bias, user_bias])
         meta_data = keras.layers.Dense(16 * network_width, activation="tanh", )(meta_data)
         meta_data = keras.layers.Dense(16 * network_width, activation="tanh", )(meta_data)
 
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
         n_dims = dense_representation.shape[1]
-        print("dense shape = ", dense_representation.shape, ", Meta Data Shape= ", meta_data.shape, ", vector shape =",vectors.shape, ", N_dims = ", n_dims,)
+        print("Hybrid SVDpp: dense shape = ", dense_representation.shape, ", Meta Data Shape= ", meta_data.shape, ", vector shape =",vectors.shape, ", N_dims = ", n_dims,)
 
         for i in range(network_depth):
             dense_representation = keras.layers.Dense(n_dims, activation="tanh",
@@ -339,6 +341,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                     activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1, l2=activity_l2))(
             dense_representation)
         rating = tf.keras.backend.constant(mu) + user_bias + item_bias + rating
+        rating = RatingPredRegularization(l1=0.01, l2=0.001)(rating)
         # rating = K.clip(rating, -1.0, 1.0)
         model = keras.Model(
             inputs=[input_user, input_item, input_1, input_2, input_3, input_4, input_svd_uv, input_svd_iv,

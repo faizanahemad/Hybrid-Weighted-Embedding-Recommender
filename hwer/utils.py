@@ -474,3 +474,47 @@ class UnitLengthRegularization(keras.layers.Layer):
         config = {'l1': self.l1, 'l2': self.l2}
         base_config = super(UnitLengthRegularization, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+
+
+class RatingPredRegularizer(keras.regularizers.Regularizer):
+    """Regularizer for Making Vectors Unit Length.
+    Arguments:
+      l1: Float; L1 regularization factor.
+      l2: Float; L2 regularization factor.
+    """
+
+    def __init__(self, l1=0., l2=0.):  # pylint: disable=redefined-outer-name
+        self.l1 = K.cast_to_floatx(l1)
+        self.l2 = K.cast_to_floatx(l2)
+
+    def __call__(self, x):
+        if not self.l1 and not self.l2:
+            return K.constant(0.)
+        regularization = 0.
+        x = K.sum(K.relu(K.square(x) - 1))
+        if self.l1:
+            regularization += self.l1 * K.abs(x)
+        if self.l2:
+            regularization += self.l2 * K.square(x)
+        return regularization
+
+    def get_config(self):
+        return {'l1': float(self.l1), 'l2': float(self.l2)}
+
+
+class RatingPredRegularization(keras.layers.Layer):
+    def __init__(self, l1=0., l2=0., **kwargs):
+        super(RatingPredRegularization, self).__init__(
+            activity_regularizer=RatingPredRegularizer(l1=l1, l2=l2), **kwargs)
+        self.supports_masking = True
+        self.l1 = l1
+        self.l2 = l2
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
+
+    def get_config(self):
+        config = {'l1': self.l1, 'l2': self.l2}
+        base_config = super(RatingPredRegularization, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))

@@ -5,5 +5,6 @@ from .content_recommender import ContentRecommendation
 from .hybrid_recommender import HybridRecommender
 from .hybrid_recommender_svdpp import HybridRecommenderSVDpp
 from .hybrid_triplet_loss_recommender import HybridRecommenderTripletLoss
+from .hybrid_resnet_recommender import HybridRecommenderResnet
 from .utils import build_item_user_dict, build_user_item_dict, normalize_affinity_scores_by_user
 

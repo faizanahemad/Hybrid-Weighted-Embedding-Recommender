@@ -22,9 +22,10 @@ from ast import literal_eval
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
     FlairGlove100Embedding
 from hwer import Feature, FeatureSet, FeatureType
-from hwer import HybridRecommender, HybridRecommenderSVDpp, HybridRecommenderTripletLoss
+from hwer import HybridRecommender, HybridRecommenderSVDpp, HybridRecommenderTripletLoss, HybridRecommenderResnet
 from hwer.utils import cos_sim
 import tensorflow as tf
+
 # tf.compat.v1.disable_eager_execution()
 
 users = pd.read_csv("users.csv", sep="\t", engine="python")
@@ -51,10 +52,10 @@ movies["runtime"] = movies["runtime"].fillna(0.0)
 
 # print(ratings[ratings["user_id"]=="1051"])
 
-check_working = True  # Setting to False uses all the data
+check_working = False  # Setting to False uses all the data
 enable_kfold = True
 enable_error_analysis = False
-kfold_multiplier = 1 if enable_kfold else 1
+kfold_multiplier = 2 if enable_kfold else 1
 
 hyperparameters = dict(combining_factor=0.5,
                        collaborative_params=dict(
@@ -144,7 +145,7 @@ def get_prediction_details(recsys, affinities):
 
 
 def error_analysis(error_df, title):
-    print("-x-"*30)
+    print("-x-" * 30)
     print("%s: Error Analysis -: " % title)
 
     print(error_df.describe())
@@ -204,16 +205,30 @@ def test_once(train_affinities, validation_affinities, algo="hybrid-svdpp"):
 
     if algo == "hybrid-svdpp":
         recsys = HybridRecommenderSVDpp(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                        n_content_dims=8 * kfold_multiplier,
-                                        n_collaborative_dims=8 * kfold_multiplier)
+                                        n_content_dims=16 * kfold_multiplier,
+                                        n_collaborative_dims=16 * kfold_multiplier)
     elif algo == "hybrid":
         recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                        n_content_dims=8 * kfold_multiplier,
-                                        n_collaborative_dims=8 * kfold_multiplier)
+                                   n_content_dims=16 * kfold_multiplier,
+                                   n_collaborative_dims=16 * kfold_multiplier)
     elif algo == "hybrid-triplet":
         recsys = HybridRecommenderTripletLoss(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                        n_content_dims=8 * kfold_multiplier,
-                                        n_collaborative_dims=8 * kfold_multiplier)
+                                              n_content_dims=16 * kfold_multiplier,
+                                              n_collaborative_dims=16 * kfold_multiplier)
+    elif algo == "hybrid-resnet":
+        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_layers"] = 4 * kfold_multiplier
+        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_width"] = 128 * kfold_multiplier
+        recsys = HybridRecommenderResnet(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
+                                         n_content_dims=16 * kfold_multiplier,
+                                         n_collaborative_dims=16 * kfold_multiplier)
+
+    elif algo == "hybrid-resnet-content":
+        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_content_each_layer"] = True
+        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_layers"] = 4 * kfold_multiplier
+        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_width"] = 128 * kfold_multiplier
+        recsys = HybridRecommenderResnet(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
+                                         n_content_dims=16 * kfold_multiplier,
+                                         n_collaborative_dims=16 * kfold_multiplier)
     else:
         raise ValueError()
     start = time.time()
@@ -235,16 +250,14 @@ def test_once(train_affinities, validation_affinities, algo="hybrid-svdpp"):
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
         error_analysis(error_df, "Hybrid")
-
-
-    results.append({"algo": algo, "rmse": rmse, "mae": mae,
-                    "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time})
+    results = [{"algo": algo, "rmse": rmse, "mae": mae,
+                "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time}]
     return recsys, results, predictions, actuals
 
 
 if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25)
-    recsys, results, predictions, actuals = test_once(train_affinities, validation_affinities)
+    recsys, results, predictions, actuals = test_once(train_affinities, validation_affinities, algo="hybrid-resnet")
     results.extend(test_surprise(train_affinities, validation_affinities))
     display_results(results)
     print(list(zip(actuals[:20], predictions[:20])))
@@ -268,11 +281,15 @@ else:
         train_affinities, validation_affinities = X[train_index], X[test_index]
         train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
         validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
-        recsys, res, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid-svdpp")
+        recsys, res, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid-resnet")
         recsys, res1, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid")
         recsys, res2, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid-triplet")
+        recsys, res3, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid-svdpp")
+        recsys, res4, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid-resnet-content")
         res.extend(res1)
         res.extend(res2)
+        res.extend(res3)
+        res.extend(res4)
         res.extend(test_surprise(train_affinities, validation_affinities))
         display_results(res)
         results.extend(res)
