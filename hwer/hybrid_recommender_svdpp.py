@@ -1,3 +1,4 @@
+from .logging import getLogger
 from .recommendation_base import RecommendationBase, Feature, FeatureSet
 from typing import List, Dict, Tuple, Sequence, Type, Set, Optional
 from sklearn.decomposition import PCA
@@ -43,6 +44,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32):
         super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims)
+        self.log = getLogger(type(self).__name__)
 
     def __build_svd_model__(self, user_item_affinities, svdpp, rating_scale, user_ids, item_ids, n_folds=1):
         models = []
@@ -158,7 +160,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         user_bias = np.array([user_bias[u] if u in user_bias else np.random.rand() * 0.01 for u in user_ids])
         item_bias = np.array([item_bias[i] if i in item_bias else np.random.rand() * 0.01 for i in item_ids])
-        print("Mu = ", mu, " User Bias = ", np.abs(np.max(user_bias)), " Item Bias = ", np.abs(np.max(item_bias)))
+        self.log.debug("Mu = %.4f, Max User Bias = %.4f, Max Item Bias = %.4f", mu, np.abs(np.max(user_bias)), np.abs(np.max(item_bias)))
 
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
@@ -208,6 +210,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                      user_vectors: np.ndarray, item_vectors: np.ndarray,
                                      user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
+        self.log.debug("Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
+                       (user_vectors.shape, item_vectors.shape), (user_content_vectors.shape, item_content_vectors.shape))
 
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
@@ -378,9 +382,11 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                 "ratings_count_by_user": ratings_count_by_user,
                                 "ratings_count_by_item": ratings_count_by_item,
                                 "batch_size": batch_size, "svd_uv": svd_uv, "svd_iv": svd_iv}
+        self.log.info("Built Prediction Network, model params = %s", model.count_params())
         return prediction_artifacts
 
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+        start = time.time()
         model = self.prediction_artifacts["model"]
         inverse_fn = self.prediction_artifacts["inverse_fn"]
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
@@ -454,5 +460,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         predictions = model.predict_generator(datagen(), steps=len(user_item_pairs)).reshape((-1))
         users, items = zip(*user_item_pairs)
         predictions = inverse_fn([(u, i, r) for u, i, r in zip(users, items, predictions)])
-        predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
+        if clip:
+            predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
+        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f", len(user_item_pairs), time.time() - start)
         return predictions

@@ -1,4 +1,5 @@
 from .recommendation_base import RecommendationBase, Feature, FeatureSet
+from .logging import getLogger
 from typing import List, Dict, Tuple, Sequence, Type, Set, Optional
 from sklearn.decomposition import PCA
 from scipy.special import comb
@@ -43,6 +44,7 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32):
         super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims)
+        self.log = getLogger(type(self).__name__)
 
     def __entity_entity_affinities_trainer__(self,
                                              entity_ids: List[str],
@@ -51,6 +53,8 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
                                              vectors: np.ndarray,
                                              n_output_dims: int,
                                              hyperparams: Dict) -> np.ndarray:
+        self.log.debug("Start Training Entity Affinities, n_entities = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+                       len(entity_ids), len(entity_entity_affinities), vectors.shape, n_output_dims)
         train_affinities, validation_affinities = train_test_split(entity_entity_affinities, test_size=0.5)
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
@@ -211,6 +215,7 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
+        self.log.debug("End Training Entity Affinities")
 
         return encoder.predict(
             tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size))
@@ -222,6 +227,8 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
                                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                          n_output_dims: int,
                                          hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
+        self.log.debug("Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+                       len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -408,4 +415,5 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
             tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size))
         item_vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(batch_size))
+        self.log.debug("End Training User-Item Affinities")
         return user_vectors, item_vectors

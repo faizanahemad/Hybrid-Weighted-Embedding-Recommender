@@ -1,3 +1,4 @@
+from .logging import getLogger
 from .recommendation_base import RecommendationBase, Feature, FeatureSet
 from typing import List, Dict, Tuple, Sequence, Type, Set, Optional
 from sklearn.decomposition import PCA
@@ -34,6 +35,7 @@ class ContentRecommendation(RecommendationBase):
                          n_output_dims=n_output_dims)
 
         self.embedding_mapper: dict[str, ContentEmbeddingBase] = embedding_mapper
+        self.log = getLogger(type(self).__name__)
 
     def __build_user_only_embeddings__(self, user_ids: List[str], user_data: FeatureSet):
         user_embeddings = {}
@@ -196,6 +198,7 @@ class ContentRecommendation(RecommendationBase):
 
         user_vectors, item_vectors = self.__concat_feature_vectors__(processed_features, item_embeddings,
                                                                      user_embeddings, n_output_dims)
+        self.log.info("Built Content Embeddings, user vectors shape = %s, item vectors shape = %s", user_vectors.shape, item_vectors.shape)
         return user_vectors, item_vectors
 
     def fit(self,

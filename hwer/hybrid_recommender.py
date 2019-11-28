@@ -1,3 +1,4 @@
+from .logging import getLogger
 from .recommendation_base import RecommendationBase, Feature, FeatureSet
 from typing import List, Dict, Tuple, Sequence, Type, Set, Optional
 from sklearn.decomposition import PCA
@@ -45,6 +46,7 @@ class HybridRecommender(RecommendationBase):
         self.n_collaborative_dims = n_collaborative_dims
         self.content_data_used = None
         self.prediction_artifacts = None
+        self.log = getLogger(type(self).__name__)
 
     def __entity_entity_affinities_trainer__(self,
                                              entity_ids: List[str],
@@ -53,6 +55,8 @@ class HybridRecommender(RecommendationBase):
                                              vectors: np.ndarray,
                                              n_output_dims: int,
                                              hyperparams: Dict) -> np.ndarray:
+        self.log.debug("Start Training Entity Affinities, n_entities = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+                       len(entity_ids), len(entity_entity_affinities), vectors.shape, n_output_dims)
         train_affinities, validation_affinities = train_test_split(entity_entity_affinities, test_size=0.5)
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
@@ -159,6 +163,7 @@ class HybridRecommender(RecommendationBase):
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
+        self.log.debug("End Training Entity Affinities")
 
         return encoder.predict(
             tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size))
@@ -197,6 +202,8 @@ class HybridRecommender(RecommendationBase):
                                                                                self.item_id_to_index,
                                                                                self.n_collaborative_dims,
                                                                                user_item_params)
+        self.log.info("Built Collaborative Embeddings, user_vectors shape = %s, item_vectors shape = %s",
+                      user_vectors.shape, item_vectors.shape)
         return user_vectors, item_vectors
 
     def __user_item_affinities_trainer__(self,
@@ -206,6 +213,9 @@ class HybridRecommender(RecommendationBase):
                                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                          n_output_dims: int,
                                          hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
+        self.log.debug(
+            "Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+            len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -319,6 +329,7 @@ class HybridRecommender(RecommendationBase):
             tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size))
         item_vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(batch_size))
+        self.log.debug("End Training User-Item Affinities")
         return user_vectors, item_vectors
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
@@ -328,8 +339,9 @@ class HybridRecommender(RecommendationBase):
                                      user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
 
-        # max_affinity = np.max([r for u, i, r in user_item_affinities])
-        # min_affinity = np.min([r for u, i, r in user_item_affinities])
+        self.log.debug(
+            "Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
+            (user_vectors.shape, item_vectors.shape), (user_content_vectors.shape, item_content_vectors.shape))
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -524,6 +536,7 @@ class HybridRecommender(RecommendationBase):
                                 "ratings_count_by_user": ratings_count_by_user,
                                 "ratings_count_by_item": ratings_count_by_item,
                                 "batch_size": batch_size}
+        self.log.info("Built Prediction Network, model params = %s", model.count_params())
         return prediction_artifacts
 
     def fit(self,
@@ -531,6 +544,7 @@ class HybridRecommender(RecommendationBase):
             item_ids: List[str],
             user_item_affinities: List[Tuple[str, str, float]],
             **kwargs):
+        start_time = time.time()
         _ = super().fit(user_ids, item_ids, user_item_affinities, **kwargs)
         _, _, _, _, user_normalized_affinities = normalize_affinity_scores_by_user(user_item_affinities)
 
@@ -599,9 +613,12 @@ class HybridRecommender(RecommendationBase):
 
         _, _ = self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
         self.fit_done = True
+        self.log.info("End Fitting Recommender, user_vectors shape = %s, item_vectors shape = %s, Time to fit = %.1f",
+                      user_vectors.shape, item_vectors.shape, time.time() - start_time)
         return user_vectors, item_vectors
 
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+        start = time.time()
         model = self.prediction_artifacts["model"]
         inverse_fn = self.prediction_artifacts["inverse_fn"]
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
@@ -667,7 +684,10 @@ class HybridRecommender(RecommendationBase):
         predictions = model.predict_generator(datagen(), steps=len(user_item_pairs)).reshape((-1))
         users, items = zip(*user_item_pairs)
         predictions = inverse_fn([(u, i, r) for u, i, r in zip(users, items, predictions)])
-        predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
+        if clip:
+            predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
+        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f", len(user_item_pairs),
+                      time.time() - start)
         return predictions
 
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,

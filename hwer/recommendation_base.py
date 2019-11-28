@@ -1,5 +1,6 @@
 from typing import List, Dict, Tuple, Sequence, Type, Optional
 from pandas import DataFrame
+from .logging import getLogger
 import abc
 import numpy as np
 import nmslib
@@ -101,6 +102,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.bu = defaultdict(float)
         self.bi = defaultdict(float)
         self.spread: Optional[int] = None
+        self.log = getLogger(type(self).__name__)
 
     def __add_users__(self, users: List[str]):
         new_users_set = set(users)
@@ -147,6 +149,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         self.user_knn = user_knn
         self.item_knn = item_knn
+        self.log.info("Built KNN, user vectors shape = %s, item vectors shape = %s, n_neighbors = %s", user_vectors.shape,
+                      item_vectors.shape, n_neighbors)
         return user_knn, item_knn
 
     def add_user(self, user_id: str, features: FeatureSet, user_item_affinities: List[Tuple[str, str, float]]):
@@ -173,6 +177,9 @@ class RecommendationBase(metaclass=abc.ABCMeta):
             **kwargs):
         # self.build_content_embeddings(item_data, user_item_affinities)
         assert not self.fit_done
+        sparsity = 1 - len(user_item_affinities)/(len(user_ids)*len(item_ids))
+        self.log.info("Start Fitting Recommender with n_users = %s, n_items = %s, n_samples = %s, sparsity = %s",
+                      len(user_ids), len(item_ids), len(user_item_affinities), sparsity)
         user_set = set(user_ids)
         item_set = set(item_ids)
         assert len(user_ids) == len(user_set)

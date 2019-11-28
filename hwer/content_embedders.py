@@ -15,6 +15,7 @@ from joblib import Parallel, delayed
 from tqdm import tqdm
 from typing import Type, Union
 from sklearn.preprocessing import StandardScaler
+from .logging import getLogger
 
 
 class ContentEmbeddingBase(metaclass=abc.ABCMeta):
@@ -23,15 +24,18 @@ class ContentEmbeddingBase(metaclass=abc.ABCMeta):
         self.make_unit_length = make_unit_length
         self.kwargs = kwargs
         self.is_fit = False
+        self.log = None
 
     @abc.abstractmethod
-    def fit(self, feature: Union[Feature, FeatureSet], **kwargs):
-        assert not self.is_fit
+    def fit(self, feature: Feature, **kwargs):
+        assert not self.is_fit and self.log is not None
+        self.log.debug("Start Fitting for feature name %s", feature.feature_name)
         self.is_fit = True
 
     @abc.abstractmethod
     def transform(self, feature: Union[Feature, FeatureSet], **kwargs) -> np.ndarray:
         assert self.is_fit
+        pass
 
     def fit_transform(self, feature: Union[Feature, FeatureSet], **kwargs) -> np.ndarray:
         self.fit(feature, **kwargs)
@@ -43,7 +47,7 @@ class ContentEmbeddingBase(metaclass=abc.ABCMeta):
 
     def check_output_dims(self, output: np.ndarray, feature: Feature):
         if self.n_dims != output.shape[1] or output.shape[0] != len(feature):
-            raise ValueError("Unmatched Dims. Output Dims = %s, Required Dims = (%s,%s)"% (output.shape, len(feature), self.n_dims))
+            raise ValueError("Unmatched Dims. Output Dims = %s, Required Dims = (%s,%s)" % (output.shape, len(feature), self.n_dims))
         return output
 
 
@@ -53,6 +57,7 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         self.n_iters = n_iters
         self.encoder = None
         self.ohe = None
+        self.log = getLogger(type(self).__name__)
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
@@ -81,12 +86,15 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         _, encoder = auto_encoder_transform(network_inputs, network_output, n_dims=self.n_dims, verbose=0, epochs=self.n_iters)
         self.encoder = encoder
         self.ohe = ohe
+        self.log.debug("End Fitting CategoricalEmbedding for feature name %s", feature.feature_name)
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+        self.log.debug("Start Transform CategoricalEmbedding for feature name %s", feature.feature_name)
         df = pd.DataFrame(data=feature.values, columns=["input"], dtype=str)
         network_inputs = self.ohe.transform(df[['input']])
 
         outputs = unit_length(self.encoder.predict(network_inputs), axis=1) if self.make_unit_length else self.encoder.predict(network_inputs)
+        self.log.debug("End Transform CategoricalEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
 
 
@@ -97,6 +105,7 @@ class MultiCategoricalEmbedding(ContentEmbeddingBase):
         self.encoder = None
         self.vectorizer = None
         self.input_mapper = lambda x: " ".join(map(lambda y: "__" + str(y).strip() + "__", x))
+        self.log = getLogger(type(self).__name__)
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
@@ -127,11 +136,14 @@ class MultiCategoricalEmbedding(ContentEmbeddingBase):
         _, encoder = auto_encoder_transform(network_inputs, network_output, n_dims=self.n_dims, verbose=0, epochs=self.n_iters)
         self.encoder = encoder
         self.vectorizer = vectorizer
+        self.log.debug("End Fitting MultiCategoricalEmbedding for feature name %s", feature.feature_name)
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+        self.log.debug("Start Transform MultiCategoricalEmbedding for feature name %s", feature.feature_name)
         df = pd.DataFrame(data=np.array(feature.values).T, columns=["input"])
         network_inputs = self.vectorizer.transform(list(df.input.map(self.input_mapper).values)).toarray()
         outputs = unit_length(self.encoder.predict(network_inputs), axis=1) if self.make_unit_length else self.encoder.predict(network_inputs)
+        self.log.debug("End Transform MultiCategoricalEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
 
 
@@ -143,6 +155,7 @@ class FasttextEmbedding(ContentEmbeddingBase):
         self.fasttext_params = kwargs["fasttext_params"] \
             if "fasttext_params" in kwargs else dict(neg=5, ws=7, minCount=3, bucket=1000000, minn=4, maxn=5,
                                                      dim=self.n_dims, epoch=10, lr=0.1, thread=os.cpu_count())
+        self.log = getLogger(type(self).__name__)
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
@@ -150,17 +163,20 @@ class FasttextEmbedding(ContentEmbeddingBase):
         if self.fasttext_file is None:
             df = pd.DataFrame(data=feature.values, columns=[feature.feature_name])
             df[feature.feature_name] = df[feature.feature_name].fillna("").apply(clean_text)
-            df.to_csv("sentences.txt",index=False)
+            df.to_csv("sentences.txt", index=False)
             text_model = fasttext.train_unsupervised("sentences.txt", "skipgram", **self.fasttext_params)
         else:
             text_model = fasttext.load_model(self.fasttext_file)
         self.text_model = text_model
+        self.log.debug("End Fitting FasttextEmbedding for feature name %s", feature.feature_name)
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+        self.log.debug("Start Transform FasttextEmbedding for feature name %s", feature.feature_name)
         assert feature.feature_type == FeatureType.STR
         outputs = list(map(lambda x: self.text_model.get_sentence_vector(clean_text(x)), feature.values))
         outputs = np.array(outputs)
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
+        self.log.debug("End Transform FasttextEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
 
 
@@ -176,6 +192,7 @@ class NumericEmbedding(ContentEmbeddingBase):
         self.scaler = None
         self.encoder = None
         self.standard_scaler = None
+        self.log = getLogger(type(self).__name__)
 
     def __prepare_inputs(self, inputs):
         scaled_inputs = self.scaler.transform(inputs)
@@ -211,8 +228,10 @@ class NumericEmbedding(ContentEmbeddingBase):
         _, encoder = auto_encoder_transform(inputs, inputs.copy(), n_dims=self.n_dims, verbose=0,
                                             epochs=self.n_iters)
         self.encoder = encoder
+        self.log.debug("End Fitting NumericEmbedding for feature name %s", feature.feature_name)
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+        self.log.debug("Start Transform NumericEmbedding for feature name %s", feature.feature_name)
         assert feature.feature_type == FeatureType.NUMERIC
         inputs = np.array(feature.values)
         if len(inputs.shape) == 1:
@@ -220,6 +239,7 @@ class NumericEmbedding(ContentEmbeddingBase):
         inputs = self.__prepare_inputs(inputs)
         outputs = unit_length(self.encoder.predict(inputs),
                               axis=1) if self.make_unit_length else self.encoder.predict(inputs)
+        self.log.debug("End Transform NumericEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
 
 
@@ -228,9 +248,11 @@ class FlairGlove100Embedding(ContentEmbeddingBase):
         super().__init__(n_dims=100, make_unit_length=make_unit_length)
         embeddings = [WordEmbeddings('glove')]
         self.embeddings = DocumentPoolEmbeddings(embeddings)
+        self.log = getLogger(type(self).__name__)
 
     def get_sentence_vector(self, text):
         sentence = Sentence(clean_text(text))
+        # noinspection PyUnresolvedReferences
         _ = self.embeddings.embed(sentence)
         a = sentence.get_embedding()
         result = a.detach().cpu().numpy()
@@ -241,12 +263,15 @@ class FlairGlove100Embedding(ContentEmbeddingBase):
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
         assert feature.feature_type == FeatureType.STR
+        self.log.debug("End Fitting FlairGlove100Embedding for feature name %s", feature.feature_name)
         return
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+        self.log.debug("Start Transform FlairGlove100Embedding for feature name %s", feature.feature_name)
         assert feature.feature_type == FeatureType.STR
         outputs = np.vstack([self.get_sentence_vector(t) for t in tqdm(feature.values)])
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
+        self.log.debug("End Transform FlairGlove100Embedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
 
 
@@ -255,7 +280,9 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
         super().__init__(n_dims=200, make_unit_length=make_unit_length)
         embeddings = [WordEmbeddings('glove'), BytePairEmbeddings('en')]
         self.embeddings = DocumentPoolEmbeddings(embeddings)
+        self.log = getLogger(type(self).__name__)
 
+    # noinspection PyUnresolvedReferences
     def get_sentence_vector(self, text):
         sentence = Sentence(clean_text(text))
         _ = self.embeddings.embed(sentence)
@@ -268,10 +295,13 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
         assert feature.feature_type == FeatureType.STR
+        self.log.debug("End Fitting FlairGlove100AndBytePairEmbedding for feature name %s", feature.feature_name)
         return
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+        self.log.debug("Start Transform FlairGlove100AndBytePairEmbedding for feature name %s", feature.feature_name)
         assert feature.feature_type == FeatureType.STR
         outputs = np.vstack([self.get_sentence_vector(t) for t in tqdm(feature.values)])
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
+        self.log.debug("End Transform FlairGlove100AndBytePairEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)

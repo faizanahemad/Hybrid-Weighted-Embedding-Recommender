@@ -1,4 +1,5 @@
 from .recommendation_base import RecommendationBase, Feature, FeatureSet
+from .logging import getLogger
 from typing import List, Dict, Tuple, Sequence, Type, Set, Optional
 from sklearn.decomposition import PCA
 from scipy.special import comb
@@ -68,6 +69,7 @@ class HybridRecommenderResnet(HybridRecommenderSVDpp):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32):
         super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims)
+        self.log = getLogger(type(self).__name__)
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
                                      user_item_affinities: List[Tuple[str, str, float]],
@@ -75,6 +77,9 @@ class HybridRecommenderResnet(HybridRecommenderSVDpp):
                                      user_vectors: np.ndarray, item_vectors: np.ndarray,
                                      user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
+        self.log.debug(
+            "Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
+            (user_vectors.shape, item_vectors.shape), (user_content_vectors.shape, item_content_vectors.shape))
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -152,8 +157,8 @@ class HybridRecommenderResnet(HybridRecommenderSVDpp):
 
         dense_representation = K.concatenate([meta_data, vectors])
 
-        print("RESNET REC: dense shape = ", dense_representation.shape, ", resnet width =", resnet_width,
-              ", content based resnet or not = ", resnet_content_each_layer)
+        self.log.debug("dense shape = %s, resnet width = %s, content based resnet or not = %s",
+                       dense_representation.shape, resnet_width,resnet_content_each_layer)
 
         dense_representation = keras.layers.Dense(resnet_width, activation="tanh",
                                                   kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1,
@@ -216,4 +221,5 @@ class HybridRecommenderResnet(HybridRecommenderSVDpp):
                                 "ratings_count_by_user": ratings_count_by_user,
                                 "ratings_count_by_item": ratings_count_by_item,
                                 "batch_size": batch_size, "svd_uv": svd_uv, "svd_iv": svd_iv}
+        self.log.info("Built Prediction Network, model params = %s", model.count_params())
         return prediction_artifacts
