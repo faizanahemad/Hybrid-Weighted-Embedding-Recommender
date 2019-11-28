@@ -89,7 +89,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         else:
             user_item_affinities = np.array(user_item_affinities)
             users_for_each_rating = np.array([u for u, i, r in user_item_affinities])
-            X,y = user_item_affinities, users_for_each_rating
+            X, y = user_item_affinities, users_for_each_rating
             skf = StratifiedKFold(n_splits=n_folds)
             for train_index, test_index in skf.split(X, y):
                 train_affinities, validation_affinities = X[train_index], X[test_index]
@@ -160,7 +160,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         user_bias = np.array([user_bias[u] if u in user_bias else np.random.rand() * 0.01 for u in user_ids])
         item_bias = np.array([item_bias[i] if i in item_bias else np.random.rand() * 0.01 for i in item_ids])
-        self.log.debug("Mu = %.4f, Max User Bias = %.4f, Max Item Bias = %.4f", mu, np.abs(np.max(user_bias)), np.abs(np.max(item_bias)))
+        self.log.debug("Mu = %.4f, Max User Bias = %.4f, Max Item Bias = %.4f", mu, np.abs(np.max(user_bias)),
+                       np.abs(np.max(item_bias)))
 
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
@@ -210,8 +211,9 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                      user_vectors: np.ndarray, item_vectors: np.ndarray,
                                      user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
-        self.log.debug("Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
-                       (user_vectors.shape, item_vectors.shape), (user_content_vectors.shape, item_content_vectors.shape))
+        self.log.debug(
+            "Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
+            (user_vectors.shape, item_vectors.shape), (user_content_vectors.shape, item_content_vectors.shape))
 
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
@@ -314,14 +316,16 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         counts_data = keras.layers.Dense(8, activation="tanh")(K.concatenate([ratings_by_user, ratings_by_item]))
         meta_data = K.concatenate(
-            [counts_data, user_item_content_similarity, user_item_collab_similarity, user_item_svd_similarity, item_bias, user_bias])
+            [counts_data, user_item_content_similarity, user_item_collab_similarity, user_item_svd_similarity,
+             item_bias, user_bias])
         meta_data = keras.layers.Dense(16 * network_width, activation="tanh", )(meta_data)
         meta_data = keras.layers.Dense(16 * network_width, activation="tanh", )(meta_data)
 
         dense_representation = K.concatenate([meta_data, vectors])
         dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
         n_dims = dense_representation.shape[1]
-        print("Hybrid SVDpp: dense shape = ", dense_representation.shape, ", Meta Data Shape= ", meta_data.shape, ", vector shape =",vectors.shape, ", N_dims = ", n_dims,)
+        print("Hybrid SVDpp: dense shape = ", dense_representation.shape, ", Meta Data Shape= ", meta_data.shape,
+              ", vector shape =", vectors.shape, ", N_dims = ", n_dims, )
 
         for i in range(network_depth):
             dense_representation = keras.layers.Dense(n_dims, activation="tanh",
@@ -333,7 +337,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
             dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
             dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
 
-        dense_representation = keras.layers.Dense(int(n_dims/2), activation="tanh",
+        dense_representation = keras.layers.Dense(int(n_dims / 2), activation="tanh",
                                                   kernel_regularizer=keras.regularizers.l1_l2(l1=kernel_l1,
                                                                                               l2=kernel_l2),
                                                   activity_regularizer=keras.regularizers.l1_l2(l1=activity_l1,
@@ -393,6 +397,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
         svd_uv = self.prediction_artifacts["svd_uv"]
         svd_iv = self.prediction_artifacts["svd_iv"]
+        batch_size = self.prediction_artifacts["batch_size"]
 
         def generate_prediction_samples(affinities: List[Tuple[str, str]],
                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
@@ -415,19 +420,11 @@ class HybridRecommenderSVDpp(HybridRecommender):
                     user_svd = svd_uv[user]
                     item_svd = svd_iv[item]
 
-                    user_content = user_content.reshape((-1, len(user_content)))
-                    item_content = user_content.reshape((-1, len(item_content)))
-                    user_collab = user_content.reshape((-1, len(user_collab)))
-                    item_collab = user_content.reshape((-1, len(item_collab)))
-
-                    user_svd = user_svd.reshape((-1, len(user_svd)))
-                    item_svd = item_svd.reshape((-1, len(item_svd)))
-
                     ratings_by_user = np.log1p((ratings_count_by_user[i] + 10.0) / 10.0)
                     ratings_by_item = np.log1p((ratings_count_by_item[j] + 10.0) / 10.0)
-                    yield [np.array([user_idx], dtype=int), np.array([item_idx], dtype=int),
-                           user_content, item_content, user_collab, item_collab, user_svd, item_svd,
-                           np.array([ratings_by_user], dtype=float), np.array([ratings_by_item], dtype=float)]
+                    yield user_idx, item_idx, user_content, item_content, \
+                          user_collab, item_collab, user_svd, item_svd, \
+                          ratings_by_user, ratings_by_item
 
             return generator
 
@@ -451,16 +448,27 @@ class HybridRecommenderSVDpp(HybridRecommender):
             user_content_vectors = user_vectors
             item_content_vectors = item_vectors
 
-        datagen = generate_prediction_samples(user_item_pairs,
-                                              user_id_to_index, item_id_to_index,
-                                              user_content_vectors, item_content_vectors,
-                                              user_vectors, item_vectors, svd_uv, svd_iv,
-                                              ratings_count_by_user, ratings_count_by_item)
-
-        predictions = model.predict_generator(datagen(), steps=len(user_item_pairs)).reshape((-1))
+        n_svd_dims = svd_uv.shape[1]
+        output_shapes = (
+            (), (), self.n_content_dims, self.n_content_dims, (self.n_collaborative_dims),
+            self.n_collaborative_dims, n_svd_dims, n_svd_dims, (), ())
+        output_types = (tf.int64, tf.int64, tf.float64, tf.float64, tf.float64,
+                        tf.float64, tf.float64, tf.float64,tf.float64, tf.float64)
+        predict = tf.data.Dataset.from_generator(generate_prediction_samples(user_item_pairs,
+                                                                             user_id_to_index, item_id_to_index,
+                                                                             user_content_vectors, item_content_vectors,
+                                                                             user_vectors, item_vectors, svd_uv, svd_iv,
+                                                                             ratings_count_by_user,
+                                                                             ratings_count_by_item),
+                                                 output_types=output_types, output_shapes=output_shapes, )
+        predict = predict.batch(batch_size)
+        predictions = np.array(list(flatten([model.predict(x).reshape((-1)) for x in predict])))
+        self.log.debug("Predictions shape = %s", predictions.shape)
+        assert len(predictions) == len(user_item_pairs)
         users, items = zip(*user_item_pairs)
         predictions = inverse_fn([(u, i, r) for u, i, r in zip(users, items, predictions)])
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
-        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f", len(user_item_pairs), time.time() - start)
+        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f", len(user_item_pairs),
+                      time.time() - start)
         return predictions
