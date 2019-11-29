@@ -82,17 +82,17 @@ hyperparameters = dict(combining_factor=0.5,
 
 if check_working:
     movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
-    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(300)
+    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(500)
     movies = movies[movies["movie_id"].isin(movie_counts.movie_id)]
 
     ratings = ratings[(ratings.movie_id.isin(movie_counts.movie_id))]
 
     user_counts = ratings.groupby(["user_id"])[["movie_id"]].count().reset_index()
-    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(100)
+    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(200)
     ratings = ratings.merge(user_counts[["user_id"]], on="user_id")
     users = users[users["user_id"].isin(user_counts.user_id)]
     ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]
-    samples = min(20000, ratings.shape[0])
+    samples = min(50000, ratings.shape[0])
     ratings = ratings.sample(samples)
     print("Total Samples Taken = %s" % (ratings.shape[0]))
 
