@@ -2,6 +2,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
 import pandas as pd
 import warnings
+import os
 
 warnings.filterwarnings('ignore')
 from typing import List, Dict, Tuple, Sequence, Type, Set, Optional, Any
@@ -56,25 +57,26 @@ check_working = False  # Setting to False uses all the data
 enable_kfold = True
 enable_error_analysis = False
 kfold_multiplier = 2 if enable_kfold else 1
+verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 
 hyperparameters = dict(combining_factor=0.5,
                        collaborative_params=dict(
                            prediction_network_params=dict(lr=0.001, epochs=10 * kfold_multiplier, batch_size=512,
                                                           network_width=2,
-                                                          network_depth=2 * kfold_multiplier, verbose=0,
+                                                          network_depth=2 * kfold_multiplier, verbose=verbose,
                                                           kernel_l1=0.0, kernel_l2=0.01,
                                                           activity_l1=0.0, activity_l2=0.02,
                                                           bias_regularizer=0.1, dropout=0.2),
                            item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512, network_width=4,
-                                                 network_depth=2 * kfold_multiplier, verbose=0, kernel_l1=0.0,
+                                                 network_depth=2 * kfold_multiplier, verbose=verbose, kernel_l1=0.0,
                                                  kernel_l2=0.01,
                                                  activity_l1=0.0, activity_l2=0.0, dropout=0.2),
                            user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512, network_width=4,
-                                                 network_depth=2 * kfold_multiplier, verbose=0, kernel_l1=0.0,
+                                                 network_depth=2 * kfold_multiplier, verbose=verbose, kernel_l1=0.0,
                                                  kernel_l2=0.01,
                                                  activity_l1=0.0, activity_l2=0.0, dropout=0.2),
                            user_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512, network_width=2,
-                                                 network_depth=2 * kfold_multiplier, verbose=0, kernel_l1=0.0,
+                                                 network_depth=2 * kfold_multiplier, verbose=verbose, kernel_l1=0.0,
                                                  kernel_l2=0.01,
                                                  activity_l1=0.0, activity_l2=0.0, dropout=0.2)))
 
@@ -90,7 +92,7 @@ if check_working:
     ratings = ratings.merge(user_counts[["user_id"]], on="user_id")
     users = users[users["user_id"].isin(user_counts.user_id)]
     ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]
-    samples = min(10000, ratings.shape[0])
+    samples = min(20000, ratings.shape[0])
     ratings = ratings.sample(samples)
     print("Total Samples Taken = %s" % (ratings.shape[0]))
 
@@ -216,7 +218,7 @@ def test_once(train_affinities, validation_affinities, algo="hybrid-svdpp"):
                                               n_content_dims=16 * kfold_multiplier,
                                               n_collaborative_dims=16 * kfold_multiplier)
     elif algo == "hybrid-resnet":
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_layers"] = 4 * kfold_multiplier
+        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_layers"] = 6 * kfold_multiplier
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_width"] = 128 * kfold_multiplier
         recsys = HybridRecommenderResnet(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
                                          n_content_dims=16 * kfold_multiplier,
@@ -224,7 +226,7 @@ def test_once(train_affinities, validation_affinities, algo="hybrid-svdpp"):
 
     elif algo == "hybrid-resnet-content":
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_content_each_layer"] = True
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_layers"] = 4 * kfold_multiplier
+        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_layers"] = 6 * kfold_multiplier
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_width"] = 128 * kfold_multiplier
         recsys = HybridRecommenderResnet(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
                                          n_content_dims=16 * kfold_multiplier,
@@ -257,7 +259,7 @@ def test_once(train_affinities, validation_affinities, algo="hybrid-svdpp"):
 
 if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25)
-    recsys, results, predictions, actuals = test_once(train_affinities, validation_affinities, algo="hybrid-resnet")
+    recsys, results, predictions, actuals = test_once(train_affinities, validation_affinities, algo="hybrid")
     results.extend(test_surprise(train_affinities, validation_affinities))
     display_results(results)
     print(list(zip(actuals[:20], predictions[:20])))

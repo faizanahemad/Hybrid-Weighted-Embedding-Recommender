@@ -450,7 +450,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         n_svd_dims = svd_uv.shape[1]
         output_shapes = (
-            (), (), self.n_content_dims, self.n_content_dims, (self.n_collaborative_dims),
+            (), (), self.n_content_dims, self.n_content_dims, self.n_collaborative_dims,
             self.n_collaborative_dims, n_svd_dims, n_svd_dims, (), ())
         output_types = (tf.int64, tf.int64, tf.float64, tf.float64, tf.float64,
                         tf.float64, tf.float64, tf.float64,tf.float64, tf.float64)
