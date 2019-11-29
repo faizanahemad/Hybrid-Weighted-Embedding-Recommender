@@ -88,7 +88,7 @@ if check_working:
     ratings = ratings[(ratings.movie_id.isin(movie_counts.movie_id))]
 
     user_counts = ratings.groupby(["user_id"])[["movie_id"]].count().reset_index()
-    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(200)
+    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(500)
     ratings = ratings.merge(user_counts[["user_id"]], on="user_id")
     users = users[users["user_id"].isin(user_counts.user_id)]
     ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]

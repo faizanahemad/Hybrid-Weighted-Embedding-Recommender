@@ -355,6 +355,18 @@ class HybridRecommender(RecommendationBase):
         activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
         bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.01
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
+        noise_augmentation = hyperparams["noise_augmentation"] if "noise_augmentation" in hyperparams else False
+
+        def rng(dims, weight):
+            if noise_augmentation:
+                r = np.random.rand(dims) if dims > 1 else np.random.rand() - 0.5
+                return weight*r
+            else:
+                return 0
+        user_content_vectors_mean = np.mean(user_content_vectors)
+        item_content_vectors_mean = np.mean(item_content_vectors)
+        user_vectors_mean = np.mean(user_vectors)
+        item_vectors_mean = np.mean(item_vectors)
 
         max_affinity = rating_scale[1]
         min_affinity = rating_scale[0]
@@ -402,10 +414,11 @@ class HybridRecommender(RecommendationBase):
                 for i, j, r in affinities:
                     user = user_id_to_index[i]
                     item = item_id_to_index[j]
-                    user_content = user_content_vectors[user]
-                    item_content = item_content_vectors[item]
-                    user_collab = user_vectors[user]
-                    item_collab = item_vectors[item]
+                    user_content = user_content_vectors[user] + rng(n_content_dims, 0.1 * user_content_vectors_mean)
+                    item_content = item_content_vectors[item] + rng(n_content_dims, 0.1 * item_content_vectors_mean)
+                    user_collab = user_vectors[user] + rng(n_collaborative_dims, 0.1 * user_vectors_mean)
+                    item_collab = item_vectors[item] + rng(n_collaborative_dims, 0.1 * item_vectors_mean)
+                    r = r + rng(1, 0.01)
 
                     ratings_by_user = np.log1p((ratings_count_by_user[i] + 10.0) / 10.0)
                     ratings_by_item = np.log1p((ratings_count_by_item[j] + 10.0) / 10.0)
