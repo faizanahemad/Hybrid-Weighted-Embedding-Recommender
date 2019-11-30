@@ -19,6 +19,7 @@ from sklearn.model_selection import train_test_split
 import nmslib
 import re
 from collections import defaultdict
+from .logging import getLogger
 
 
 def locality_preserving_dimensionality_reduction(data: np.ndarray, n_neighbors=100, max_similarity=0.1, ):
@@ -331,6 +332,8 @@ def get_mean_rating(user_item_affinities: List[Tuple[str, str, float]]) -> float
 
 def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str, float]], ) \
         -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
+    log = getLogger("normalize_affinity_scores_by_user")
+    start = time.time()
     uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
     # Calculating Biases
     mean = uid.rating.mean()
@@ -348,7 +351,7 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
     # Stochastic Gradient Descent Taken from Surprise Lib
     lr = 0.001
     reg = 0.05
-    n_epochs = 10
+    n_epochs = 5
     for dummy in range(n_epochs):
         for u, i, r in user_item_affinities:
             err = (r - (mean + bu[u]))
@@ -362,12 +365,14 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
 
     # Making final Dict
     uid = list(zip(uid['user'], uid['item'], uid['rating']))
-
+    log.debug("Calculated Biases in time = %.1f, n_sampples = %s" % (time.time() - start, len(user_item_affinities)))
     return mean, bu, bi, spread, uid
 
 
 def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str, str, float]], ) \
         -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
+    log = getLogger("normalize_affinity_scores_by_user_item")
+    start = time.time()
     uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
     # Calculating Biases
     mean = uid.rating.mean()
@@ -394,7 +399,7 @@ def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str,
     # Stochastic Gradient Descent Taken from Surprise Lib
     lr = 0.001
     reg = 0.05
-    n_epochs = 10
+    n_epochs = 5
     for dummy in range(n_epochs):
         for u, i, r in user_item_affinities:
             err = (r - (mean + bu[u] + bi[i]))
@@ -409,7 +414,7 @@ def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str,
 
     # Making final Dict
     uid = list(zip(uid['user'], uid['item'], uid['rating']))
-
+    log.debug("Calculated Biases in time = %.1f, n_sampples = %s" %(time.time() - start, len(user_item_affinities)))
     return mean, bu, bi, spread, uid
 
 

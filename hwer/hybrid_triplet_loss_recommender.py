@@ -304,10 +304,10 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
                         else:
                             if (choose_user_pair and j in item_close_dict) or i not in user_close_dict:
                                 second_item, close_item_weight = item_close_dict[j][np.random.randint(0, len(item_close_dict[j]))]
-                                second_item = total_users + user_id_to_index[second_item]
+                                second_item = user_id_to_index[second_item]
                             else:
                                 second_item, close_item_weight = user_close_dict[i][np.random.randint(0, len(user_close_dict[i]))]
-                                second_item = item_id_to_index[second_item]
+                                second_item = total_users + item_id_to_index[second_item]
                     else:
                         close_item_weight = r
                         if choose_random_pair or (i not in user_far_dict and j not in item_far_dict):
@@ -315,10 +315,10 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
                         else:
                             if (choose_user_pair and j in item_far_dict) or i not in user_far_dict:
                                 distant_item, distant_item_weight = item_far_dict[j][np.random.randint(0, len(item_far_dict[j]))]
-                                distant_item = total_users + user_id_to_index[distant_item]
+                                distant_item = user_id_to_index[distant_item]
                             else:
                                 distant_item, distant_item_weight = user_far_dict[i][np.random.randint(0, len(user_far_dict[i]))]
-                                distant_item = item_id_to_index[distant_item]
+                                distant_item = total_users + item_id_to_index[distant_item]
 
                     yield (user, second_item, distant_item, close_item_weight, distant_item_weight), r
             return generator

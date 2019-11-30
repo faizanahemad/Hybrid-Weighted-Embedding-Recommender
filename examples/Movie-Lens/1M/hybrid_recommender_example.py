@@ -61,7 +61,7 @@ verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 
 hyperparameters = dict(combining_factor=0.5,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.001, epochs=10 * kfold_multiplier, batch_size=512,
+                           prediction_network_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                           network_width=2,
                                                           network_depth=2 * kfold_multiplier, verbose=verbose,
                                                           kernel_l1=0.0, kernel_l2=0.01,
@@ -75,7 +75,7 @@ hyperparameters = dict(combining_factor=0.5,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose, kernel_l1=0.0,
                                                  kernel_l2=0.01,
                                                  activity_l1=0.0, activity_l2=0.0, dropout=0.2),
-                           user_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512, network_width=2,
+                           user_item_params=dict(lr=0.001, epochs=2 * kfold_multiplier, batch_size=512, network_width=2,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose, kernel_l1=0.0,
                                                  kernel_l2=0.01,
                                                  activity_l1=0.0, activity_l2=0.0, dropout=0.2)))
@@ -94,7 +94,8 @@ if check_working:
     ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]
     samples = min(50000, ratings.shape[0])
     ratings = ratings.sample(samples)
-    print("Total Samples Taken = %s" % (ratings.shape[0]))
+
+print("Total Samples Taken = %s" % (ratings.shape[0]))
 
 user_item_affinities = [(row[0], row[1], row[2]) for row in ratings.values]
 users_for_each_rating = [row[0] for row in ratings.values]
@@ -180,12 +181,12 @@ def test_once(train_affinities, validation_affinities, algo="hybrid-svdpp"):
     embedding_mapper = {}
     embedding_mapper['gender'] = CategoricalEmbedding(n_dims=2)
     embedding_mapper['age'] = CategoricalEmbedding(n_dims=2)
-    embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=4)
-    embedding_mapper['zip'] = CategoricalEmbedding(n_dims=2)
+    embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=4*kfold_multiplier)
+    embedding_mapper['zip'] = CategoricalEmbedding(n_dims=2*kfold_multiplier)
 
     embedding_mapper['text'] = FlairGlove100Embedding()
-    embedding_mapper['numeric'] = NumericEmbedding(4)
-    embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
+    embedding_mapper['numeric'] = NumericEmbedding(4*kfold_multiplier)
+    embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4*kfold_multiplier)
 
     u1 = Feature(feature_name="gender", feature_type=FeatureType.CATEGORICAL, values=users.gender.values)
     u2 = Feature(feature_name="age", feature_type=FeatureType.CATEGORICAL, values=users.age.astype(str).values)
@@ -207,30 +208,30 @@ def test_once(train_affinities, validation_affinities, algo="hybrid-svdpp"):
 
     if algo == "hybrid-svdpp":
         recsys = HybridRecommenderSVDpp(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                        n_content_dims=16 * kfold_multiplier,
-                                        n_collaborative_dims=16 * kfold_multiplier)
+                                        n_content_dims=32 * kfold_multiplier,
+                                        n_collaborative_dims=32 * kfold_multiplier)
     elif algo == "hybrid":
         recsys = HybridRecommender(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                   n_content_dims=16 * kfold_multiplier,
-                                   n_collaborative_dims=16 * kfold_multiplier)
+                                   n_content_dims=32 * kfold_multiplier,
+                                   n_collaborative_dims=32 * kfold_multiplier)
     elif algo == "hybrid-triplet":
         recsys = HybridRecommenderTripletLoss(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                              n_content_dims=16 * kfold_multiplier,
-                                              n_collaborative_dims=16 * kfold_multiplier)
+                                              n_content_dims=32 * kfold_multiplier,
+                                              n_collaborative_dims=32 * kfold_multiplier)
     elif algo == "hybrid-resnet":
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_layers"] = 6 * kfold_multiplier
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_width"] = 128 * kfold_multiplier
         recsys = HybridRecommenderResnet(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                         n_content_dims=16 * kfold_multiplier,
-                                         n_collaborative_dims=16 * kfold_multiplier)
+                                         n_content_dims=32 * kfold_multiplier,
+                                         n_collaborative_dims=32 * kfold_multiplier)
 
     elif algo == "hybrid-resnet-content":
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_content_each_layer"] = True
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_layers"] = 6 * kfold_multiplier
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_width"] = 128 * kfold_multiplier
         recsys = HybridRecommenderResnet(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
-                                         n_content_dims=16 * kfold_multiplier,
-                                         n_collaborative_dims=16 * kfold_multiplier)
+                                         n_content_dims=32 * kfold_multiplier,
+                                         n_collaborative_dims=32 * kfold_multiplier)
     else:
         raise ValueError()
     start = time.time()
