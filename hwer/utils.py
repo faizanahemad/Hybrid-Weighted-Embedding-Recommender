@@ -523,3 +523,12 @@ class RatingPredRegularization(keras.layers.Layer):
         config = {'l1': self.l1, 'l2': self.l2}
         base_config = super(RatingPredRegularization, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+
+def get_rng(noise_augmentation):
+    if noise_augmentation:
+        def rng(dims, weight):
+            r = np.random.rand(dims) if dims > 1 else np.random.rand() - 0.5
+            return weight * r
+        return rng
+    return lambda dims, weight: np.zeros(dims) if dims > 1 else 0

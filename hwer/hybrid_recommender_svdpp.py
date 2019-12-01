@@ -27,7 +27,7 @@ import fasttext
 from .recommendation_base import EntityType
 from .content_recommender import ContentRecommendation
 from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
-    normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, RatingPredRegularization
+    normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, RatingPredRegularization, get_rng
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
@@ -47,6 +47,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         self.log = getLogger(type(self).__name__)
 
     def __build_svd_model__(self, user_item_affinities, svdpp, rating_scale, user_ids, item_ids, n_folds=1):
+        start = time.time()
         models = []
         svd_uv, svd_iv = None, None
         affinities = []
@@ -114,7 +115,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
                 affinities.extend(validation_affinities)
 
         #
-
+        assert len(models) == n_folds
+        self.log.debug("Training %s SVD Models in time = %.1f", len(models), time.time() - start)
         return models, svd_uv, svd_iv, affinities
 
     def __build_dataset__(self, user_ids: List[str], item_ids: List[str],
@@ -132,18 +134,11 @@ class HybridRecommenderSVDpp(HybridRecommender):
         min_affinity = rating_scale[0]
 
         noise_augmentation = hyperparams["noise_augmentation"] if "noise_augmentation" in hyperparams else False
-
-        def rng(dims, weight):
-            if noise_augmentation:
-                r = np.random.rand(dims) if dims > 1 else np.random.rand() - 0.5
-                return weight * r
-            return 0
-
+        rng = get_rng(noise_augmentation)
         user_content_vectors_mean = np.mean(user_content_vectors)
         item_content_vectors_mean = np.mean(item_content_vectors)
         user_vectors_mean = np.mean(user_vectors)
         item_vectors_mean = np.mean(item_vectors)
-
 
         models, svd_uv, svd_iv, user_item_affinities = self.__build_svd_model__(
             user_item_affinities, svdpp, rating_scale, user_ids, item_ids, n_svd_folds)
@@ -162,16 +157,12 @@ class HybridRecommenderSVDpp(HybridRecommender):
         mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item(user_item_affinities)
 
         def inverse_fn(user_item_predictions):
-            def inner(r):
-                rscaled = ((r + 1) / 2) * (max_affinity - min_affinity) + min_affinity
-                return rscaled
-
-            rscaled = np.array([inner(r) for u, i, r in user_item_predictions])
+            rscaled = np.array([r for u, i, r in user_item_predictions])
+            rscaled = ((rscaled + 1) / 2) * (max_affinity - min_affinity) + min_affinity
             svd_predictions = np.array(
                 [[model.predict(u, i).est for model in models] for u, i, r in
                  user_item_predictions])
             svd_predictions = np.array(svd_predictions).mean(axis=1)
-            # we can plot
             return rscaled + svd_predictions
 
         user_bias = np.array([user_bias[u] if u in user_bias else np.random.rand() * 0.01 for u in user_ids])
@@ -218,8 +209,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                                     output_types=output_types,
                                                     output_shapes=output_shapes, )
 
-        train = train.shuffle(batch_size).batch(batch_size)
-        validation = validation.shuffle(batch_size).batch(batch_size)
+        train = train.shuffle(batch_size).batch(batch_size).prefetch(16)
+        validation = validation.shuffle(batch_size).batch(batch_size).prefetch(16)
         return mu, user_bias, item_bias, inverse_fn, train, validation, n_svd_dims, ratings_count_by_user, ratings_count_by_item, svd_uv, svd_iv
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
@@ -258,6 +249,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                                 user_vectors, item_vectors,
                                                 user_id_to_index, item_id_to_index,
                                                 rating_scale, hyperparams)
+        assert svd_uv.shape[1] == svd_iv.shape[1] == n_svd_dims
+        self.log.debug("DataSet Built with n_svd_dims = %s", n_svd_dims)
         input_user = keras.Input(shape=(1,))
         input_item = keras.Input(shape=(1,))
 
@@ -395,7 +388,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
 
-        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size)
+        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size).prefetch(16)
         model.fit(full_dataset, epochs=1, verbose=verbose)
         # print("Train Loss = ", model.evaluate(train), "validation Loss = ", model.evaluate(validation))
 
@@ -478,14 +471,15 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                                                              ratings_count_by_user,
                                                                              ratings_count_by_item),
                                                  output_types=output_types, output_shapes=output_shapes, )
-        predict = predict.batch(batch_size)
+        predict = predict.batch(batch_size).prefetch(16)
         predictions = np.array(list(flatten([model.predict(x).reshape((-1)) for x in predict])))
         self.log.debug("Predictions shape = %s", predictions.shape)
         assert len(predictions) == len(user_item_pairs)
         users, items = zip(*user_item_pairs)
+        invert_start = time.time()
         predictions = inverse_fn([(u, i, r) for u, i, r in zip(users, items, predictions)])
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
-        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f", len(user_item_pairs),
-                      time.time() - start)
+        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f, Invert time = %.1f", len(user_item_pairs),
+                      time.time() - start, time.time() - invert_start)
         return predictions

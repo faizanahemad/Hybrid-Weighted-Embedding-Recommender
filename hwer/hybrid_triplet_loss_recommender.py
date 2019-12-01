@@ -134,8 +134,8 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
         validation = tf.data.Dataset.from_generator(generate_training_samples(validation_affinities),
                                                     output_types=output_types,
                                                     output_shapes=output_shapes, )
-        train = train.shuffle(batch_size).batch(batch_size)
-        validation = validation.shuffle(batch_size).batch(batch_size)
+        train = train.shuffle(batch_size).batch(batch_size).prefetch(16)
+        validation = validation.shuffle(batch_size).batch(batch_size).prefetch(16)
 
         input_1 = keras.Input(shape=(1,))
         input_2 = keras.Input(shape=(1,))
@@ -218,7 +218,7 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
         self.log.debug("End Training Entity Affinities")
 
         return encoder.predict(
-            tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size))
+            tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size).prefetch(16))
 
     def __user_item_affinities_trainer__(self,
                                          user_ids: List[str], item_ids: List[str],
@@ -332,8 +332,8 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
                                                     output_types=output_types,
                                                     output_shapes=output_shapes, )
 
-        train = train.shuffle(batch_size).batch(batch_size)
-        validation = validation.shuffle(batch_size).batch(batch_size)
+        train = train.shuffle(batch_size).batch(batch_size).prefetch(16)
+        validation = validation.shuffle(batch_size).batch(batch_size).prefetch(16)
 
         def build_base_network(embedding_size, n_output_dims, vectors):
             avg_value = np.mean(vectors)
@@ -412,8 +412,8 @@ class HybridRecommenderTripletLoss(HybridRecommenderSVDpp):
                   validation_data=train, callbacks=callbacks, verbose=verbose)
 
         user_vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size))
+            tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
         item_vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(batch_size))
+            tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(batch_size).prefetch(16))
         self.log.debug("End Training User-Item Affinities")
         return user_vectors, item_vectors

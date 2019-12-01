@@ -27,7 +27,7 @@ from .recommendation_base import EntityType
 from .content_recommender import ContentRecommendation
 from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
     normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, UnitLengthRegularizer, \
-    UnitLengthRegularization, RatingPredRegularization
+    UnitLengthRegularization, RatingPredRegularization, get_rng
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
@@ -88,8 +88,8 @@ class HybridRecommender(RecommendationBase):
         validation = tf.data.Dataset.from_generator(generate_training_samples(validation_affinities),
                                                     output_types=output_types,
                                                     output_shapes=output_shapes, )
-        train = train.shuffle(batch_size).batch(batch_size)
-        validation = validation.shuffle(batch_size).batch(batch_size)
+        train = train.shuffle(batch_size).batch(batch_size).prefetch(16)
+        validation = validation.shuffle(batch_size).batch(batch_size).prefetch(16)
 
         input_1 = keras.Input(shape=(1,))
         input_2 = keras.Input(shape=(1,))
@@ -166,7 +166,7 @@ class HybridRecommender(RecommendationBase):
         self.log.debug("End Training Entity Affinities")
 
         return encoder.predict(
-            tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size))
+            tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size).prefetch(16))
 
     def __build_collaborative_embeddings__(self, user_item_affinities: List[Tuple[str, str, float]],
                                            item_item_affinities: List[Tuple[str, str, bool]],
@@ -327,9 +327,9 @@ class HybridRecommender(RecommendationBase):
                   validation_data=train, callbacks=callbacks, verbose=verbose)
 
         user_vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size))
+            tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
         item_vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(batch_size))
+            tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(batch_size).prefetch(16))
         self.log.debug("End Training User-Item Affinities")
         return user_vectors, item_vectors
 
@@ -357,12 +357,7 @@ class HybridRecommender(RecommendationBase):
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
         noise_augmentation = hyperparams["noise_augmentation"] if "noise_augmentation" in hyperparams else False
 
-        def rng(dims, weight):
-            if noise_augmentation:
-                r = np.random.rand(dims) if dims > 1 else np.random.rand() - 0.5
-                return weight*r
-            else:
-                return 0
+        rng = get_rng(noise_augmentation)
         user_content_vectors_mean = np.mean(user_content_vectors)
         item_content_vectors_mean = np.mean(item_content_vectors)
         user_vectors_mean = np.mean(user_vectors)
@@ -440,8 +435,8 @@ class HybridRecommender(RecommendationBase):
                                                     output_types=output_types,
                                                     output_shapes=output_shapes, )
 
-        train = train.shuffle(batch_size).batch(batch_size)
-        validation = validation.shuffle(batch_size).batch(batch_size)
+        train = train.shuffle(batch_size).batch(batch_size).prefetch(16)
+        validation = validation.shuffle(batch_size).batch(batch_size).prefetch(16)
 
         input_user = keras.Input(shape=(1,))
         input_item = keras.Input(shape=(1,))
@@ -558,7 +553,7 @@ class HybridRecommender(RecommendationBase):
 
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
-        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size)
+        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size).prefetch(16)
         model.fit(full_dataset, epochs=1, verbose=verbose)
         # print("Train Loss = ",model.evaluate(train), "validation Loss = ", model.evaluate(validation))
 
@@ -716,15 +711,17 @@ class HybridRecommender(RecommendationBase):
                                                                              ratings_count_by_user,
                                                                              ratings_count_by_item),
                                                  output_types=output_types, output_shapes=output_shapes, )
-        predict = predict.batch(batch_size)
+        predict = predict.batch(batch_size).prefetch(16)
         predictions = np.array(list(flatten([model.predict(x).reshape((-1)) for x in predict])))
 
         users, items = zip(*user_item_pairs)
+        invert_start = time.time()
         predictions = inverse_fn([(u, i, r) for u, i, r in zip(users, items, predictions)])
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
-        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f", len(user_item_pairs),
-                      time.time() - start)
+        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f, Invert time = %.1f",
+                      len(user_item_pairs),
+                      time.time() - start, time.time() - invert_start)
         return predictions
 
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,

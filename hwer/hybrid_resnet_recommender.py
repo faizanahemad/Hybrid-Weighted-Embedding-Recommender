@@ -213,7 +213,7 @@ class HybridRecommenderResnet(HybridRecommenderSVDpp):
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=callbacks, verbose=verbose)
 
-        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size)
+        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size).prefetch(16)
         model.fit(full_dataset, epochs=1, verbose=verbose)
         # print("Train Loss = ", model.evaluate(train), "validation Loss = ", model.evaluate(validation))
 
