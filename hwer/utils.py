@@ -66,9 +66,11 @@ def unit_length(a, axis=0):
 
 def unit_length_violations(a, axis=0, epsilon=1e-2):
     vector_lengths = np.expand_dims(norm(a, axis=axis), axis=axis)
-    violations = np.sum(vector_lengths > 1 + epsilon) + np.sum(vector_lengths < 1 - epsilon)
+    positive_violations = np.sum(vector_lengths > 1 + epsilon)
+    negative_violations = np.sum(vector_lengths < 1 - epsilon)
+    violations = positive_violations + negative_violations
     violation_mean = np.mean(np.abs(vector_lengths - 1))
-    return violations,violation_mean
+    return violations, violation_mean, positive_violations, negative_violations
 
 
 def shuffle_copy(*args):

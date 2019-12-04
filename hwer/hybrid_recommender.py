@@ -186,6 +186,8 @@ class HybridRecommender(RecommendationBase):
             "random_negative_weight"] if "random_negative_weight" in hyperparams else 0.2
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.1
 
+        aff_range = np.max([r for u1, u2, r in entity_entity_affinities]) - np.min([r for u1, u2, r in entity_entity_affinities])
+
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             item_close_dict = {}
             item_far_dict = {}
@@ -212,13 +214,14 @@ class HybridRecommender(RecommendationBase):
                     else:
                         item_far_dict[j] = [(i, r)]
             total_items = len(entity_ids)
+            triplet_wt_fn = lambda x: 1 + np.log1p(np.abs(x/aff_range))
 
             def generator():
                 for i, j, r in affinities:
                     first_item = entity_id_to_index[i]
                     second_item = entity_id_to_index[j]
                     random_item = entity_id_to_index[entity_ids[np.random.randint(0, total_items)]]
-                    choose_random_pair = np.random.rand() < random_pair_proba
+                    choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba/10)
                     if r < 0:
                         distant_item = second_item
                         distant_item_weight = r
@@ -239,7 +242,8 @@ class HybridRecommender(RecommendationBase):
                             distant_item, distant_item_weight = item_far_dict[i][
                                 np.random.randint(0, len(item_far_dict[i]))]
                             distant_item = entity_id_to_index[distant_item]
-
+                    close_item_weight = triplet_wt_fn(close_item_weight)
+                    distant_item_weight = triplet_wt_fn(distant_item_weight)
                     yield (first_item, second_item, distant_item, close_item_weight, distant_item_weight), 0
 
             return generator
@@ -527,8 +531,8 @@ class HybridRecommender(RecommendationBase):
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.25
         random_pair_user_item_proba = hyperparams["random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.2
-        random_positive_weight = hyperparams["random_positive_weight"] if "random_positive_weight" in hyperparams else 0.05
-        random_negative_weight = hyperparams["random_negative_weight"] if "random_negative_weight" in hyperparams else 0.2
+        random_positive_weight = hyperparams["random_positive_weight"] if "random_positive_weight" in hyperparams else 0.1
+        random_negative_weight = hyperparams["random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.1
 
         # max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
@@ -543,6 +547,8 @@ class HybridRecommender(RecommendationBase):
         train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.5)
         total_users = len(user_ids)
         total_items = len(item_ids)
+        aff_range = np.max([r for u1, u2, r in user_item_affinities]) - np.min(
+            [r for u1, u2, r in user_item_affinities])
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             user_close_dict = {}
@@ -572,13 +578,15 @@ class HybridRecommender(RecommendationBase):
                     else:
                         item_far_dict[j] = [(i, r)]
 
+            triplet_wt_fn = lambda x: 1 + np.log1p(np.abs(x / aff_range))
+
             def generator():
                 for i, j, r in affinities:
                     user = user_id_to_index[i]
                     second_item = total_users + item_id_to_index[j]
                     random_item = total_users + item_id_to_index[item_ids[np.random.randint(0, total_items)]]
                     random_user = user_id_to_index[user_ids[np.random.randint(0, total_users)]]
-                    choose_random_pair = np.random.rand() < random_pair_proba
+                    choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba/10)
                     choose_user_pair = np.random.rand() < random_pair_user_item_proba
                     if r < 0:
                         distant_item = second_item
@@ -605,6 +613,8 @@ class HybridRecommender(RecommendationBase):
                                 distant_item, distant_item_weight = user_far_dict[i][np.random.randint(0, len(user_far_dict[i]))]
                                 distant_item = total_users + item_id_to_index[distant_item]
 
+                    close_item_weight = triplet_wt_fn(close_item_weight)
+                    distant_item_weight = triplet_wt_fn(distant_item_weight)
                     yield (user, second_item, distant_item, close_item_weight, distant_item_weight), 0
             return generator
 
@@ -662,11 +672,11 @@ class HybridRecommender(RecommendationBase):
 
         i1_i2_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
         i1_i2_dist = 1 - i1_i2_dist
-        # i1_i2_dist = close_weight * i1_i2_dist
+        i1_i2_dist = close_weight * i1_i2_dist
 
         i1_i3_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_3])
         i1_i3_dist = 1 - i1_i3_dist
-        # i1_i3_dist = i1_i3_dist / K.abs(far_weight)
+        i1_i3_dist = i1_i3_dist / K.abs(far_weight)
 
         loss = K.relu(i1_i2_dist - i1_i3_dist + margin)
         model = keras.Model(inputs=[input_1, input_2, input_3, close_weight, far_weight],
