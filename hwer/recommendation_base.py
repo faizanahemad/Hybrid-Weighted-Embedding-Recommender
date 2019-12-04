@@ -9,7 +9,8 @@ from bidict import bidict
 from enum import Enum
 from collections import defaultdict
 import math
-from .utils import normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, get_mean_rating
+from .utils import normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, get_mean_rating, \
+    unit_length
 from .utils import is_num, is_1d_array, is_2d_array
 
 
@@ -130,7 +131,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         n_neighbors = self.knn_params["n_neighbors"]
         index_time_params = self.knn_params["index_time_params"]
-
+        user_vectors = unit_length(user_vectors, axis=1)
+        item_vectors = unit_length(item_vectors, axis=1)
         user_knn = hnswlib.Index(space='cosine', dim=self.n_output_dims)
         user_knn.init_index(max_elements=len(user_ids)*2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])

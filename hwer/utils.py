@@ -64,6 +64,13 @@ def unit_length(a, axis=0):
     return a / np.expand_dims(norm(a, axis=axis), axis=axis)
 
 
+def unit_length_violations(a, axis=0, epsilon=1e-2):
+    vector_lengths = np.expand_dims(norm(a, axis=axis), axis=axis)
+    violations = np.sum(vector_lengths > 1 + epsilon) + np.sum(vector_lengths < 1 - epsilon)
+    violation_mean = np.mean(np.abs(vector_lengths - 1))
+    return violations,violation_mean
+
+
 def shuffle_copy(*args):
     rng_state = np.random.get_state()
     results = []
@@ -435,6 +442,7 @@ def is_2d_array(x):
 
 
 unit_length = repeat_args_wrapper(unit_length)
+unit_length_violations = repeat_args_wrapper(unit_length_violations)
 average_precision = average_precision_v2
 
 
@@ -481,23 +489,28 @@ class UnitLengthRegularization(keras.layers.Layer):
         return dict(list(base_config.items()) + list(config.items()))
 
 
-
 class RatingPredRegularizer(keras.regularizers.Regularizer):
-    """Regularizer for Making Vectors Unit Length.
-    Arguments:
-      l1: Float; L1 regularization factor.
-      l2: Float; L2 regularization factor.
-    """
+    def __init__(self, max_r=1.0, min_r=-1.0, l1=0., l2=0.):  # pylint: disable=redefined-outer-name
+        """
+        Regularize Predictions for keeping in a specific range
 
-    def __init__(self, l1=0., l2=0.):  # pylint: disable=redefined-outer-name
+        :param max_r:
+        :param min_r:
+        :param l1:
+        :param l2:
+        """
         self.l1 = K.cast_to_floatx(l1)
         self.l2 = K.cast_to_floatx(l2)
+        self.max_r = max_r
+        self.min_r = min_r
 
     def __call__(self, x):
         if not self.l1 and not self.l2:
             return K.constant(0.)
         regularization = 0.
-        x = K.sum(K.relu(K.square(x) - 1))
+        x1 = K.clip(x, np.NINF, self.min_r)
+        x2 = K.clip(x, self.max_r, np.Inf)
+        x = K.sum(K.square(x2 - self.max_r)) + K.sum(K.square(x1 - self.min_r))
         if self.l1:
             regularization += self.l1 * K.abs(x)
         if self.l2:
@@ -509,9 +522,9 @@ class RatingPredRegularizer(keras.regularizers.Regularizer):
 
 
 class RatingPredRegularization(keras.layers.Layer):
-    def __init__(self, l1=0., l2=0., **kwargs):
+    def __init__(self, max_r=1.0, min_r=-1.0, l1=0., l2=0., **kwargs):
         super(RatingPredRegularization, self).__init__(
-            activity_regularizer=RatingPredRegularizer(l1=l1, l2=l2), **kwargs)
+            activity_regularizer=RatingPredRegularizer(max_r=max_r, min_r=min_r, l1=l1, l2=l2), **kwargs)
         self.supports_masking = True
         self.l1 = l1
         self.l2 = l2
