@@ -27,7 +27,8 @@ import fasttext
 from .recommendation_base import EntityType
 from .content_recommender import ContentRecommendation
 from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
-    normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, RatingPredRegularization, get_rng
+    normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, RatingPredRegularization, get_rng, \
+    LRSchedule
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
@@ -346,7 +347,6 @@ class HybridRecommenderSVDpp(HybridRecommender):
         ratings_by_user = input_5
         ratings_by_item = input_6
 
-
         vectors = [user_content, item_content, user_collab, item_collab]
         counts_data = keras.layers.Dense(8, activation="tanh")(K.concatenate([ratings_by_user, ratings_by_item]))
         meta_data = [counts_data, user_item_content_similarity, user_item_collab_similarity, item_bias, user_bias]
@@ -403,29 +403,22 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         model = keras.Model(inputs=inputs, outputs=[rating])
 
-        adam = tf.keras.optimizers.Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.01, amsgrad=False)
-        model.compile(optimizer=adam,
+        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
+        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
+        model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=2, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
-
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks, verbose=verbose)
+                  validation_data=validation, callbacks=[], verbose=verbose)
 
-        K.set_value(model.optimizer.lr, lr)
-
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=2, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
+        learning_rate.step = 0
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks, verbose=verbose)
+                  validation_data=train, callbacks=[], verbose=verbose)
 
         full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size).prefetch(16)
+        learning_rate.step = 0
+        learning_rate.epochs = 1
         model.fit(full_dataset, epochs=1, verbose=verbose)
         # print("Train Loss = ", model.evaluate(train), "validation Loss = ", model.evaluate(validation))
 

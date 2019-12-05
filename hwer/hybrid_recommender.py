@@ -29,7 +29,7 @@ from .recommendation_base import EntityType
 from .content_recommender import ContentRecommendation
 from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
     normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, UnitLengthRegularizer, \
-    UnitLengthRegularization, RatingPredRegularization, get_rng, unit_length_violations
+    UnitLengthRegularization, RatingPredRegularization, get_rng, unit_length_violations, LRSchedule
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
@@ -59,6 +59,11 @@ class HybridRecommender(RecommendationBase):
                                              hyperparams: Dict) -> np.ndarray:
         self.log.debug("Start Training Entity Affinities, n_entities = %s, n_samples = %s, in_dims = %s, out_dims = %s",
                        len(entity_ids), len(entity_entity_affinities), vectors.shape, n_output_dims)
+        ratings = np.array([r for u, i, r in entity_entity_affinities])
+        min_affinity = np.min(ratings)
+        max_affinity = np.max(ratings)
+        entity_entity_affinities = [(u, i, (2 * 0.9* (r - min_affinity) / (max_affinity - min_affinity)) - 0.9) for u, i, r in
+                                    entity_entity_affinities]
         train_affinities, validation_affinities = train_test_split(entity_entity_affinities, test_size=0.5)
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
@@ -133,27 +138,17 @@ class HybridRecommender(RecommendationBase):
                             outputs=[pred])
         encoder = bn
 
-        adam = tf.keras.optimizers.Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.01, amsgrad=False)
-        model.compile(optimizer=adam,
+        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(entity_entity_affinities))
+        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
+        model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=3, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
-
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks, verbose=verbose)
+                  validation_data=validation, callbacks=[], verbose=verbose)
 
-        K.set_value(model.optimizer.lr, lr)
-
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=3, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
-
+        learning_rate.step = 0
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks, verbose=verbose)
+                  validation_data=train, callbacks=[], verbose=verbose)
 
         vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size).prefetch(16))
@@ -187,6 +182,8 @@ class HybridRecommender(RecommendationBase):
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.1
 
         aff_range = np.max([r for u1, u2, r in entity_entity_affinities]) - np.min([r for u1, u2, r in entity_entity_affinities])
+        random_positive_weight = random_positive_weight * aff_range
+        random_negative_weight = random_negative_weight * aff_range
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             item_close_dict = {}
@@ -273,8 +270,6 @@ class HybridRecommender(RecommendationBase):
             embeddings_initializer = tf.keras.initializers.Constant(vectors)
             embeddings = keras.layers.Embedding(len(entity_ids), embedding_size, input_length=1,
                                                 embeddings_initializer=embeddings_initializer)
-            # embeddings_constraint=FixedNorm()
-            # embeddings_constraint=tf.keras.constraints.unit_norm(axis=2)
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
@@ -313,28 +308,18 @@ class HybridRecommender(RecommendationBase):
         model = keras.Model(inputs=[input_1, input_2, input_3, close_weight, far_weight],
                             outputs=[loss])
         encoder = bn
-
-        adam = tf.keras.optimizers.Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.01, amsgrad=False)
-        model.compile(optimizer=adam,
+        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(entity_entity_affinities))
+        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
+        model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=3, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
-
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks, verbose=verbose)
+                  validation_data=validation, callbacks=[], verbose=verbose)
 
-        K.set_value(model.optimizer.lr, lr)
-
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=3, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
+        learning_rate.step = 0
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks, verbose=verbose)
+                  validation_data=train, callbacks=[], verbose=verbose)
 
         vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size).prefetch(
@@ -482,27 +467,18 @@ class HybridRecommender(RecommendationBase):
         model = keras.Model(inputs=[input_1, input_2],
                             outputs=[pred])
         encoder = bn
-        adam = tf.keras.optimizers.Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.01, amsgrad=False)
-        model.compile(optimizer=adam,
+        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
+        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
+        model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=3, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
-
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks, verbose=verbose)
+                  validation_data=validation, callbacks=[], verbose=verbose)
 
-        K.set_value(model.optimizer.lr, lr)
-
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=3, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
+        learning_rate.step = 0
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks, verbose=verbose)
+                  validation_data=train, callbacks=[], verbose=verbose)
 
         user_vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
@@ -531,8 +507,8 @@ class HybridRecommender(RecommendationBase):
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.25
         random_pair_user_item_proba = hyperparams["random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.2
-        random_positive_weight = hyperparams["random_positive_weight"] if "random_positive_weight" in hyperparams else 0.1
-        random_negative_weight = hyperparams["random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
+        random_positive_weight = hyperparams["random_positive_weight"] if "random_positive_weight" in hyperparams else 0.05
+        random_negative_weight = hyperparams["random_negative_weight"] if "random_negative_weight" in hyperparams else 0.2
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.1
 
         # max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
@@ -549,6 +525,8 @@ class HybridRecommender(RecommendationBase):
         total_items = len(item_ids)
         aff_range = np.max([r for u1, u2, r in user_item_affinities]) - np.min(
             [r for u1, u2, r in user_item_affinities])
+        random_positive_weight = random_positive_weight * aff_range
+        random_negative_weight = random_negative_weight * aff_range
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             user_close_dict = {}
@@ -683,27 +661,18 @@ class HybridRecommender(RecommendationBase):
                             outputs=[loss])
 
         encoder = bn
-        adam = tf.keras.optimizers.Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.01, amsgrad=False)
-        model.compile(optimizer=adam,
+        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
+        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
+        model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=3, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
-
         model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=callbacks, verbose=verbose)
+                  validation_data=validation, callbacks=[], verbose=verbose)
 
-        K.set_value(model.optimizer.lr, lr)
-
-        es = tf.keras.callbacks.EarlyStopping(monitor='val_mean_squared_error', min_delta=0.0, patience=3, verbose=0,
-                                              restore_best_weights=True)
-        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='val_mean_squared_error', factor=0.2, patience=1, min_lr=0.0001)
-        callbacks = [es, reduce_lr]
+        learning_rate.step = 0
 
         model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=callbacks, verbose=verbose)
+                  validation_data=train, callbacks=[], verbose=verbose)
 
         user_vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))

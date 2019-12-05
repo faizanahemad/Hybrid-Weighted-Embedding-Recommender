@@ -540,6 +540,31 @@ class RatingPredRegularization(keras.layers.Layer):
         return dict(list(base_config.items()) + list(config.items()))
 
 
+class LRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
+    def __init__(self, lr, epochs, batch_size, n_examples):
+        super(LRSchedule, self).__init__()
+        self.lr = lr
+        self.lrs = []
+        self.log = getLogger(type(self).__name__)
+        self.step = 0
+        self.dtype = tf.float64
+        self.epochs = epochs
+        self.batch_size = batch_size
+        self.n_examples = n_examples
+
+    def __call__(self, step):
+        steps_per_epoch = int(np.ceil(self.n_examples/self.batch_size))
+        total_steps = steps_per_epoch * self.epochs
+        lr = self.lr
+        # step = tf.cast(step, tf.float64)
+        # self.log.debug("Changing LR, step = %s, %s", step.eval(session=tf.compat.v1.Session()), dir(step))
+        step = self.step
+        new_lr = np.interp(float(K.eval(step)), [0, total_steps/4, total_steps - steps_per_epoch, total_steps], [lr/20, lr, lr/10, lr/100])
+        self.lrs.append(lr)
+        self.step += 1
+        return new_lr
+
+
 def get_rng(noise_augmentation):
     if noise_augmentation:
         def rng(dims, weight):
