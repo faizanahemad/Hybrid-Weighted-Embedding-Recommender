@@ -1,17 +1,15 @@
-from typing import List, Dict, Tuple, Sequence, Type, Optional
-from pandas import DataFrame
-from .logging import getLogger
 import abc
-import numpy as np
-import nmslib
-import hnswlib
-from bidict import bidict
-from enum import Enum
 from collections import defaultdict
-import math
-from .utils import normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, get_mean_rating, \
-    unit_length
-from .utils import is_num, is_1d_array, is_2d_array
+from enum import Enum
+from typing import List, Tuple, Optional
+
+import hnswlib
+import numpy as np
+from bidict import bidict
+
+from .logging import getLogger
+from .utils import is_num, is_2d_array
+from .utils import normalize_affinity_scores_by_user_item, unit_length
 
 
 # TODO: Add Validations for add apis
@@ -95,7 +93,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.knn_params = knn_params
         if self.knn_params is None:
             self.knn_params = dict(n_neighbors=1000,
-                                index_time_params = {'M': 15, 'ef_construction': 200,})
+                                   index_time_params={'M': 15, 'ef_construction': 200, })
 
         self.n_output_dims = n_output_dims
         self.rating_scale = rating_scale
@@ -110,7 +108,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         if len(new_users_set.intersection(self.users_set)) > 0:
             raise AssertionError("Trying to Add User ID already present.")
         current_user_count = len(self.users_set)
-        update_dict = bidict(zip(users, list(range(current_user_count, current_user_count+len(users)))))
+        update_dict = bidict(zip(users, list(range(current_user_count, current_user_count + len(users)))))
         self.user_id_to_index.update(update_dict)
         self.users_set.update(new_users_set)
         return self
@@ -134,7 +132,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
         user_knn = hnswlib.Index(space='cosine', dim=self.n_output_dims)
-        user_knn.init_index(max_elements=len(user_ids)*2,
+        user_knn.init_index(max_elements=len(user_ids) * 2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])
         user_knn.set_ef(n_neighbors * 2)
         assert len(user_vectors) == len(self.users_set)
@@ -151,7 +149,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         self.user_knn = user_knn
         self.item_knn = item_knn
-        self.log.info("Built KNN, user vectors shape = %s, item vectors shape = %s, n_neighbors = %s", user_vectors.shape,
+        self.log.info("Built KNN, user vectors shape = %s, item vectors shape = %s, n_neighbors = %s",
+                      user_vectors.shape,
                       item_vectors.shape, n_neighbors)
         return user_knn, item_knn
 
@@ -161,7 +160,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         assert set([f.feature_name for f in features if f.feature_type != FeatureType.ID]) == set(self.user_features)
         users, items, weights = zip(*user_item_affinities)
         embedding = np.average(self.get_average_embeddings(items), weights=weights)
-        self.user_knn.add_items([embedding], [len(self.users_set)-1])
+        self.user_knn.add_items([embedding], [len(self.users_set) - 1])
 
     def add_item(self, item_id, features: FeatureSet, user_item_affinities: List[Tuple[str, str, float]]):
         assert self.fit_done
@@ -169,7 +168,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         assert set([f.feature_name for f in features if f.feature_type != FeatureType.ID]) == set(self.item_features)
         users, items, weights = zip(*user_item_affinities)
         embedding = np.average(self.get_average_embeddings(users), weights=weights)
-        self.item_knn.add_items([embedding], [len(self.items_set)-1])
+        self.item_knn.add_items([embedding], [len(self.items_set) - 1])
 
     @abc.abstractmethod
     def fit(self,
@@ -179,7 +178,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
             **kwargs):
         # self.build_content_embeddings(item_data, user_item_affinities)
         assert not self.fit_done
-        sparsity = 1 - len(user_item_affinities)/(len(user_ids)*len(item_ids))
+        sparsity = 1 - len(user_item_affinities) / (len(user_ids) * len(item_ids))
         self.log.info("Start Fitting Recommender with n_users = %s, n_items = %s, n_samples = %s, sparsity = %s",
                       len(user_ids), len(item_ids), len(user_item_affinities), sparsity)
         user_set = set(user_ids)
@@ -233,7 +232,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         embeddings = self.get_embeddings(entities)
         return np.average(embeddings, axis=0)
 
-    def find_similar_items(self, item: str, positive: List[Tuple[str, EntityType]] = None, negative: List[Tuple[str, EntityType]] = None) \
+    def find_similar_items(self, item: str, positive: List[Tuple[str, EntityType]] = None,
+                           negative: List[Tuple[str, EntityType]] = None) \
             -> List[Tuple[str, float]]:
         assert self.fit_done
         assert item in self.items_set
@@ -248,7 +248,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=self.knn_params['n_neighbors'])
         return [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
 
-    def find_similar_users(self, user: str, positive: List[Tuple[str, EntityType]] = None, negative: List[Tuple[str, EntityType]] = None) -> List[Tuple[str, float]]:
+    def find_similar_users(self, user: str, positive: List[Tuple[str, EntityType]] = None,
+                           negative: List[Tuple[str, EntityType]] = None) -> List[Tuple[str, float]]:
         assert self.fit_done
         assert user in self.users_set
         embedding_list = [self.get_average_embeddings([(user, EntityType.USER)])]
@@ -261,7 +262,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         (neighbors,), (dist,) = self.user_knn.knn_query([embedding], k=self.knn_params['n_neighbors'])
         return [(self.user_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
 
-    def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None, negative: List[Tuple[str, EntityType]] = None) -> List[Tuple[str, float]]:
+    def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
+                            negative: List[Tuple[str, EntityType]] = None) -> List[Tuple[str, float]]:
         assert self.fit_done
         assert user in self.users_set
         embedding_list = [self.get_average_embeddings([(user, EntityType.USER)])]

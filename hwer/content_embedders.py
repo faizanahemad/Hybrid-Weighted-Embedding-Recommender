@@ -1,21 +1,21 @@
-from .recommendation_base import Feature, FeatureSet, FeatureType, EntityType
-import numpy as np
 import abc
-import pandas as pd
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import MinMaxScaler
-from .utils import auto_encoder_transform, unit_length, clean_text
-import fasttext
 import os
+from typing import Union
+
+import fasttext
+import numpy as np
+import pandas as pd
+from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings
 from scipy.stats.mstats import rankdata
 from sklearn.feature_extraction.text import CountVectorizer
-from flair.data import Sentence
-from flair.embeddings import WordEmbeddings, FlairEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings, StackedEmbeddings
-from joblib import Parallel, delayed
-from tqdm import tqdm
-from typing import Type, Union
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
+
 from .logging import getLogger
+from .recommendation_base import Feature, FeatureSet, FeatureType
+from .utils import auto_encoder_transform, unit_length, clean_text
 
 
 class ContentEmbeddingBase(metaclass=abc.ABCMeta):
@@ -32,6 +32,7 @@ class ContentEmbeddingBase(metaclass=abc.ABCMeta):
         self.log.debug("Start Fitting for feature name %s", feature.feature_name)
         self.is_fit = True
 
+    # noinspection PyTypeChecker
     @abc.abstractmethod
     def transform(self, feature: Union[Feature, FeatureSet], **kwargs) -> np.ndarray:
         assert self.is_fit

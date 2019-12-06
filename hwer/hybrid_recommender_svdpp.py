@@ -1,44 +1,25 @@
-from .logging import getLogger
-from .recommendation_base import RecommendationBase, Feature, FeatureSet
-from typing import List, Dict, Tuple, Sequence, Type, Set, Optional
-from sklearn.decomposition import PCA
-from scipy.special import comb
-from pandas import DataFrame
-from .content_embedders import ContentEmbeddingBase
-import tensorflow as tf
 import time
-import matplotlib.pyplot as plt
-from sklearn.model_selection import StratifiedKFold
-import pandas as pd
-import numpy as np
-import re
-from bidict import bidict
-from joblib import Parallel, delayed
-from collections import defaultdict
-import gc
-import sys
-import os
-from more_itertools import flatten
-import dill
 from collections import Counter
-import operator
-from tqdm import tqdm_notebook
-import fasttext
-from .recommendation_base import EntityType
-from .content_recommender import ContentRecommendation
-from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
-    normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, RatingPredRegularization, get_rng, \
-    LRSchedule, resnet_layer_with_content, ScaledGlorotNormal
+from typing import List, Dict, Tuple, Optional, Any, Union
+
+import numpy as np
+import pandas as pd
 import tensorflow as tf
-from tensorflow import keras
-from sklearn.model_selection import train_test_split
 import tensorflow.keras.backend as K
-from scipy.stats import describe
-from surprise import SVD, SVDpp
+from bidict import bidict
+from more_itertools import flatten
+from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import train_test_split
 from surprise import Dataset
 from surprise import Reader
+from surprise import SVDpp
+from tensorflow import keras
 
 from .hybrid_recommender import HybridRecommender
+from .logging import getLogger
+from .recommendation_base import EntityType
+from .utils import normalize_affinity_scores_by_user_item, RatingPredRegularization, get_rng, \
+    LRSchedule, resnet_layer_with_content, ScaledGlorotNormal
 
 
 class HybridRecommenderSVDpp(HybridRecommender):
@@ -226,7 +207,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         s = time.time()
         _ = [i for i in generate_training_samples(train_affinities)()]
         e = time.time()
-        self.log.debug("Total time to Run Training Generator 1 EPOCH = %.1f", e-s)
+        self.log.debug("Total time to Run Training Generator 1 EPOCH = %.1f", e - s)
         train = tf.data.Dataset.from_generator(generate_training_samples(train_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
         validation = tf.data.Dataset.from_generator(generate_training_samples(validation_affinities),
@@ -274,10 +255,10 @@ class HybridRecommenderSVDpp(HybridRecommender):
         mu, user_bias, item_bias, inverse_fn, train, validation, \
         n_svd_dims, ratings_count_by_user, ratings_count_by_item, \
         svd_uv, svd_iv, min_affinity, max_affinity = self.__build_dataset__(user_ids, item_ids, user_item_affinities,
-                                                user_content_vectors, item_content_vectors,
-                                                user_vectors, item_vectors,
-                                                user_id_to_index, item_id_to_index,
-                                                rating_scale, hyperparams)
+                                                                            user_content_vectors, item_content_vectors,
+                                                                            user_vectors, item_vectors,
+                                                                            user_id_to_index, item_id_to_index,
+                                                                            rating_scale, hyperparams)
         assert svd_uv.shape[1] == svd_iv.shape[1] == n_svd_dims
         self.log.debug("DataSet Built with n_svd_dims = %s, use_svd = %s", n_svd_dims, use_svd)
         input_user = keras.Input(shape=(1,))
@@ -335,7 +316,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
             ratings_by_item = input_6
 
             vectors = [user_content, item_content, user_collab, item_collab]
-            counts_data = keras.layers.Dense(8, activation="tanh", use_bias=False)(K.concatenate([ratings_by_user, ratings_by_item]))
+            counts_data = keras.layers.Dense(8, activation="tanh", use_bias=False)(
+                K.concatenate([ratings_by_user, ratings_by_item]))
             meta_data = [counts_data, user_item_content_similarity, user_item_collab_similarity,
                          item_bias, user_bias]
             if use_svd:
@@ -354,18 +336,23 @@ class HybridRecommenderSVDpp(HybridRecommender):
             initial_dense_representation = dense_representation if resnet_content_each_layer else None
             self.log.info("Start Training: use_svd = %s, use_resnet = %s, dense_dims = %s, vector shape = %s, " +
                           "network_depth = %s, network width = %s, dropout = %.2f, ",
-                          use_svd, use_resnet, dense_representation.shape, vectors.shape, network_depth, network_width, dropout)
+                          use_svd, use_resnet, dense_representation.shape, vectors.shape, network_depth, network_width,
+                          dropout)
 
             if use_resnet:
                 for i in range(0, network_depth):
-                    dense_representation = resnet_layer_with_content(network_width, network_width, dropout, kernel_l2)(dense_representation, initial_dense_representation)
+                    dense_representation = resnet_layer_with_content(network_width, network_width, dropout, kernel_l2)(
+                        dense_representation, initial_dense_representation)
 
-                dense_representation = resnet_layer_with_content(network_width, int(network_width/2), dropout, kernel_l2)(dense_representation, initial_dense_representation)
+                dense_representation = resnet_layer_with_content(network_width, int(network_width / 2), dropout,
+                                                                 kernel_l2)(dense_representation,
+                                                                            initial_dense_representation)
             else:
                 for i in range(network_depth):
                     dense_representation = keras.layers.Dense(network_width, activation="tanh", use_bias=True,
                                                               kernel_initializer=ScaledGlorotNormal(),
-                                                              kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(
+                                                              kernel_regularizer=keras.regularizers.l1_l2(
+                                                                  l2=kernel_l2))(
                         dense_representation)
                     # dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
                     # dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
@@ -380,6 +367,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
                 dense_representation)
             rating = keras.layers.ActivityRegularization(l2=bias_regularizer)(rating)
             return rating
+
         rating = tf.keras.backend.constant(mu) + user_bias + item_bias + main_network()
         self.log.debug("Before Rating Regularization, min-max affinity for DNN = %s", (min_affinity, max_affinity))
         rating = RatingPredRegularization(l2=rating_regularizer, min_r=min_affinity, max_r=max_affinity)(rating)
@@ -399,7 +387,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
         model.fit(validation, epochs=epochs,
                   validation_data=train, callbacks=[], verbose=verbose)
 
-        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size).prefetch(16)
+        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size).batch(batch_size).prefetch(
+            16)
         learning_rate.step = 0
         learning_rate.epochs = 1
         model.fit(full_dataset, epochs=1, verbose=verbose)
@@ -407,7 +396,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn,
                                 "ratings_count_by_user": ratings_count_by_user,
                                 "ratings_count_by_item": ratings_count_by_item,
-                                "batch_size": batch_size, "svd_uv": svd_uv, "svd_iv": svd_iv, "use_svd":use_svd}
+                                "batch_size": batch_size, "svd_uv": svd_uv, "svd_iv": svd_iv, "use_svd": use_svd}
         self.log.info("Built Prediction Network, model params = %s", model.count_params())
         return prediction_artifacts
 
@@ -482,7 +471,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
                 (), (), self.n_content_dims, self.n_content_dims, self.n_collaborative_dims,
                 self.n_collaborative_dims, n_svd_dims, n_svd_dims, (), ())
             output_types = (tf.int64, tf.int64, tf.float64, tf.float64, tf.float64,
-                            tf.float64, tf.float64, tf.float64,tf.float64, tf.float64)
+                            tf.float64, tf.float64, tf.float64, tf.float64, tf.float64)
         else:
             output_shapes = (
                 (), (), self.n_content_dims, self.n_content_dims, self.n_collaborative_dims,
@@ -505,6 +494,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         predictions = inverse_fn([(u, i, r) for u, i, r in zip(users, items, predictions)])
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
-        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f, Invert time = %.1f", len(user_item_pairs),
+        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f, Invert time = %.1f",
+                      len(user_item_pairs),
                       time.time() - start, time.time() - invert_start)
         return predictions

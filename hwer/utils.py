@@ -1,24 +1,20 @@
-from numpy import dot
-from numpy.linalg import norm
+import re
+import time
+from collections import defaultdict
+from typing import List, Dict, Tuple
+
+import nmslib
 import numpy as np
 import pandas as pd
-from joblib import Parallel, delayed
-from sklearn.neighbors import NearestNeighbors
-import nmslib
-import time
-from tqdm import tqdm_notebook
-from typing import List, Dict, Tuple, Sequence, Type, Set
-from fasttext import FastText
-from scipy.special import comb
-from sklearn.utils import shuffle
-from tensorflow import keras
 import tensorflow as tf
 import tensorflow.keras.backend as K
-from tensorflow import keras
+from numpy import dot
+from numpy.linalg import norm
+from scipy.special import comb
 from sklearn.model_selection import train_test_split
-import nmslib
-import re
-from collections import defaultdict
+from sklearn.utils import shuffle
+from tensorflow import keras
+
 from .logging import getLogger
 
 
@@ -423,7 +419,7 @@ def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str,
 
     # Making final Dict
     uid = list(zip(uid['user'], uid['item'], uid['rating']))
-    log.debug("Calculated Biases in time = %.1f, n_sampples = %s" %(time.time() - start, len(user_item_affinities)))
+    log.debug("Calculated Biases in time = %.1f, n_sampples = %s" % (time.time() - start, len(user_item_affinities)))
     return mean, bu, bi, spread, uid
 
 
@@ -485,11 +481,6 @@ class UnitLengthRegularization(keras.layers.Layer):
     def compute_output_shape(self, input_shape):
         return input_shape
 
-    def get_config(self):
-        config = {'l1': self.l1, 'l2': self.l2}
-        base_config = super(UnitLengthRegularization, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
 
 class RatingPredRegularizer(keras.regularizers.Regularizer):
     def __init__(self, max_r=1.0, min_r=-1.0, l1=0., l2=0.):  # pylint: disable=redefined-outer-name
@@ -518,9 +509,6 @@ class RatingPredRegularizer(keras.regularizers.Regularizer):
         if self.l2:
             regularization += self.l2 * K.square(x)
         return regularization
-
-    def get_config(self):
-        return {'l1': float(self.l1), 'l2': float(self.l2)}
 
 
 class RatingPredRegularization(keras.layers.Layer):
@@ -553,13 +541,12 @@ class LRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
         self.n_examples = n_examples
 
     def __call__(self, step):
-        steps_per_epoch = int(np.ceil(self.n_examples/self.batch_size))
+        steps_per_epoch = int(np.ceil(self.n_examples / self.batch_size))
         total_steps = steps_per_epoch * self.epochs
         lr = self.lr
-        # step = tf.cast(step, tf.float64)
-        # self.log.debug("Changing LR, step = %s, %s", step.eval(session=tf.compat.v1.Session()), dir(step))
         step = self.step
-        new_lr = np.interp(float(K.eval(step)), [0, total_steps/4, total_steps - steps_per_epoch, total_steps], [lr/20, lr, lr/10, lr/100])
+        new_lr = np.interp(float(K.eval(step)), [0, total_steps / 4, total_steps - steps_per_epoch, total_steps],
+                           [lr / 20, lr, lr / 10, lr / 100])
         self.lrs.append(lr)
         self.step += 1
         return new_lr
@@ -570,6 +557,7 @@ def get_rng(noise_augmentation):
         def rng(dims, weight):
             r = np.random.rand(dims) if dims > 1 else np.random.rand() - 0.5
             return weight * r
+
         return rng
     return lambda dims, weight: np.zeros(dims) if dims > 1 else 0
 
@@ -593,13 +581,14 @@ def resnet_layer_with_content(n_dims, n_out_dims, dropout, kernel_l2, depth=2):
         x = h + x
         # x = tf.keras.layers.Dropout(dropout)(x)
         return x
+
     return layer
 
 
 class ScaledGlorotNormal(tf.keras.initializers.VarianceScaling):
-  def __init__(self, scale=0.1, seed=None):
-    super(ScaledGlorotNormal, self).__init__(
-        scale=scale,
-        mode="fan_avg",
-        distribution="truncated_normal",
-        seed=seed)
+    def __init__(self, scale=0.1, seed=None):
+        super(ScaledGlorotNormal, self).__init__(
+            scale=scale,
+            mode="fan_avg",
+            distribution="truncated_normal",
+            seed=seed)

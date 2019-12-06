@@ -1,31 +1,12 @@
-from .logging import getLogger
-from .recommendation_base import RecommendationBase, Feature, FeatureSet
-from typing import List, Dict, Tuple, Sequence, Type, Set, Optional
-from sklearn.decomposition import PCA
-from scipy.special import comb
-from pandas import DataFrame
-from .content_embedders import ContentEmbeddingBase
-import tensorflow as tf
-import time
-import matplotlib.pyplot as plt
-import pandas as pd
+from typing import List, Dict, Tuple, Optional
+
 import numpy as np
-import re
-from joblib import Parallel, delayed
-import gc
-import sys
-import os
-from more_itertools import flatten
-import dill
-from collections import Counter
-import operator
-from tqdm import tqdm_notebook
-import fasttext
-from .recommendation_base import EntityType
-from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy
-import tensorflow as tf
-from tensorflow import keras
-from sklearn.model_selection import train_test_split
+from sklearn.decomposition import PCA
+
+from .content_embedders import ContentEmbeddingBase
+from .logging import getLogger
+from .recommendation_base import RecommendationBase, FeatureSet
+from .utils import unit_length, build_user_item_dict, build_item_user_dict
 
 
 class ContentRecommendation(RecommendationBase):
@@ -152,7 +133,7 @@ class ContentRecommendation(RecommendationBase):
         return user_embeddings, processed_features
 
     def __concat_feature_vectors__(self, processed_features, item_embeddings, user_embeddings, n_output_dims):
-        # Unit Vectorise Features
+        # Making Each Embedding vector to have unit length Features
         for feature_name in processed_features:
             item_embedding = unit_length(item_embeddings[feature_name], axis=1)
             user_embedding = unit_length(user_embeddings[feature_name], axis=1)
