@@ -1,6 +1,7 @@
 import abc
 import operator
 import time
+from collections import defaultdict
 from typing import List, Dict, Tuple, Optional
 
 import numpy as np
@@ -97,7 +98,7 @@ class HybridRecommender(RecommendationBase):
             dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
                                        kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
             item = dense(item)
-            item = UnitLengthRegularization(l2=0.01)(item)
+            item = UnitLengthRegularization(l2=0.1)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
@@ -253,7 +254,7 @@ class HybridRecommender(RecommendationBase):
             dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
                                        kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
             item = dense(item)
-            item = UnitLengthRegularization(l2=0.01)(item)
+            item = UnitLengthRegularization(l2=0.1)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
@@ -410,7 +411,7 @@ class HybridRecommender(RecommendationBase):
                                        kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
             item = dense(item)
 
-            item = UnitLengthRegularization(l2=0.01)(item)
+            item = UnitLengthRegularization(l2=0.1)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
@@ -488,32 +489,18 @@ class HybridRecommender(RecommendationBase):
         random_negative_weight = random_negative_weight * aff_range
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            user_close_dict = {}
-            user_far_dict = {}
-            item_close_dict = {}
-            item_far_dict = {}
+            user_close_dict = defaultdict(list)
+            user_far_dict = defaultdict(list)
+            item_close_dict = defaultdict(list)
+            item_far_dict = defaultdict(list)
             for i, j, r in affinities:
                 assert r != 0
                 if r > 0:
-                    if i in user_close_dict:
-                        user_close_dict[i].append((j, r))
-                    else:
-                        user_close_dict[i] = [(j, r)]
-
-                    if j in item_close_dict:
-                        item_close_dict[j].append((i, r))
-                    else:
-                        item_close_dict[j] = [(i, r)]
+                    user_close_dict[i].append((j, r))
+                    item_close_dict[j].append((i, r))
                 if r < 0:
-                    if i in user_far_dict:
-                        user_far_dict[i].append((j, r))
-                    else:
-                        user_far_dict[i] = [(j, r)]
-
-                    if j in item_far_dict:
-                        item_far_dict[j].append((i, r))
-                    else:
-                        item_far_dict[j] = [(i, r)]
+                    user_far_dict[i].append((j, r))
+                    item_far_dict[j].append((i, r))
 
             triplet_wt_fn = lambda x: 1 + np.log1p(np.abs(x / aff_range))
 
@@ -585,7 +572,7 @@ class HybridRecommender(RecommendationBase):
             dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False,
                                        kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
             item = dense(item)
-            item = UnitLengthRegularization(l2=0.01)(item)
+            item = UnitLengthRegularization(l2=0.1)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
