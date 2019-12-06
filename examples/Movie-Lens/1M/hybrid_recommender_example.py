@@ -1,6 +1,7 @@
-from sklearn.model_selection import train_test_split
-from sklearn.model_selection import StratifiedKFold
 import pandas as pd
+from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import train_test_split
+
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
@@ -10,7 +11,7 @@ import os
 import copy
 
 warnings.filterwarnings('ignore')
-from typing import List, Dict, Tuple, Sequence, Type, Set, Optional, Any
+from typing import List, Dict, Any
 import numpy as np
 import time
 import datetime
@@ -22,15 +23,11 @@ from surprise import accuracy
 from surprise import BaselineOnly
 from surprise import Dataset
 from surprise import Reader
-from surprise.model_selection import cross_validate
 from ast import literal_eval
 
-from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
-    FlairGlove100Embedding
+from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding
 from hwer import Feature, FeatureSet, FeatureType
-from hwer import HybridRecommender, HybridRecommenderSVDpp
-from hwer.utils import cos_sim
-import tensorflow as tf
+from hwer import HybridRecommenderSVDpp
 
 # tf.compat.v1.disable_eager_execution()
 
@@ -67,20 +64,20 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.5,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
+                           prediction_network_params=dict(lr=0.005, epochs=5 * kfold_multiplier, batch_size=1,
                                                           network_width=128,
                                                           network_depth=2 * kfold_multiplier, verbose=verbose,
-                                                          kernel_l2=0.005, activity_l2=0.01,
-                                                          bias_regularizer=0.01, dropout=0.2),
+                                                          kernel_l2=0.0, rating_regularizer=0.001,
+                                                          bias_regularizer=0.001, dropout=0.0),
                            item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
-                                                 kernel_l2=0.01, activity_l2=0.0, dropout=0.2),
+                                                 kernel_l2=0.01, dropout=0.0),
                            user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
-                                                 kernel_l2=0.01, activity_l2=0.0, dropout=0.2),
-                           user_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
+                                                 kernel_l2=0.01, dropout=0.0),
+                           user_item_params=dict(lr=0.005, epochs=2 * kfold_multiplier, batch_size=32,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
-                                                 kernel_l2=0.01, activity_l2=0.0, dropout=0.2)))
+                                                 kernel_l2=0.001, dropout=0.0)))
 
 if check_working:
     movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
@@ -260,7 +257,7 @@ def test_once(train_affinities, validation_affinities, capabilities=["svdpp", "r
 if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25)
 
-    capabilities = []
+    capabilities = ["resnet"]
     recsys, results, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
 
     #
@@ -272,14 +269,14 @@ if not enable_kfold:
     # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
     # results.extend(res)
 
-    capabilities = ["svdpp", "resnet", "content", "triplet"]
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
-    results.extend(res)
+    # capabilities = ["svdpp", "resnet", "content"]
+    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
+    # results.extend(res)
 
-    results.extend(test_surprise(train_affinities, validation_affinities))
+    results.extend(test_surprise(train_affinities, validation_affinities, algo=["baseline", "svd"]))
     display_results(results)
+    print(list(zip(actuals[:50], predictions[:50])))
     if test_retrieval:
-        print(list(zip(actuals[:20], predictions[:20])))
         user_id = users.user_id.values[0]
         recommendations = recsys.find_items_for_user(user=user_id, positive=[], negative=[])
         res, dist = zip(*recommendations)
