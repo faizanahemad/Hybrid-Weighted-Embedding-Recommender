@@ -64,18 +64,18 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.5,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.005, epochs=5 * kfold_multiplier, batch_size=1,
-                                                          network_width=128,
+                           prediction_network_params=dict(lr=0.002, epochs=5 * kfold_multiplier, batch_size=64,
+                                                          network_width=128, padding_length=50,
                                                           network_depth=2 * kfold_multiplier, verbose=verbose,
-                                                          kernel_l2=0.0, rating_regularizer=0.001,
-                                                          bias_regularizer=0.001, dropout=0.0),
+                                                          kernel_l2=0.001, rating_regularizer=0.0,
+                                                          bias_regularizer=0.01, dropout=0.0),
                            item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
                                                  kernel_l2=0.01, dropout=0.0),
                            user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
                                                  kernel_l2=0.01, dropout=0.0),
-                           user_item_params=dict(lr=0.005, epochs=2 * kfold_multiplier, batch_size=32,
+                           user_item_params=dict(lr=0.002, epochs=2 * kfold_multiplier, batch_size=64,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
                                                  kernel_l2=0.001, dropout=0.0)))
 
@@ -257,7 +257,7 @@ def test_once(train_affinities, validation_affinities, capabilities=["svdpp", "r
 if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25)
 
-    capabilities = ["resnet"]
+    capabilities = []
     recsys, results, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
 
     #
@@ -269,11 +269,11 @@ if not enable_kfold:
     # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
     # results.extend(res)
 
-    # capabilities = ["svdpp", "resnet", "content"]
-    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
-    # results.extend(res)
+    capabilities = ["svdpp", "resnet", "content"]
+    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
+    results.extend(res)
 
-    results.extend(test_surprise(train_affinities, validation_affinities, algo=["baseline", "svd"]))
+    results.extend(test_surprise(train_affinities, validation_affinities, algo=["baseline", "svd", "svdpp"]))
     display_results(results)
     print(list(zip(actuals[:50], predictions[:50])))
     if test_retrieval:

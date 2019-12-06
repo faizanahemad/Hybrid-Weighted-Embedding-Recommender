@@ -573,10 +573,12 @@ def resnet_layer_with_content(n_dims, n_out_dims, dropout, kernel_l2, depth=2):
         for i in range(1, depth + 1):
             dims = n_dims if i < depth else n_out_dims
             h = keras.layers.Dense(dims, activation="tanh", kernel_initializer=ScaledGlorotNormal(),
+                                   use_bias=False,
                                    kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(h)
             # h = tf.keras.layers.BatchNormalization()(h)
         if x.shape[1] != n_out_dims:
             x = keras.layers.Dense(n_out_dims, activation="linear", kernel_initializer=ScaledGlorotNormal(),
+                                   use_bias=False,
                                    kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(x)
         x = h + x
         # x = tf.keras.layers.Dropout(dropout)(x)

@@ -111,6 +111,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         use_svd = hyperparams["use_svd"] if "use_svd" in hyperparams else False
         svdpp = hyperparams["svdpp"] if "svdpp" in hyperparams else {"n_factors": 8, "n_epochs": 10}
         n_svd_folds = hyperparams["n_svd_folds"] if "n_svd_folds" in hyperparams else 5
+        padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
         n_content_dims = user_content_vectors.shape[1]
         n_collaborative_dims = user_vectors.shape[1]
         max_affinity = rating_scale[1]
@@ -171,7 +172,11 @@ class HybridRecommenderSVDpp(HybridRecommender):
                 for i, j, r in affinities:
                     user = user_id_to_index[i]
                     item = item_id_to_index[j]
-                    items = user_item_list[i]
+                    items = np.array(user_item_list[i])
+                    # np.random.shuffle(items)
+                    items = items[:padding_length]
+                    items = items + 1
+                    items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0))
                     user_content = user_content_vectors[user] + rng(n_content_dims, 0.1 * user_content_vectors_mean)
                     item_content = item_content_vectors[item] + rng(n_content_dims, 0.1 * item_content_vectors_mean)
                     user_collab = user_vectors[user] + rng(n_collaborative_dims, 0.1 * user_vectors_mean)
@@ -194,7 +199,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         if use_svd:
             output_shapes = (
-                ((), (), tf.TensorShape([None]), (), n_content_dims, n_content_dims, n_collaborative_dims, n_collaborative_dims,
+                ((), (), padding_length, (), n_content_dims, n_content_dims, n_collaborative_dims, n_collaborative_dims,
                  n_svd_dims,
                  n_svd_dims, (), ()),
                 ())
@@ -205,7 +210,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
                 tf.float64)
         else:
             output_shapes = (
-                ((), (), tf.TensorShape([None]), (), n_content_dims, n_content_dims, n_collaborative_dims, n_collaborative_dims, (), ()),
+                ((), (), padding_length, (), n_content_dims, n_content_dims, n_collaborative_dims, n_collaborative_dims, (), ()),
                 ())
             output_types = (
                 (tf.int64, tf.int64, tf.int64, tf.float64, tf.float64, tf.float64, tf.float64, tf.float64,
@@ -249,6 +254,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         rating_regularizer = hyperparams["rating_regularizer"] if "rating_regularizer" in hyperparams else 0.001
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
         use_svd = hyperparams["use_svd"] if "use_svd" in hyperparams else False
+        padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
 
         use_resnet = hyperparams["use_resnet"] if "use_resnet" in hyperparams else False
         resnet_content_each_layer = hyperparams[
@@ -274,7 +280,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         self.log.debug("DataSet Built with n_svd_dims = %s, use_svd = %s", n_svd_dims, use_svd)
         input_user = keras.Input(shape=(1,))
         input_item = keras.Input(shape=(1,))
-        input_items = keras.Input(shape=(None,))
+        input_items = keras.Input(shape=(padding_length,))
         input_nu = keras.Input(shape=(1,))
 
         input_1 = keras.Input(shape=(n_content_dims,))
@@ -312,10 +318,13 @@ class HybridRecommenderSVDpp(HybridRecommender):
             item_vec = keras.layers.Embedding(len(item_ids), n_collaborative_dims, input_length=1,
                                               embeddings_initializer=item_initializer)(input_item)
 
-            item_vecs = keras.layers.Embedding(len(item_ids), n_collaborative_dims, input_length=None,
+            item_initializer = tf.keras.initializers.Constant(np.concatenate((np.array([[0.0]*n_collaborative_dims]), item_vectors),  axis=0))
+            item_vecs = keras.layers.Embedding(len(item_ids)+1, n_collaborative_dims,
+                                               input_length=padding_length, mask_zero=True,
                                                embeddings_initializer=item_initializer)(input_items)
             item_vecs = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vecs)
-            item_vecs = K.sum(item_vecs, axis=1) * input_nu
+            item_vecs = tf.keras.layers.GlobalAveragePooling1D()(item_vecs)
+            item_vecs = item_vecs * input_nu
 
             user_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_vec)
             item_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vec)
@@ -336,15 +345,15 @@ class HybridRecommenderSVDpp(HybridRecommender):
             ratings_by_user = input_5
             ratings_by_item = input_6
 
-            vectors = [user_content, item_content, user_collab, item_collab]
+            vectors = [user_content, item_content, user_collab, item_collab, user_vec, item_vec, item_vecs]
             counts_data = keras.layers.Dense(8, activation="tanh", use_bias=False)(
                 K.concatenate([ratings_by_user, ratings_by_item]))
             meta_data = [counts_data, user_item_content_similarity, user_item_collab_similarity,
-                         item_bias, user_bias]
+                         item_bias, user_bias, implicit_term, item_items_vec_dot, user_item_vec_dot]
             if use_svd:
                 user_svd = input_svd_uv
                 item_svd = input_svd_iv
-                user_item_svd_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_svd, item_svd])
+                user_item_svd_similarity = tf.keras.layers.Dot(axes=1, normalize=False)([user_svd, item_svd])
                 vectors.extend([user_svd, item_svd])
                 meta_data.append(user_item_svd_similarity)
 
@@ -370,7 +379,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
                                                                             initial_dense_representation)
             else:
                 for i in range(network_depth):
-                    dense_representation = keras.layers.Dense(network_width, activation="tanh", use_bias=True,
+                    dense_representation = keras.layers.Dense(network_width, activation="tanh", use_bias=False,
                                                               kernel_initializer=ScaledGlorotNormal(),
                                                               kernel_regularizer=keras.regularizers.l1_l2(
                                                                   l2=kernel_l2))(
@@ -378,12 +387,12 @@ class HybridRecommenderSVDpp(HybridRecommender):
                     # dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
                     # dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
 
-                dense_representation = keras.layers.Dense(int(network_width / 2), activation="tanh", use_bias=True,
+                dense_representation = keras.layers.Dense(int(network_width / 2), activation="tanh", use_bias=False,
                                                           kernel_initializer=ScaledGlorotNormal(),
                                                           kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(
                     dense_representation)
 
-            rating = keras.layers.Dense(1, activation="tanh", use_bias=True, kernel_initializer=ScaledGlorotNormal(),
+            rating = keras.layers.Dense(1, activation="tanh", use_bias=False, kernel_initializer=ScaledGlorotNormal(),
                                         kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(
                 dense_representation)
             rating = keras.layers.ActivityRegularization(l2=bias_regularizer)(rating)
@@ -412,10 +421,11 @@ class HybridRecommenderSVDpp(HybridRecommender):
             16)
         learning_rate.step = 0
         learning_rate.epochs = 1
+        learning_rate.lr /= 2
         model.fit(full_dataset, epochs=1, verbose=verbose)
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn, "user_item_list": user_item_list,
-                                "ratings_count_by_user": ratings_count_by_user,
+                                "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
                                 "ratings_count_by_item": ratings_count_by_item,
                                 "batch_size": batch_size, "svd_uv": svd_uv, "svd_iv": svd_iv, "use_svd": use_svd}
         self.log.info("Built Prediction Network, model params = %s", model.count_params())
@@ -432,6 +442,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         batch_size = self.prediction_artifacts["batch_size"]
         use_svd = self.prediction_artifacts["use_svd"]
         user_item_list = self.prediction_artifacts["user_item_list"]
+        padding_length = self.prediction_artifacts["padding_length"]
 
         def generate_prediction_samples(affinities: List[Tuple[str, str]],
                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
@@ -446,7 +457,11 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
                     user = user_id_to_index[i]
                     item = item_id_to_index[j]
-                    items = user_item_list[i]
+                    items = np.array(user_item_list[i])
+                    # np.random.shuffle(items)
+                    items = items[:padding_length]
+                    items = items + 1
+                    items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0))
                     user_content = user_content_vectors[user]
                     item_content = item_content_vectors[item]
                     user_collab = user_vectors[user]
@@ -491,13 +506,13 @@ class HybridRecommenderSVDpp(HybridRecommender):
         n_svd_dims = svd_uv.shape[1]
         if use_svd:
             output_shapes = (
-                (), (), None, (), self.n_content_dims, self.n_content_dims, self.n_collaborative_dims,
+                (), (), padding_length, (), self.n_content_dims, self.n_content_dims, self.n_collaborative_dims,
                 self.n_collaborative_dims, n_svd_dims, n_svd_dims, (), ())
             output_types = (tf.int64, tf.int64, tf.int64, tf.float64, tf.float64, tf.float64, tf.float64,
                             tf.float64, tf.float64, tf.float64, tf.float64, tf.float64)
         else:
             output_shapes = (
-                (), (), None, (), self.n_content_dims, self.n_content_dims, self.n_collaborative_dims,
+                (), (), padding_length, (), self.n_content_dims, self.n_content_dims, self.n_collaborative_dims,
                 self.n_collaborative_dims, (), ())
             output_types = (tf.int64, tf.int64, tf.int64, tf.float64, tf.float64, tf.float64, tf.float64,
                             tf.float64, tf.float64, tf.float64)
