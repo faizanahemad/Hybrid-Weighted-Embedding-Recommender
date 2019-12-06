@@ -28,7 +28,7 @@ from .recommendation_base import EntityType
 from .content_recommender import ContentRecommendation
 from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
     normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, RatingPredRegularization, get_rng, \
-    LRSchedule
+    LRSchedule, resnet_layer_with_content, ScaledGlorotNormal
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
@@ -40,28 +40,6 @@ from surprise import Reader
 
 from .hybrid_recommender import HybridRecommender
 
-
-def resnet_layer_with_content(n_dims, n_out_dims, dropout, activity_l2, kernel_l2, depth=2):
-    assert n_dims >= n_out_dims
-
-    def layer(x, content=None):
-        if content is not None:
-            h = K.concatenate([x, content])
-        else:
-            h = x
-        for i in range(1, depth + 1):
-            dims = n_dims if i < depth else n_out_dims
-            h = keras.layers.Dense(dims, activation="tanh",
-                                   kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                   activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))(h)
-            h = tf.keras.layers.BatchNormalization()(h)
-            h = tf.keras.layers.Dropout(dropout)(h)
-        if x.shape[1] != n_out_dims:
-            x = keras.layers.Dense(n_out_dims, activation="linear",
-                                   kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                   activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))(x)
-        return h + x
-    return layer
 
 class HybridRecommenderSVDpp(HybridRecommender):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
@@ -195,8 +173,9 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         user_bias = np.array([user_bias[u] if u in user_bias else np.random.rand() * 0.01 for u in user_ids])
         item_bias = np.array([item_bias[i] if i in item_bias else np.random.rand() * 0.01 for i in item_ids])
-        self.log.debug("Mu = %.4f, Max User Bias = %.4f, Max Item Bias = %.4f, use_svd = %s", mu, np.abs(np.max(user_bias)),
-                       np.abs(np.max(item_bias)), use_svd)
+        self.log.debug("Mu = %.4f, Max User Bias = %.4f, Max Item Bias = %.4f, use_svd = %s, min-max-affinity = %s",
+                       mu, np.abs(np.max(user_bias)),
+                       np.abs(np.max(item_bias)), use_svd, (min_affinity, max_affinity))
 
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
@@ -224,7 +203,6 @@ class HybridRecommenderSVDpp(HybridRecommender):
                         yield (user, item, user_content, item_content, user_collab, item_collab,
                                ratings_by_user, ratings_by_item), r
 
-
             return generator
 
         if use_svd:
@@ -245,6 +223,10 @@ class HybridRecommenderSVDpp(HybridRecommender):
                  tf.float64, tf.float64),
                 tf.float64)
 
+        s = time.time()
+        _ = [i for i in generate_training_samples(train_affinities)()]
+        e = time.time()
+        self.log.debug("Total time to Run Training Generator 1 EPOCH = %.1f", e-s)
         train = tf.data.Dataset.from_generator(generate_training_samples(train_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
         validation = tf.data.Dataset.from_generator(generate_training_samples(validation_affinities),
@@ -274,8 +256,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
         bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.01
+        rating_regularizer = hyperparams["rating_regularizer"] if "rating_regularizer" in hyperparams else 0.001
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
         use_svd = hyperparams["use_svd"] if "use_svd" in hyperparams else False
 
@@ -301,6 +283,19 @@ class HybridRecommenderSVDpp(HybridRecommender):
         input_user = keras.Input(shape=(1,))
         input_item = keras.Input(shape=(1,))
 
+        input_1 = keras.Input(shape=(n_content_dims,))
+        input_2 = keras.Input(shape=(n_content_dims,))
+        input_3 = keras.Input(shape=(n_collaborative_dims,))
+        input_4 = keras.Input(shape=(n_collaborative_dims,))
+        input_5 = keras.Input(shape=(1,))
+        input_6 = keras.Input(shape=(1,))
+        inputs = [input_user, input_item, input_1, input_2, input_3, input_4, input_5, input_6]
+        if use_svd:
+            input_svd_uv = keras.Input(shape=(n_svd_dims,))
+            input_svd_iv = keras.Input(shape=(n_svd_dims,))
+            inputs = [input_user, input_item, input_1, input_2, input_3, input_4, input_svd_uv, input_svd_iv,
+                      input_5, input_6]
+
         embeddings_initializer = tf.keras.initializers.Constant(user_bias)
         user_bias = keras.layers.Embedding(len(user_ids), 1, input_length=1,
                                            embeddings_initializer=embeddings_initializer)(input_user)
@@ -313,93 +308,81 @@ class HybridRecommenderSVDpp(HybridRecommender):
         user_bias = tf.keras.layers.Flatten()(user_bias)
         item_bias = tf.keras.layers.Flatten()(item_bias)
 
-        embeddings_initializer = tf.keras.initializers.Constant(user_vectors)
-        user_vec = keras.layers.Embedding(len(user_ids), n_collaborative_dims, input_length=1,
-                                          embeddings_initializer=embeddings_initializer)(input_user)
+        def main_network():
+            embeddings_initializer = tf.keras.initializers.Constant(user_vectors)
+            user_vec = keras.layers.Embedding(len(user_ids), n_collaborative_dims, input_length=1,
+                                              embeddings_initializer=embeddings_initializer)(input_user)
 
-        item_initializer = tf.keras.initializers.Constant(item_vectors)
-        item_vec = keras.layers.Embedding(len(item_ids), n_collaborative_dims, input_length=1,
-                                          embeddings_initializer=item_initializer)(input_item)
+            item_initializer = tf.keras.initializers.Constant(item_vectors)
+            item_vec = keras.layers.Embedding(len(item_ids), n_collaborative_dims, input_length=1,
+                                              embeddings_initializer=item_initializer)(input_item)
 
-        user_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_vec)
-        item_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vec)
-        user_vec = tf.keras.layers.Flatten()(user_vec)
-        item_vec = tf.keras.layers.Flatten()(item_vec)
-        user_item_vec_dot = tf.keras.layers.Dot(axes=1, normalize=False)([user_vec, item_vec])
+            user_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_vec)
+            item_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vec)
+            user_vec = tf.keras.layers.Flatten()(user_vec)
+            item_vec = tf.keras.layers.Flatten()(item_vec)
+            user_item_vec_dot = tf.keras.layers.Dot(axes=1, normalize=False)([user_vec, item_vec])
 
-        input_1 = keras.Input(shape=(n_content_dims,))
-        input_2 = keras.Input(shape=(n_content_dims,))
-        input_3 = keras.Input(shape=(n_collaborative_dims,))
-        input_4 = keras.Input(shape=(n_collaborative_dims,))
+            user_content = input_1
+            item_content = input_2
+            user_collab = input_3
+            item_collab = input_4
 
+            user_item_content_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_content, item_content])
+            user_item_collab_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_collab, item_collab])
 
-        user_content = input_1
-        item_content = input_2
-        user_collab = input_3
-        item_collab = input_4
+            ratings_by_user = input_5
+            ratings_by_item = input_6
 
-        user_item_content_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_content, item_content])
-        user_item_collab_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_collab, item_collab])
+            vectors = [user_content, item_content, user_collab, item_collab]
+            counts_data = keras.layers.Dense(8, activation="tanh", use_bias=False)(K.concatenate([ratings_by_user, ratings_by_item]))
+            meta_data = [counts_data, user_item_content_similarity, user_item_collab_similarity,
+                         item_bias, user_bias]
+            if use_svd:
+                user_svd = input_svd_uv
+                item_svd = input_svd_iv
+                user_item_svd_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_svd, item_svd])
+                vectors.extend([user_svd, item_svd])
+                meta_data.append(user_item_svd_similarity)
 
-        input_5 = keras.Input(shape=(1,))
-        input_6 = keras.Input(shape=(1,))
+            vectors = K.concatenate(vectors)
+            meta_data = K.concatenate(meta_data)
+            meta_data = keras.layers.Dense(32, activation="tanh", )(meta_data)
 
-        ratings_by_user = input_5
-        ratings_by_item = input_6
+            dense_representation = K.concatenate([meta_data, vectors])
+            # dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
+            initial_dense_representation = dense_representation if resnet_content_each_layer else None
+            self.log.info("Start Training: use_svd = %s, use_resnet = %s, dense_dims = %s, vector shape = %s, " +
+                          "network_depth = %s, network width = %s, dropout = %.2f, ",
+                          use_svd, use_resnet, dense_representation.shape, vectors.shape, network_depth, network_width, dropout)
 
-        vectors = [user_content, item_content, user_collab, item_collab]
-        counts_data = keras.layers.Dense(8, activation="tanh")(K.concatenate([ratings_by_user, ratings_by_item]))
-        meta_data = [counts_data, user_item_content_similarity, user_item_collab_similarity, item_bias, user_bias]
-        inputs = [input_user, input_item, input_1, input_2, input_3, input_4, input_5, input_6]
-        if use_svd:
-            input_svd_uv = keras.Input(shape=(n_svd_dims,))
-            input_svd_iv = keras.Input(shape=(n_svd_dims,))
-            user_svd = input_svd_uv
-            item_svd = input_svd_iv
-            user_item_svd_similarity = tf.keras.layers.Dot(axes=1, normalize=True)([user_svd, item_svd])
-            vectors.extend([user_svd, item_svd])
-            meta_data.append(user_item_svd_similarity)
-            inputs = [input_user, input_item, input_1, input_2, input_3, input_4, input_svd_uv, input_svd_iv,
-                      input_5, input_6]
+            if use_resnet:
+                for i in range(0, network_depth):
+                    dense_representation = resnet_layer_with_content(network_width, network_width, dropout, kernel_l2)(dense_representation, initial_dense_representation)
 
-        vectors = K.concatenate(vectors)
-        meta_data = K.concatenate(meta_data)
-        meta_data = keras.layers.Dense(32, activation="tanh", )(meta_data)
+                dense_representation = resnet_layer_with_content(network_width, int(network_width/2), dropout, kernel_l2)(dense_representation, initial_dense_representation)
+            else:
+                for i in range(network_depth):
+                    dense_representation = keras.layers.Dense(network_width, activation="tanh", use_bias=True,
+                                                              kernel_initializer=ScaledGlorotNormal(),
+                                                              kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(
+                        dense_representation)
+                    # dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
+                    # dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
 
-        dense_representation = K.concatenate([meta_data, vectors])
-        dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
-        initial_dense_representation = dense_representation if resnet_content_each_layer else None
-        n_dims = dense_representation.shape[1]
-        self.log.info("Start Training: use_svd = %s, use_resnet = %s, dense_dims = %s, vector shape = %s, " +
-                      "network_depth = %s, network width = %s, dropout = %.2f, ",
-                      use_svd, use_resnet, dense_representation.shape, vectors.shape, network_depth, network_width, dropout)
-
-        if use_resnet:
-            for i in range(0, network_depth):
-                dense_representation = resnet_layer_with_content(network_width, network_width, dropout, activity_l2, kernel_l2)(dense_representation, initial_dense_representation)
-
-            dense_representation = resnet_layer_with_content(network_width, int(network_width/2), dropout, activity_l2, kernel_l2)(dense_representation, initial_dense_representation)
-        else:
-            for i in range(network_depth):
-                dense_representation = keras.layers.Dense(network_width, activation="tanh",
-                                                          kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                                          activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))(
+                dense_representation = keras.layers.Dense(int(network_width / 2), activation="tanh", use_bias=True,
+                                                          kernel_initializer=ScaledGlorotNormal(),
+                                                          kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(
                     dense_representation)
-                dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
-                dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
 
-            dense_representation = keras.layers.Dense(int(network_width / 2), activation="tanh",
-                                                      kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                                      activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))(
+            rating = keras.layers.Dense(1, activation="tanh", use_bias=True, kernel_initializer=ScaledGlorotNormal(),
+                                        kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(
                 dense_representation)
-
-        rating = keras.layers.Dense(1, activation="tanh", use_bias=True,
-                                    kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                    activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))(
-            dense_representation)
-        rating = keras.layers.ActivityRegularization(l2=bias_regularizer)(rating)
-        rating = tf.keras.backend.constant(mu) + user_bias + item_bias + rating
-        rating = RatingPredRegularization(l2=0.005, min_r=min_affinity, max_r=max_affinity)(rating)
+            rating = keras.layers.ActivityRegularization(l2=bias_regularizer)(rating)
+            return rating
+        rating = tf.keras.backend.constant(mu) + user_bias + item_bias + main_network()
+        self.log.debug("Before Rating Regularization, min-max affinity for DNN = %s", (min_affinity, max_affinity))
+        rating = RatingPredRegularization(l2=rating_regularizer, min_r=min_affinity, max_r=max_affinity)(rating)
 
         model = keras.Model(inputs=inputs, outputs=[rating])
 
@@ -420,7 +403,6 @@ class HybridRecommenderSVDpp(HybridRecommender):
         learning_rate.step = 0
         learning_rate.epochs = 1
         model.fit(full_dataset, epochs=1, verbose=verbose)
-        # print("Train Loss = ", model.evaluate(train), "validation Loss = ", model.evaluate(validation))
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn,
                                 "ratings_count_by_user": ratings_count_by_user,

@@ -29,7 +29,8 @@ from .recommendation_base import EntityType
 from .content_recommender import ContentRecommendation
 from .utils import unit_length, build_user_item_dict, build_item_user_dict, cos_sim, shuffle_copy, \
     normalize_affinity_scores_by_user, normalize_affinity_scores_by_user_item, UnitLengthRegularizer, \
-    UnitLengthRegularization, RatingPredRegularization, get_rng, unit_length_violations, LRSchedule
+    UnitLengthRegularization, RatingPredRegularization, get_rng, unit_length_violations, LRSchedule, \
+    resnet_layer_with_content
 import tensorflow as tf
 from tensorflow import keras
 from sklearn.model_selection import train_test_split
@@ -71,7 +72,6 @@ class HybridRecommender(RecommendationBase):
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
@@ -110,18 +110,12 @@ class HybridRecommender(RecommendationBase):
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
-            dims_fn = lambda x: int(np.interp(x, list(range(network_depth)), [embedding_size * 2, embedding_size]))
+            dims_fn = lambda x: int(np.interp(x, [0, network_depth - 1], [embedding_size * 2, embedding_size]))
             for i in range(network_depth):
-                dense = keras.layers.Dense(dims_fn(i), activation="tanh",
-                                           kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                           activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))
-                item = dense(item)
-                item = tf.keras.layers.BatchNormalization()(item)
-                item = tf.keras.layers.Dropout(dropout)(item)
+                item = resnet_layer_with_content(dims_fn(i), dims_fn(i), dropout, kernel_l2)(item)
 
             dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
-                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                       activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))
+                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
             item = dense(item)
             item = UnitLengthRegularization(l2=0.01)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
@@ -133,7 +127,7 @@ class HybridRecommender(RecommendationBase):
         item_2 = bn(input_2)
 
         pred = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
-        pred = K.tanh(pred)
+        # pred = K.tanh(pred)
         model = keras.Model(inputs=[input_1, input_2],
                             outputs=[pred])
         encoder = bn
@@ -172,7 +166,6 @@ class HybridRecommender(RecommendationBase):
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.2
         random_positive_weight = hyperparams[
@@ -273,18 +266,12 @@ class HybridRecommender(RecommendationBase):
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
-            dims_fn = lambda x: int(np.interp(x, list(range(network_depth)), [embedding_size * 2, embedding_size]))
+            dims_fn = lambda x: int(np.interp(x, [0, network_depth - 1], [embedding_size * 2, embedding_size]))
             for i in range(network_depth):
-                dense = keras.layers.Dense(dims_fn(i), activation="tanh",
-                                           kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                           activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))
-                item = dense(item)
-                item = tf.keras.layers.BatchNormalization()(item)
-                item = tf.keras.layers.Dropout(dropout)(item)
+                item = resnet_layer_with_content(dims_fn(i), dims_fn(i), dropout, kernel_l2)(item)
 
             dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
-                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                       activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))
+                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
             item = dense(item)
             item = UnitLengthRegularization(l2=0.01)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
@@ -389,7 +376,6 @@ class HybridRecommender(RecommendationBase):
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
 
         # max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
@@ -436,18 +422,12 @@ class HybridRecommender(RecommendationBase):
             item = tf.keras.layers.Flatten()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
             embedding_size = max(embedding_size, n_output_dims)
-            dims_fn = lambda x: int(np.interp(x, list(range(network_depth)), [embedding_size * 2, n_output_dims]))
+            dims_fn = lambda x: int(np.interp(x, [0, network_depth - 1], [embedding_size * 2, n_output_dims]))
             for i in range(network_depth):
-                dense = keras.layers.Dense(dims_fn(i), activation="tanh",
-                                           kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                           activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))
-                item = dense(item)
-                item = tf.keras.layers.BatchNormalization()(item)
-                item = tf.keras.layers.Dropout(dropout)(item)
+                item = resnet_layer_with_content(dims_fn(i), dims_fn(i), dropout, kernel_l2)(item)
 
             dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False,
-                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                       activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))
+                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
             item = dense(item)
 
             item = UnitLengthRegularization(l2=0.01)(item)
@@ -462,7 +442,7 @@ class HybridRecommender(RecommendationBase):
         item = bn(input_2)
 
         pred = tf.keras.layers.Dot(axes=1, normalize=True)([user, item])
-        pred = K.tanh(pred)
+        # pred = K.tanh(pred)
 
         model = keras.Model(inputs=[input_1, input_2],
                             outputs=[pred])
@@ -503,7 +483,6 @@ class HybridRecommender(RecommendationBase):
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        activity_l2 = hyperparams["activity_l2"] if "activity_l2" in hyperparams else 0.0005
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.25
         random_pair_user_item_proba = hyperparams["random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.2
@@ -619,18 +598,12 @@ class HybridRecommender(RecommendationBase):
             item = tf.keras.layers.Flatten()(item)
             item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
             embedding_size = max(embedding_size, n_output_dims)
-            dims_fn = lambda x: int(np.interp(x, list(range(network_depth)), [embedding_size * 2, n_output_dims]))
+            dims_fn = lambda x: int(np.interp(x, [0, network_depth - 1], [embedding_size * 2, n_output_dims]))
             for i in range(network_depth):
-                dense = keras.layers.Dense(dims_fn(i), activation="tanh",
-                                           kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                           activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))
-                item = dense(item)
-                item = tf.keras.layers.BatchNormalization()(item)
-                item = tf.keras.layers.Dropout(dropout)(item)
+                item = resnet_layer_with_content(dims_fn(i), dims_fn(i), dropout, kernel_l2)(item)
 
             dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False,
-                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2),
-                                       activity_regularizer=keras.regularizers.l1_l2(l2=activity_l2))
+                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
             item = dense(item)
             item = UnitLengthRegularization(l2=0.01)(item)
             base_network = keras.Model(inputs=i1, outputs=item)

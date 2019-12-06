@@ -572,3 +572,34 @@ def get_rng(noise_augmentation):
             return weight * r
         return rng
     return lambda dims, weight: np.zeros(dims) if dims > 1 else 0
+
+
+def resnet_layer_with_content(n_dims, n_out_dims, dropout, kernel_l2, depth=2):
+    assert n_dims >= n_out_dims
+
+    def layer(x, content=None):
+        if content is not None:
+            h = K.concatenate([x, content])
+        else:
+            h = x
+        for i in range(1, depth + 1):
+            dims = n_dims if i < depth else n_out_dims
+            h = keras.layers.Dense(dims, activation="tanh", kernel_initializer=ScaledGlorotNormal(),
+                                   kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(h)
+            # h = tf.keras.layers.BatchNormalization()(h)
+        if x.shape[1] != n_out_dims:
+            x = keras.layers.Dense(n_out_dims, activation="linear", kernel_initializer=ScaledGlorotNormal(),
+                                   kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(x)
+        x = h + x
+        # x = tf.keras.layers.Dropout(dropout)(x)
+        return x
+    return layer
+
+
+class ScaledGlorotNormal(tf.keras.initializers.VarianceScaling):
+  def __init__(self, scale=0.1, seed=None):
+    super(ScaledGlorotNormal, self).__init__(
+        scale=scale,
+        mode="fan_avg",
+        distribution="truncated_normal",
+        seed=seed)
