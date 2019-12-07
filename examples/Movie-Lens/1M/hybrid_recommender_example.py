@@ -64,18 +64,18 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.5,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=64,
+                           prediction_network_params=dict(lr=0.001, epochs=10 * kfold_multiplier, batch_size=256,
                                                           network_width=160, padding_length=50,
                                                           network_depth=3 * kfold_multiplier, verbose=verbose,
-                                                          kernel_l2=0.0001, rating_regularizer=0.0,
-                                                          bias_regularizer=0.001, dropout=0.0),
+                                                          kernel_l2=0.0, rating_regularizer=0.0,
+                                                          bias_regularizer=0.0, dropout=0.0),
                            item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
                                                  kernel_l2=0.01, dropout=0.0),
                            user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
                                                  kernel_l2=0.01, dropout=0.0),
-                           user_item_params=dict(lr=0.001, epochs=3 * kfold_multiplier, batch_size=64,
+                           user_item_params=dict(lr=0.001, epochs=7 * kfold_multiplier, batch_size=256,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
                                                  kernel_l2=0.001, dropout=0.0)))
 
@@ -260,11 +260,11 @@ if not enable_kfold:
     capabilities = ["svdpp", "resnet", "content", "triplet"]
     recsys, results, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
     display_results(results)
-
-    capabilities = ["svdpp", "resnet", "content"]
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
-    results.extend(res)
-    display_results(results)
+    #
+    # capabilities = ["svdpp", "resnet", "content"]
+    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
+    # results.extend(res)
+    # display_results(results)
 
     # capabilities = []
     # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)

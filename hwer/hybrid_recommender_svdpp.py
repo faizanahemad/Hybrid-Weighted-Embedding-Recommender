@@ -187,19 +187,19 @@ class HybridRecommenderSVDpp(HybridRecommender):
                     users = users + 1
                     users = np.pad(users, (padding_length - len(users), 0), constant_values=(0, 0))
 
-                    user_content = user_content_vectors[user] + rng(n_content_dims, 0.01 * user_content_vectors_mean)
-                    item_content = item_content_vectors[item] + rng(n_content_dims, 0.01 * item_content_vectors_mean)
-                    user_collab = user_vectors[user] + rng(n_collaborative_dims, 0.01 * user_vectors_mean)
-                    item_collab = item_vectors[item] + rng(n_collaborative_dims, 0.01 * item_vectors_mean)
-                    r = r + rng(1, 0.01)
+                    user_content = user_content_vectors[user] + rng(n_content_dims, 0.001 * user_content_vectors_mean)
+                    item_content = item_content_vectors[item] + rng(n_content_dims, 0.001 * item_content_vectors_mean)
+                    user_collab = user_vectors[user] + rng(n_collaborative_dims, 0.001 * user_vectors_mean)
+                    item_collab = item_vectors[item] + rng(n_collaborative_dims, 0.001 * item_vectors_mean)
+                    r = r + rng(1, 0.001)
 
                     ratings_by_user = np.log1p((ratings_count_by_user[i] + 10.0) / 10.0)
                     ratings_by_item = np.log1p((ratings_count_by_item[j] + 10.0) / 10.0)
                     nu = 1 / np.sqrt(ratings_count_by_user[i])
                     ni = 1 / np.sqrt(ratings_count_by_item[j])
                     if use_svd:
-                        user_svd = svd_uv[user] + rng(n_svd_dims, 0.01 * user_svd_mean)
-                        item_svd = svd_iv[item] + rng(n_svd_dims, 0.01 * item_svd_mean)
+                        user_svd = svd_uv[user] + rng(n_svd_dims, 0.001 * user_svd_mean)
+                        item_svd = svd_iv[item] + rng(n_svd_dims, 0.001 * item_svd_mean)
                         yield (user, item, users, items, nu, ni, user_content, item_content, user_collab, item_collab,
                                user_svd, item_svd, ratings_by_user, ratings_by_item), r
                     else:
