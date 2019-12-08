@@ -4,5 +4,6 @@ from .recommendation_base import Feature, FeatureSet, RecommendationBase, Featur
 from .content_recommender import ContentRecommendation
 from .hybrid_recommender import HybridRecommender
 from .hybrid_recommender_svdpp import HybridRecommenderSVDpp
+from .svdpp_dnn import SVDppDNN
 from .utils import build_item_user_dict, build_user_item_dict, normalize_affinity_scores_by_user
 
