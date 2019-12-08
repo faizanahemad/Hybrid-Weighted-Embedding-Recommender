@@ -65,7 +65,7 @@ test_retrieval = False
 hyperparameters = dict(combining_factor=0.5,
                        collaborative_params=dict(
                            prediction_network_params=dict(lr=0.1, epochs=10 * kfold_multiplier, batch_size=16,
-                                                          network_width=128, padding_length=50,
+                                                          network_width=32, padding_length=50,
                                                           network_depth=3 * kfold_multiplier, verbose=verbose,
                                                           kernel_l2=0.0, rating_regularizer=0.0,
                                                           bias_regularizer=0.02, dropout=0.0),

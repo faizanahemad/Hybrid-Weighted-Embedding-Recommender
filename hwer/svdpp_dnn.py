@@ -48,13 +48,10 @@ class SVDppDNN(HybridRecommender):
         ratings = np.array([r for u, i, r in user_item_affinities])
         min_affinity = np.min(ratings)
         max_affinity = np.max(ratings)
-        # user_item_affinities = [(u, i, (2 * (r - min_affinity) / (max_affinity - min_affinity)) - 1) for u, i, r in
-        #                         user_item_affinities]
         mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item_bs(user_item_affinities, rating_scale)
 
         def inverse_fn(user_item_predictions):
             rscaled = np.array([r for u, i, r in user_item_predictions])
-            # rscaled = ((rscaled + 1) / 2) * (max_affinity - min_affinity) + min_affinity
             return rscaled
 
         user_bias = np.array([user_bias[u] if u in user_bias else 0.0 for u in user_ids])
@@ -67,8 +64,10 @@ class SVDppDNN(HybridRecommender):
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
 
         user_item_list = defaultdict(list)
+        item_user_list = defaultdict(list)
         for i, j, r in user_item_affinities:
             user_item_list[i].append(item_id_to_index[j])
+            item_user_list[j].append(user_id_to_index[i])
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
@@ -79,16 +78,23 @@ class SVDppDNN(HybridRecommender):
                     items = items[:padding_length]
                     items = items + 1
                     items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0))
+
+                    users = np.array(item_user_list[j])
+                    users = users[:padding_length]
+                    users = users + 1
+                    users = np.pad(users, (padding_length - len(users), 0), constant_values=(0, 0))
+
                     nu = 1 / np.sqrt(ratings_count_by_user[i])
-                    yield (user, item, items, nu), r
+                    ni = 1 / np.sqrt(ratings_count_by_item[j])
+                    yield (user, item, users, items, nu, ni), r
 
             return generator
 
         output_shapes = (
-            ((), (), padding_length, ()),
+            ((), (), padding_length, padding_length, (), ()),
             ())
         output_types = (
-            (tf.int64, tf.int64, tf.int64, tf.float64,),
+            (tf.int64, tf.int64, tf.int64, tf.int64, tf.float64, tf.float64,),
             tf.float64)
 
         train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
@@ -97,7 +103,7 @@ class SVDppDNN(HybridRecommender):
         train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
         return mu, user_bias, item_bias, inverse_fn, train, \
                ratings_count_by_user, ratings_count_by_item, \
-               min_affinity, max_affinity, user_item_list
+               min_affinity, max_affinity, user_item_list, item_user_list
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
                                      user_item_affinities: List[Tuple[str, str, float]],
@@ -124,7 +130,7 @@ class SVDppDNN(HybridRecommender):
         mu, user_bias, item_bias, inverse_fn, train, \
         ratings_count_by_user, ratings_count_by_item, \
         min_affinity, \
-        max_affinity, user_item_list = self.__build_dataset__(user_ids, item_ids,
+        max_affinity, user_item_list, item_user_list = self.__build_dataset__(user_ids, item_ids,
                                                                               user_item_affinities,
                                                                               user_content_vectors,
                                                                               item_content_vectors,
@@ -135,9 +141,11 @@ class SVDppDNN(HybridRecommender):
         input_user = keras.Input(shape=(1,))
         input_item = keras.Input(shape=(1,))
         input_items = keras.Input(shape=(padding_length,))
+        input_users = keras.Input(shape=(padding_length,))
         input_nu = keras.Input(shape=(1,))
+        input_ni = keras.Input(shape=(1,))
 
-        inputs = [input_user, input_item, input_items, input_nu]
+        inputs = [input_user, input_item, input_users, input_items, input_nu, input_ni]
 
         embeddings_initializer = tf.keras.initializers.Constant(user_bias)
         user_bias = keras.layers.Embedding(len(user_ids), 1, input_length=1, embeddings_initializer=embeddings_initializer)(input_user)
@@ -157,6 +165,14 @@ class SVDppDNN(HybridRecommender):
             item_vec = keras.layers.Embedding(len(item_ids), n_collaborative_dims, input_length=1,
                                               embeddings_initializer=item_initializer)(input_item)
 
+            user_initializer = tf.keras.initializers.Constant(
+                np.concatenate((np.array([[0.0] * n_collaborative_dims]), user_vectors), axis=0))
+            user_vecs = keras.layers.Embedding(len(user_ids) + 1, n_collaborative_dims,
+                                               input_length=padding_length, mask_zero=True)(input_users)
+            user_vecs = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_vecs)
+            user_vecs = tf.keras.layers.GlobalAveragePooling1D()(user_vecs)
+            user_vecs = user_vecs * input_ni
+
             item_initializer = tf.keras.initializers.Constant(
                 np.concatenate((np.array([[0.0] * n_collaborative_dims]), item_vectors), axis=0))
             item_vecs = keras.layers.Embedding(len(item_ids) + 1, n_collaborative_dims,
@@ -172,7 +188,8 @@ class SVDppDNN(HybridRecommender):
             item_vec = tf.keras.layers.Flatten()(item_vec)
             user_item_vec_dot = tf.keras.layers.Dot(axes=1, normalize=False)([user_vec, item_vec])
             item_items_vec_dot = tf.keras.layers.Dot(axes=1, normalize=False)([item_vec, item_vecs])
-            implicit_term = user_item_vec_dot + item_items_vec_dot
+            user_user_vec_dot = tf.keras.layers.Dot(axes=1, normalize=False)([user_vec, user_vecs])
+            implicit_term = user_item_vec_dot + item_items_vec_dot + user_user_vec_dot
             return implicit_term
 
         rating = mu + user_bias + item_bias + main_network()
@@ -188,6 +205,7 @@ class SVDppDNN(HybridRecommender):
         model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn, "user_item_list": user_item_list,
+                                "item_user_list": item_user_list,
                                 "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
                                 "ratings_count_by_item": ratings_count_by_item,
                                 "batch_size": batch_size,}
@@ -202,6 +220,7 @@ class SVDppDNN(HybridRecommender):
         ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
         batch_size = self.prediction_artifacts["batch_size"]
         user_item_list = self.prediction_artifacts["user_item_list"]
+        item_user_list = self.prediction_artifacts["item_user_list"]
         padding_length = self.prediction_artifacts["padding_length"]
 
         def generate_prediction_samples(affinities: List[Tuple[str, str]],
@@ -216,14 +235,22 @@ class SVDppDNN(HybridRecommender):
                     items = items + 1
                     items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0))
 
+                    users = np.array(item_user_list[j])
+                    users = users[:padding_length]
+                    users = users + 1
+                    users = np.pad(users, (padding_length - len(users), 0), constant_values=(0, 0))
+
+
+
                     nu = 1 / np.sqrt(ratings_count_by_user[i])
-                    yield user_idx, item_idx, items, nu,
+                    ni = 1 / np.sqrt(ratings_count_by_item[j])
+                    yield user_idx, item_idx, users, items, nu, ni
 
             return generator
 
         output_shapes = (
-            (), (), padding_length, ())
-        output_types = (tf.int64, tf.int64, tf.int64, tf.float64)
+            (), (), padding_length, padding_length, (), ())
+        output_types = (tf.int64, tf.int64, tf.int64, tf.int64, tf.float64, tf.float64)
         predict = tf.data.Dataset.from_generator(generate_prediction_samples(user_item_pairs,
                                                                              self.user_id_to_index, self.item_id_to_index,
                                                                              ratings_count_by_user, ratings_count_by_item),
