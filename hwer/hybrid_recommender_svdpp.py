@@ -9,7 +9,6 @@ import tensorflow.keras.backend as K
 from bidict import bidict
 from more_itertools import flatten
 from sklearn.model_selection import StratifiedKFold
-from sklearn.model_selection import train_test_split
 from surprise import Dataset
 from surprise import Reader
 from surprise import SVDpp
@@ -163,7 +162,6 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
-        train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.5)
 
         user_item_list = defaultdict(list)
         item_user_list = defaultdict(list)
@@ -230,18 +228,14 @@ class HybridRecommenderSVDpp(HybridRecommender):
                 tf.float64)
 
         s = time.time()
-        _ = [i for i in generate_training_samples(train_affinities)()]
+        _ = [i for i in generate_training_samples(user_item_affinities)()]
         e = time.time()
         self.log.debug("Total time to Run Training Generator 1 EPOCH = %.1f", e - s)
-        train = tf.data.Dataset.from_generator(generate_training_samples(train_affinities),
+        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
-        validation = tf.data.Dataset.from_generator(generate_training_samples(validation_affinities),
-                                                    output_types=output_types,
-                                                    output_shapes=output_shapes, )
 
         train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
-        validation = validation.shuffle(batch_size*10).batch(batch_size).prefetch(32)
-        return mu, user_bias, item_bias, inverse_fn, train, validation, n_svd_dims, \
+        return mu, user_bias, item_bias, inverse_fn, train, n_svd_dims, \
                ratings_count_by_user, ratings_count_by_item, svd_uv, svd_iv, \
                min_affinity, max_affinity, user_item_list, item_user_list
 
@@ -278,7 +272,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
 
-        mu, user_bias, item_bias, inverse_fn, train, validation, \
+        mu, user_bias, item_bias, inverse_fn, train, \
         n_svd_dims, ratings_count_by_user, ratings_count_by_item, \
         svd_uv, svd_iv, min_affinity, \
         max_affinity, user_item_list, item_user_list = self.__build_dataset__(user_ids, item_ids,
@@ -430,20 +424,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
         model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=[], verbose=verbose)
-
-        learning_rate.step = 0
-
-        model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=[], verbose=verbose)
-
-        full_dataset = validation.unbatch().concatenate(train.unbatch()).shuffle(batch_size*10).batch(batch_size).prefetch(
-            32)
-        learning_rate.step = 0
-        learning_rate.epochs = 2
-        learning_rate.lr /= 5
-        model.fit(full_dataset, epochs=2, verbose=verbose)
+        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
 
         prediction_artifacts = {"model": model, "inverse_fn": inverse_fn, "user_item_list": user_item_list,
                                 "item_user_list": item_user_list,

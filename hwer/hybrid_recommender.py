@@ -7,7 +7,6 @@ from typing import List, Dict, Tuple, Optional
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.backend as K
-from sklearn.model_selection import train_test_split
 from tensorflow import keras
 
 from .content_recommender import ContentRecommendation
@@ -46,7 +45,6 @@ class HybridRecommender(RecommendationBase):
         max_affinity = np.max(ratings)
         entity_entity_affinities = [(u, i, (2 * 0.9* (r - min_affinity) / (max_affinity - min_affinity)) - 0.9) for u, i, r in
                                     entity_entity_affinities]
-        train_affinities, validation_affinities = train_test_split(entity_entity_affinities, test_size=0.5)
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -68,13 +66,9 @@ class HybridRecommender(RecommendationBase):
         output_shapes = (((), ()), ())
         output_types = ((tf.int64, tf.int64), tf.float32)
 
-        train = tf.data.Dataset.from_generator(generate_training_samples(train_affinities),
+        train = tf.data.Dataset.from_generator(generate_training_samples(entity_entity_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
-        validation = tf.data.Dataset.from_generator(generate_training_samples(validation_affinities),
-                                                    output_types=output_types,
-                                                    output_shapes=output_shapes, )
-        train = train.shuffle(batch_size).batch(batch_size).prefetch(16)
-        validation = validation.shuffle(batch_size).batch(batch_size).prefetch(16)
+        train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
 
         input_1 = keras.Input(shape=(1,))
         input_2 = keras.Input(shape=(1,))
@@ -118,12 +112,7 @@ class HybridRecommender(RecommendationBase):
         model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=[], verbose=verbose)
-
-        learning_rate.step = 0
-        model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=[], verbose=verbose)
+        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
 
         vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size).prefetch(16))
@@ -140,7 +129,6 @@ class HybridRecommender(RecommendationBase):
                                              hyperparams: Dict) -> np.ndarray:
         self.log.debug("Start Training Entity Affinities, n_entities = %s, n_samples = %s, in_dims = %s, out_dims = %s",
                        len(entity_ids), len(entity_entity_affinities), vectors.shape, n_output_dims)
-        train_affinities, validation_affinities = train_test_split(entity_entity_affinities, test_size=0.5)
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -222,13 +210,9 @@ class HybridRecommender(RecommendationBase):
         output_shapes = (((), (), (), (), ()), ())
         output_types = ((tf.int64, tf.int64, tf.int64, tf.float32, tf.float32), tf.float32)
 
-        train = tf.data.Dataset.from_generator(generate_training_samples(train_affinities),
+        train = tf.data.Dataset.from_generator(generate_training_samples(entity_entity_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
-        validation = tf.data.Dataset.from_generator(generate_training_samples(validation_affinities),
-                                                    output_types=output_types,
-                                                    output_shapes=output_shapes, )
-        train = train.shuffle(batch_size).batch(batch_size).prefetch(16)
-        validation = validation.shuffle(batch_size).batch(batch_size).prefetch(16)
+        train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
 
         input_1 = keras.Input(shape=(1,))
         input_2 = keras.Input(shape=(1,))
@@ -281,13 +265,7 @@ class HybridRecommender(RecommendationBase):
         model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=[], verbose=verbose)
-
-        learning_rate.step = 0
-
-        model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=[], verbose=verbose)
+        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
 
         vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size).prefetch(
@@ -368,8 +346,6 @@ class HybridRecommender(RecommendationBase):
 
         n_input_dims = user_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
-        # user_item_affinities = [(u, i, r / max_affinity) for u, i, r in user_item_affinities]
-        train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.5)
         total_users = len(user_ids)
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
@@ -383,14 +359,10 @@ class HybridRecommender(RecommendationBase):
 
         output_shapes = (((), ()), ())
         output_types = ((tf.int64, tf.int64), tf.float32)
-        train = tf.data.Dataset.from_generator(generate_training_samples(train_affinities),
+        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
-        validation = tf.data.Dataset.from_generator(generate_training_samples(validation_affinities),
-                                                    output_types=output_types,
-                                                    output_shapes=output_shapes, )
 
-        train = train.shuffle(batch_size).batch(batch_size)
-        validation = validation.shuffle(batch_size).batch(batch_size)
+        train = train.shuffle(batch_size*10).batch(batch_size)
 
         def build_base_network(embedding_size, n_output_dims, vectors):
             avg_value = np.mean(vectors)
@@ -433,13 +405,7 @@ class HybridRecommender(RecommendationBase):
         model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=[], verbose=verbose)
-
-        learning_rate.step = 0
-
-        model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=[], verbose=verbose)
+        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
 
         user_vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
@@ -471,7 +437,6 @@ class HybridRecommender(RecommendationBase):
         random_negative_weight = hyperparams["random_negative_weight"] if "random_negative_weight" in hyperparams else 0.2
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.1
 
-        # max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
         max_affinity = np.max([r for u, i, r in user_item_affinities])
         min_affinity = np.min([r for u, i, r in user_item_affinities])
         user_item_affinities = [(u, i, (2 * (r - min_affinity) / (max_affinity - min_affinity)) - 1) for u, i, r in
@@ -479,8 +444,6 @@ class HybridRecommender(RecommendationBase):
 
         n_input_dims = user_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
-        # user_item_affinities = [(u, i, r / max_affinity) for u, i, r in user_item_affinities]
-        train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.5)
         total_users = len(user_ids)
         total_items = len(item_ids)
         aff_range = np.max([r for u1, u2, r in user_item_affinities]) - np.min(
@@ -545,14 +508,10 @@ class HybridRecommender(RecommendationBase):
         output_shapes = (((), (), (), (), ()), ())
         output_types = ((tf.int64, tf.int64, tf.int64, tf.float32, tf.float32), tf.float32)
 
-        train = tf.data.Dataset.from_generator(generate_training_samples(train_affinities),
+        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
-        validation = tf.data.Dataset.from_generator(generate_training_samples(validation_affinities),
-                                                    output_types=output_types,
-                                                    output_shapes=output_shapes, )
 
-        train = train.shuffle(batch_size).batch(batch_size).prefetch(16)
-        validation = validation.shuffle(batch_size).batch(batch_size).prefetch(16)
+        train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
 
         def build_base_network(embedding_size, n_output_dims, vectors):
             avg_value = np.mean(vectors)
@@ -606,13 +565,7 @@ class HybridRecommender(RecommendationBase):
         model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        model.fit(train, epochs=epochs,
-                  validation_data=validation, callbacks=[], verbose=verbose)
-
-        learning_rate.step = 0
-
-        model.fit(validation, epochs=epochs,
-                  validation_data=train, callbacks=[], verbose=verbose)
+        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
 
         user_vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
