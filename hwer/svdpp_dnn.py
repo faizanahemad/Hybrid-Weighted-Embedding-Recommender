@@ -144,8 +144,8 @@ class SVDppDNN(HybridRecommender):
 
         item_initializer = tf.keras.initializers.Constant(item_bias)
         item_bias = keras.layers.Embedding(len(item_ids), 1, input_length=1, embeddings_initializer=item_initializer)(input_item)
-        # user_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_bias)
-        # item_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_bias)
+        user_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_bias)
+        item_bias = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_bias)
         user_bias = tf.keras.layers.Flatten()(user_bias)
         item_bias = tf.keras.layers.Flatten()(item_bias)
 
@@ -154,18 +154,20 @@ class SVDppDNN(HybridRecommender):
             user_vec = keras.layers.Embedding(len(user_ids), n_collaborative_dims, input_length=1)(input_user)
 
             item_initializer = tf.keras.initializers.Constant(item_vectors)
-            item_vec = keras.layers.Embedding(len(item_ids), n_collaborative_dims, input_length=1)(input_item)
+            item_vec = keras.layers.Embedding(len(item_ids), n_collaborative_dims, input_length=1,
+                                              embeddings_initializer=item_initializer)(input_item)
 
             item_initializer = tf.keras.initializers.Constant(
                 np.concatenate((np.array([[0.0] * n_collaborative_dims]), item_vectors), axis=0))
             item_vecs = keras.layers.Embedding(len(item_ids) + 1, n_collaborative_dims,
-                                               input_length=padding_length, mask_zero=True,)(input_items)
-            # item_vecs = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vecs)
+                                               input_length=padding_length, mask_zero=True,
+                                               embeddings_initializer=item_initializer)(input_items)
+            item_vecs = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vecs)
             item_vecs = tf.keras.layers.GlobalAveragePooling1D()(item_vecs)
             item_vecs = item_vecs * input_nu
 
-            # user_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_vec)
-            # item_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vec)
+            user_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_vec)
+            item_vec = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vec)
             user_vec = tf.keras.layers.Flatten()(user_vec)
             item_vec = tf.keras.layers.Flatten()(item_vec)
             user_item_vec_dot = tf.keras.layers.Dot(axes=1, normalize=False)([user_vec, item_vec])
