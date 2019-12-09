@@ -3,6 +3,8 @@
 pip install --upgrade pip
 cat requirements.txt | xargs -n 1 pip install
 pip install gpustat
+pip uninstall tensorflow
+pip uninstall tensorflow-gpu
 pip install tensorflow-gpu==2.0
 pip install -e .
 

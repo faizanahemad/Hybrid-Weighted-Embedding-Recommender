@@ -355,15 +355,6 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
     bu = dict(zip(bu['user'], bu['mean']))
     bu = defaultdict(float, bu)
 
-    # Stochastic Gradient Descent Taken from Surprise Lib
-    lr = 0.001
-    reg = 0.05
-    n_epochs = 5
-    for dummy in range(n_epochs):
-        for u, i, r in user_item_affinities:
-            err = (r - (mean + bu[u]))
-            bu[u] += lr * (err - reg * bu[u])
-
     uid = [[u, i, r - (mean + bu[u])] for u, i, r in user_item_affinities]
     uid = pd.DataFrame(uid, columns=["user", "item", "rating"])
     bi = defaultdict(float)
@@ -607,7 +598,7 @@ def resnet_layer_with_content(n_dims, n_out_dims, dropout, kernel_l2, depth=2):
                                    use_bias=False,
                                    kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(x)
         x = h + x
-        # x = tf.keras.layers.Dropout(dropout)(x)
+        x = tf.keras.layers.Dropout(dropout)(x)
         return x
 
     return layer
