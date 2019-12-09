@@ -69,7 +69,7 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.5,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=1.0, epochs=5 * kfold_multiplier, batch_size=32,
+                           prediction_network_params=dict(lr=2.0, epochs=10 * kfold_multiplier, batch_size=32,
                                                           network_width=64, padding_length=50,
                                                           network_depth=4 * kfold_multiplier, verbose=verbose,
                                                           kernel_l2=0.0, rating_regularizer=0.0,
@@ -80,7 +80,7 @@ hyperparameters = dict(combining_factor=0.5,
                            user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
                                                  kernel_l2=0.01, dropout=0.0),
-                           user_item_params=dict(lr=0.1, epochs=3 * kfold_multiplier, batch_size=128,
+                           user_item_params=dict(lr=0.01, epochs=2 * kfold_multiplier, batch_size=128,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
                                                  kernel_l2=0.001, dropout=0.0)))
 
@@ -183,7 +183,7 @@ def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_pa
         predictions = algo.test(trainset_for_testing)
         train_rmse = accuracy.rmse(predictions, verbose=False)
         train_mae = accuracy.mae(predictions, verbose=False)
-        return {"algo": name, "rmse": rmse, "mae": mae, "map": ex_ee["map"], "ext_time": ex_ee["retrieval_time"],
+        return {"algo": name, "rmse": rmse, "mae": mae, "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
                 "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time}
 
     algo_map = {"svd": SVD(**(algo_params["svd"] if "svd" in algo_params else {})),
@@ -312,12 +312,13 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["svd
     total_time = end - start
     predictions, actuals, rmse, mae = get_prediction_details(recsys, validation_affinities)
     _, _, train_rmse, train_mae = get_prediction_details(recsys, train_affinities)
+    print("hybrid-" + "_".join(capabilities), ": ", rmse, mae, train_rmse, train_mae)
     ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
         error_analysis(error_df, "Hybrid")
     results = [{"algo":"hybrid-" + "_".join(capabilities), "rmse": rmse, "mae": mae,
-                "map": ex_ee["map"], "ext_time": ex_ee["retrieval_time"],
+                "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
                 "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time}]
     return recsys, results, predictions, actuals
 

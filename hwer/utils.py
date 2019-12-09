@@ -605,7 +605,7 @@ def resnet_layer_with_content(n_dims, n_out_dims, dropout, kernel_l2, depth=2):
 
 
 class ScaledGlorotNormal(tf.keras.initializers.VarianceScaling):
-    def __init__(self, scale=0.1, seed=None):
+    def __init__(self, scale=1.0, seed=None):
         super(ScaledGlorotNormal, self).__init__(
             scale=scale,
             mode="fan_avg",
