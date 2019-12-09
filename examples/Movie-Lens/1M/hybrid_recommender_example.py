@@ -69,9 +69,9 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.5,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=2.0, epochs=10 * kfold_multiplier, batch_size=32,
+                           prediction_network_params=dict(lr=2.0, epochs=5 * kfold_multiplier, batch_size=32,
                                                           network_width=64, padding_length=50,
-                                                          network_depth=4 * kfold_multiplier, verbose=verbose,
+                                                          network_depth=3 * kfold_multiplier, verbose=verbose,
                                                           kernel_l2=0.0, rating_regularizer=0.0,
                                                           bias_regularizer=0.02, dropout=0.2),
                            item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
@@ -82,7 +82,7 @@ hyperparameters = dict(combining_factor=0.5,
                                                  kernel_l2=0.01, dropout=0.0),
                            user_item_params=dict(lr=0.01, epochs=2 * kfold_multiplier, batch_size=128,
                                                  network_depth=2 * kfold_multiplier, verbose=verbose,
-                                                 kernel_l2=0.001, dropout=0.0)))
+                                                 kernel_l2=0.001, dropout=0.0, margin=0.75)))
 
 if check_working:
     movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
@@ -110,7 +110,7 @@ item_list = list(set([i for u, i, r in user_item_affinities]))
 def surprise_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
-        p = [(i, model.predict(u, i)) for i in items]
+        p = [(i, model.predict(u, i).est) for i in items]
         predictions[u] = p[:k]
     return predictions
 
@@ -327,21 +327,21 @@ if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25, stratify=users_for_each_rating)
     results = []
 
-    capabilities = ["implicit", "triplet"]
+    capabilities = ["implicit"]
     recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
                                                   capabilities=capabilities)
     results.extend(res)
     display_results(results)
 
-    capabilities = ["implicit", "resnet", "content", "triplet"]
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
-    results.extend(res)
-    display_results(results)
-
-    capabilities = ["resnet", "content", "triplet"]
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
-    results.extend(res)
-    display_results(results)
+    # capabilities = ["implicit", "resnet", "content", "triplet"]
+    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
+    # results.extend(res)
+    # display_results(results)
+    #
+    # capabilities = ["resnet", "content", "triplet"]
+    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
+    # results.extend(res)
+    # display_results(results)
 
     results.extend(test_surprise(train_affinities, validation_affinities, item_list, algo=["baseline", "svd", "svdpp"]))
     display_results(results)

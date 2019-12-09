@@ -92,7 +92,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.fit_done = False
         self.knn_params = knn_params
         if self.knn_params is None:
-            self.knn_params = dict(n_neighbors=1000,
+            self.knn_params = dict(n_neighbors=100,
                                    index_time_params={'M': 15, 'ef_construction': 200, })
 
         self.n_output_dims = n_output_dims

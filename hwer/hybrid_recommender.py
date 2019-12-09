@@ -431,11 +431,11 @@ class HybridRecommender(RecommendationBase):
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
-        random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.25
-        random_pair_user_item_proba = hyperparams["random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.2
-        random_positive_weight = hyperparams["random_positive_weight"] if "random_positive_weight" in hyperparams else 0.05
-        random_negative_weight = hyperparams["random_negative_weight"] if "random_negative_weight" in hyperparams else 0.2
-        margin = hyperparams["margin"] if "margin" in hyperparams else 0.1
+        random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.4
+        random_pair_user_item_proba = hyperparams["random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.4
+        random_positive_weight = hyperparams["random_positive_weight"] if "random_positive_weight" in hyperparams else 0.25
+        random_negative_weight = hyperparams["random_negative_weight"] if "random_negative_weight" in hyperparams else 0.5
+        margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
 
         max_affinity = np.max([r for u, i, r in user_item_affinities])
         min_affinity = np.min([r for u, i, r in user_item_affinities])
@@ -571,8 +571,8 @@ class HybridRecommender(RecommendationBase):
             tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
         item_vectors = encoder.predict(
             tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(batch_size).prefetch(16))
-        self.log.debug("End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s",
-                       unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
+        self.log.debug("End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s, margin = %.4f",
+                       unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
         return user_vectors, item_vectors
 
     @abc.abstractmethod
@@ -620,6 +620,8 @@ class HybridRecommender(RecommendationBase):
         else:
             user_vectors, item_vectors = np.random.rand((len(user_ids), self.n_content_dims)), np.random.rand(
                 (len(item_ids), self.n_content_dims))
+        user_vectors = unit_length(user_vectors, axis=1)
+        item_vectors = unit_length(item_vectors, axis=1)
 
         user_content_vectors, item_content_vectors = user_vectors.copy(), item_vectors.copy()
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1] == self.n_content_dims
@@ -631,6 +633,9 @@ class HybridRecommender(RecommendationBase):
                                                                              user_user_affinities, user_ids, item_ids,
                                                                              user_vectors, item_vectors,
                                                                              collaborative_params)
+
+        user_vectors = unit_length(user_vectors, axis=1)
+        item_vectors = unit_length(item_vectors, axis=1)
 
         user_content_vectors, item_content_vectors = user_content_vectors * alpha, item_content_vectors * alpha
         user_vectors, item_vectors = user_vectors * (1 - alpha), item_vectors * (1 - alpha)
