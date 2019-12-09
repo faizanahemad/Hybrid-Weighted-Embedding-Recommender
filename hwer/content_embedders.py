@@ -288,7 +288,7 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
         sentence = Sentence(clean_text(text))
         _ = self.embeddings.embed(sentence)
         a = sentence.get_embedding()
-        result = a.detach().numpy()
+        result = a.cpu().detach().numpy()
         if np.sum(result[0:5]) == 0:
             result = np.random.randn(self.n_dims)
         return result
