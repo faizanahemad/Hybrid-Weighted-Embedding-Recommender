@@ -43,15 +43,13 @@ class HybridRecommender(RecommendationBase):
         ratings = np.array([r for u, i, r in entity_entity_affinities])
         min_affinity = np.min(ratings)
         max_affinity = np.max(ratings)
-        entity_entity_affinities = [(u, i, (2 * 0.9* (r - min_affinity) / (max_affinity - min_affinity)) - 0.9) for u, i, r in
+        entity_entity_affinities = [(u, i, (2 * 0.8 * (r - min_affinity) / (max_affinity - min_affinity)) - 0.8) for u, i, r in
                                     entity_entity_affinities]
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
@@ -80,19 +78,11 @@ class HybridRecommender(RecommendationBase):
             embeddings_initializer = tf.keras.initializers.Constant(vectors)
             embeddings = keras.layers.Embedding(len(entity_ids), embedding_size, input_length=1,
                                                 embeddings_initializer=embeddings_initializer)
-            # embeddings_constraint=FixedNorm()
-            # embeddings_constraint=tf.keras.constraints.unit_norm(axis=2)
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
-            item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
-            dims_fn = lambda x: int(np.interp(x, [0, network_depth - 1], [embedding_size * 2, embedding_size]))
-            for i in range(network_depth):
-                item = resnet_layer_with_content(dims_fn(i), dims_fn(i), dropout, kernel_l2)(item)
-
-            dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
-                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
+            dense = keras.layers.Dense(embedding_size, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
             item = dense(item)
-            item = UnitLengthRegularization(l2=0.1)(item)
+            item = UnitLengthRegularization(l1=0.1)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
@@ -102,7 +92,7 @@ class HybridRecommender(RecommendationBase):
         item_2 = bn(input_2)
 
         pred = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
-        # pred = K.tanh(pred)
+        pred = K.tanh(pred)
         model = keras.Model(inputs=[input_1, input_2],
                             outputs=[pred])
         encoder = bn
@@ -132,10 +122,8 @@ class HybridRecommender(RecommendationBase):
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.2
         random_positive_weight = hyperparams[
             "random_positive_weight"] if "random_positive_weight" in hyperparams else 0.05
@@ -230,15 +218,9 @@ class HybridRecommender(RecommendationBase):
                                                 embeddings_initializer=embeddings_initializer)
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
-            item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
-            dims_fn = lambda x: int(np.interp(x, [0, network_depth - 1], [embedding_size * 2, embedding_size]))
-            for i in range(network_depth):
-                item = resnet_layer_with_content(dims_fn(i), dims_fn(i), dropout, kernel_l2)(item)
-
-            dense = keras.layers.Dense(embedding_size, activation="linear", use_bias=False,
-                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
+            dense = keras.layers.Dense(embedding_size, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
             item = dense(item)
-            item = UnitLengthRegularization(l2=0.1)(item)
+            item = UnitLengthRegularization(l1=0.1)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
@@ -332,10 +314,8 @@ class HybridRecommender(RecommendationBase):
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
 
         # max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
         max_affinity = np.max([r for u, i, r in user_item_affinities])
@@ -373,17 +353,11 @@ class HybridRecommender(RecommendationBase):
                                                 embeddings_initializer=embeddings_initializer)
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
-            item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
-            embedding_size = max(embedding_size, n_output_dims)
-            dims_fn = lambda x: int(np.interp(x, [0, network_depth - 1], [embedding_size * 2, n_output_dims]))
-            for i in range(network_depth):
-                item = resnet_layer_with_content(dims_fn(i), dims_fn(i), dropout, kernel_l2)(item)
-
-            dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False,
-                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
+            #
+            dense = keras.layers.Dense(n_output_dims, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
             item = dense(item)
 
-            item = UnitLengthRegularization(l2=0.1)(item)
+            item = UnitLengthRegularization(l1=0.1)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
@@ -395,7 +369,7 @@ class HybridRecommender(RecommendationBase):
         item = bn(input_2)
 
         pred = tf.keras.layers.Dot(axes=1, normalize=True)([user, item])
-        # pred = K.tanh(pred)
+        pred = K.tanh(pred)
 
         model = keras.Model(inputs=[input_1, input_2],
                             outputs=[pred])
@@ -427,10 +401,8 @@ class HybridRecommender(RecommendationBase):
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.1
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.4
         random_pair_user_item_proba = hyperparams["random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.4
         random_positive_weight = hyperparams["random_positive_weight"] if "random_positive_weight" in hyperparams else 0.25
@@ -522,16 +494,9 @@ class HybridRecommender(RecommendationBase):
                                                 embeddings_initializer=embeddings_initializer)
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
-            item = tf.keras.layers.GaussianNoise(0.001 * avg_value)(item)
-            embedding_size = max(embedding_size, n_output_dims)
-            dims_fn = lambda x: int(np.interp(x, [0, network_depth - 1], [embedding_size * 2, n_output_dims]))
-            for i in range(network_depth):
-                item = resnet_layer_with_content(dims_fn(i), dims_fn(i), dropout, kernel_l2)(item)
-
-            dense = keras.layers.Dense(n_output_dims, activation="linear", use_bias=False,
-                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))
+            dense = keras.layers.Dense(n_output_dims, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
             item = dense(item)
-            item = UnitLengthRegularization(l2=0.1)(item)
+            item = UnitLengthRegularization(l1=0.1)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
@@ -637,6 +602,11 @@ class HybridRecommender(RecommendationBase):
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
 
+        self.log.debug("Fit Method, Unit Length Violations:: user_content = %s, item_content = %s" +
+                       "user_collab = %s, item_collab = %s",
+                       unit_length_violations(user_content_vectors, axis=1), unit_length_violations(item_content_vectors, axis=1),
+                       unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
+
         user_content_vectors, item_content_vectors = user_content_vectors * alpha, item_content_vectors * alpha
         user_vectors, item_vectors = user_vectors * (1 - alpha), item_vectors * (1 - alpha)
         assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
@@ -664,6 +634,9 @@ class HybridRecommender(RecommendationBase):
 
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
+
+        self.log.debug("Fit Method, Before KNN, Unit Length Violations:: user = %s, item = %s",
+                       unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
 
         _, _ = self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
         self.fit_done = True

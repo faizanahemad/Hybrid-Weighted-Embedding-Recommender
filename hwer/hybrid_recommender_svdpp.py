@@ -18,7 +18,7 @@ from tensorflow import keras
 from .hybrid_recommender import HybridRecommender
 from .logging import getLogger
 from .recommendation_base import EntityType
-from .utils import normalize_affinity_scores_by_user_item, RatingPredRegularization, get_rng, \
+from .utils import RatingPredRegularization, get_rng, \
     LRSchedule, resnet_layer_with_content, ScaledGlorotNormal, root_mean_squared_error, mean_absolute_error, \
     normalize_affinity_scores_by_user_item_bs
 
@@ -435,8 +435,8 @@ class HybridRecommenderSVDpp(HybridRecommender):
 
         model = keras.Model(inputs=inputs, outputs=[rating])
 
-        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
-        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
+        # lr = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
+        sgd = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
         model.compile(optimizer=sgd,
                       loss=[root_mean_squared_error], metrics=[root_mean_squared_error, mean_absolute_error])
 

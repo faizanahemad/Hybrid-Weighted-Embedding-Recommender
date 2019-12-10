@@ -367,55 +367,6 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
     return mean, bu, bi, spread, uid
 
 
-def normalize_affinity_scores_by_user_item(user_item_affinities: List[Tuple[str, str, float]], ) \
-        -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
-    log = getLogger("normalize_affinity_scores_by_user_item")
-    start = time.time()
-    uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
-    # Calculating Biases
-    mean = uid.rating.mean()
-    uid["rating"] = uid["rating"] - mean
-    bu = uid.groupby(['user']).agg(['mean', 'min', 'max'])
-    bu.columns = bu.columns.get_level_values(1)
-    bu["spread"] = np.max((bu["max"] - bu["mean"], bu["mean"] - bu["min"]), axis=0)
-    bu = bu.reset_index()
-    uid = uid.merge(bu[["user", "mean"]], on="user")
-    uid["rating"] = uid["rating"] - uid["mean"]
-    uid = uid[["user", "item", "rating"]]
-
-    bi = uid[["user", "item", "rating"]].groupby(['item']).agg(['mean', 'min', 'max'])
-    bi.columns = bi.columns.get_level_values(1)
-    bi["spread"] = np.max((bi["max"] - bi["mean"], bi["mean"] - bi["min"]), axis=0)
-    bi = bi.reset_index()
-    uid = uid.merge(bi[["item", "mean"]], on="item")
-    uid["rating"] = uid["rating"] - uid["mean"]
-
-    bu = dict(zip(bu['user'], bu['mean']))
-    bi = dict(zip(bi['item'], bi['mean']))
-    bu = defaultdict(float, bu)
-    bi = defaultdict(float, bi)
-    # Stochastic Gradient Descent Taken from Surprise Lib
-    lr = 0.001
-    reg = 0.05
-    n_epochs = 5
-    for dummy in range(n_epochs):
-        for u, i, r in user_item_affinities:
-            err = (r - (mean + bu[u] + bi[i]))
-            bu[u] += lr * (err - reg * bu[u])
-            bi[i] += lr * (err - reg * bi[i])
-
-    uid = [[u, i, r - (mean + bu[u] + bi[i])] for u, i, r in user_item_affinities]
-    uid = pd.DataFrame(uid, columns=["user", "item", "rating"])
-
-    # Calculating Spreads
-    spread = max(uid["rating"].max(), np.abs(uid["rating"].min()))
-
-    # Making final Dict
-    uid = list(zip(uid['user'], uid['item'], uid['rating']))
-    log.debug("Calculated Biases in time = %.1f, n_sampples = %s" % (time.time() - start, len(user_item_affinities)))
-    return mean, bu, bi, spread, uid
-
-
 def normalize_affinity_scores_by_user_item_bs(user_item_affinities: List[Tuple[str, str, float]], rating_scale=(1, 5)) \
         -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
     train = pd.DataFrame(user_item_affinities)

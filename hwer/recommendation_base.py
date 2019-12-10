@@ -9,7 +9,7 @@ from bidict import bidict
 
 from .logging import getLogger
 from .utils import is_num, is_2d_array
-from .utils import normalize_affinity_scores_by_user_item, unit_length
+from .utils import normalize_affinity_scores_by_user_item_bs, unit_length
 
 
 # TODO: Add Validations for add apis
@@ -195,7 +195,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.item_features = [feature.feature_name for feature in item_data if feature.feature_type != FeatureType.ID]
         self.item_only_features = list(set(self.item_features) - set(self.user_features))
         self.user_only_features = list(set(self.user_features) - set(self.item_features))
-        self.mu, self.bu, self.bi, self.spread, uid = normalize_affinity_scores_by_user_item(user_item_affinities)
+        self.mu, self.bu, self.bi, self.spread, uid = normalize_affinity_scores_by_user_item_bs(user_item_affinities)
         return uid
 
     def default_prediction(self, user_item_pairs: List[Tuple[str, str]]) -> List[Tuple[str, str, float]]:

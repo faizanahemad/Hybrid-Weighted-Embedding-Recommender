@@ -1,7 +1,7 @@
 import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
-
+from hwer.validation import *
 from hwer.utils import average_precision
 
 pd.set_option('display.max_rows', 500)
@@ -67,22 +67,22 @@ kfold_multiplier = 2 if enable_kfold else 1
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
 
-hyperparameters = dict(combining_factor=0.5,
+hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=2.0, epochs=5 * kfold_multiplier, batch_size=32,
+                           prediction_network_params=dict(lr=0.1, epochs=10 * kfold_multiplier, batch_size=32,
                                                           network_width=64, padding_length=50,
                                                           network_depth=3 * kfold_multiplier, verbose=verbose,
                                                           kernel_l2=0.0, rating_regularizer=0.0,
-                                                          bias_regularizer=0.02, dropout=0.2),
+                                                          bias_regularizer=0.05, dropout=0.2),
                            item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
-                                                 network_depth=2 * kfold_multiplier, verbose=verbose,
-                                                 kernel_l2=0.01, dropout=0.0),
+                                                 verbose=verbose,
+                                                 kernel_l2=0.0),
                            user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
-                                                 network_depth=2 * kfold_multiplier, verbose=verbose,
-                                                 kernel_l2=0.01, dropout=0.0),
-                           user_item_params=dict(lr=0.01, epochs=2 * kfold_multiplier, batch_size=128,
-                                                 network_depth=2 * kfold_multiplier, verbose=verbose,
-                                                 kernel_l2=0.001, dropout=0.0, margin=0.75)))
+                                                 verbose=verbose,
+                                                 kernel_l2=0.0),
+                           user_item_params=dict(lr=0.05, epochs=10 * kfold_multiplier, batch_size=128,
+                                                 verbose=verbose,
+                                                 kernel_l2=0.0, margin=0.5)))
 
 if check_working:
     movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
@@ -105,138 +105,6 @@ print("Total Samples Taken = %s" % (ratings.shape[0]))
 user_item_affinities = [(row[0], row[1], row[2]) for row in ratings.values]
 users_for_each_rating = [row[0] for row in ratings.values]
 item_list = list(set([i for u, i, r in user_item_affinities]))
-
-
-def surprise_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, float]]]:
-    predictions = defaultdict(list)
-    for u in users:
-        p = [(i, model.predict(u, i).est) for i in items]
-        predictions[u] = p[:k]
-    return predictions
-
-
-def model_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, float]]]:
-    return defaultdict(list, {u: model.find_items_for_user(u) for u in users})
-
-
-def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):
-    validation_users = list(set([u for u, i, r in validation_affinities]))
-    train_uid = defaultdict(set)
-    items_extracted_length = []
-    s = time.time()
-    predictions = get_topk(model, validation_users, item_list)
-    e = time.time()
-    pred_time = e - s
-    for u, i, r in train_affinities:
-        train_uid[u].add(i)
-    mean, bu, bi, _, _ = normalize_affinity_scores_by_user(train_affinities)
-    for u, i in predictions.items():
-        base_rating = mean + bu[u]
-        remaining_items = list(sorted(filter(lambda x: x[1] >= base_rating, i), key=operator.itemgetter(1), reverse=True))
-        remaining_items = list(filter(lambda x: x[0] not in train_uid[u], remaining_items))
-        remaining_items = [i for i, r in remaining_items]
-        items_extracted_length.append(len(remaining_items))
-        predictions[u] = remaining_items
-
-    validation_actuals = defaultdict(list)
-    for u, i, r in validation_affinities:
-        validation_actuals[u].append((i, r))
-
-    for u, i in validation_actuals.items():
-        base_rating = mean + bu[u]
-        remaining_items = list(
-            sorted(filter(lambda x: x[1] >= base_rating, i), key=operator.itemgetter(1), reverse=True))
-        remaining_items = list(filter(lambda x: x[0] not in train_uid[u], remaining_items))
-        remaining_items = [i for i, r in remaining_items]
-        items_extracted_length.append(len(remaining_items))
-        validation_actuals[u] = remaining_items
-
-    # check and average map for each user
-    mean_ap = np.mean([average_precision(validation_actuals[u], predictions[u]) for u in validation_users])
-
-    # calculate ndcg
-    return {"map": mean_ap, "retrieval_time": pred_time, "ndcg": 0.0}
-
-
-def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5)):
-    train_affinities = train
-    validation_affinities = test
-    train = pd.DataFrame(train)
-    test = pd.DataFrame(test)
-    reader = Reader(rating_scale=rating_scale)
-    trainset = Dataset.load_from_df(train, reader).build_full_trainset()
-    # testset = Dataset.load_from_df(test, reader).build_full_trainset().build_anti_testset()
-    testset = Dataset.load_from_df(test, reader).build_full_trainset().build_testset()
-    trainset_for_testing = trainset.build_testset()
-
-    def use_algo(algo, name):
-        start = time.time()
-        algo.fit(trainset)
-        predictions = algo.test(testset)
-        end = time.time()
-        total_time = end - start
-        rmse = accuracy.rmse(predictions, verbose=False)
-        mae = accuracy.mae(predictions, verbose=False)
-
-        ex_ee = extraction_efficiency(algo, train_affinities, validation_affinities, surprise_get_topk, items)
-
-        predictions = algo.test(trainset_for_testing)
-        train_rmse = accuracy.rmse(predictions, verbose=False)
-        train_mae = accuracy.mae(predictions, verbose=False)
-        return {"algo": name, "rmse": rmse, "mae": mae, "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
-                "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time}
-
-    algo_map = {"svd": SVD(**(algo_params["svd"] if "svd" in algo_params else {})),
-                "svdpp": SVDpp(**(algo_params["svdpp"] if "svdpp" in algo_params else {})),
-                "baseline": BaselineOnly(bsl_options={'method': 'sgd'})}
-    results = list(map(lambda a: use_algo(algo_map[a], a), algo))
-    return results
-
-
-def display_results(results: List[Dict[str, Any]]):
-    df = pd.DataFrame.from_records(results)
-    df = df.groupby(['algo']).mean()
-    df['time'] = df['time'].apply(lambda s: str(datetime.timedelta(seconds=s)))
-    df['retrieval_time'] = df['retrieval_time'].apply(lambda s: str(datetime.timedelta(seconds=s)))
-    print(df)
-
-
-def get_prediction_details(recsys, affinities):
-    predictions = recsys.predict([(u, i) for u, i, r in affinities])
-    actuals = np.array([r for u, i, r in affinities])
-    rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
-    mae = np.mean(np.abs(actuals - predictions))
-    return predictions, actuals, rmse, mae
-
-
-def error_analysis(error_df, title):
-    print("-x-" * 30)
-    print("%s: Error Analysis -: " % title)
-
-    print(error_df.describe())
-
-    print("Analysis By actuals")
-    print(error_df.groupby(["actuals"]).agg(["mean", "std"]))
-
-    print("Describe Errors -: ")
-    print(describe(error_df["errors"].values))
-    plt.figure(figsize=(8, 6))
-    sns.scatterplot(x="actuals", y="errors", data=error_df)
-    plt.title("Errors vs Actuals")
-    plt.xlabel("Actuals")
-    plt.ylabel("Errors")
-    plt.show()
-    plt.figure(figsize=(8, 6))
-    sns.scatterplot(x="predictions", y="errors", hue="actuals", data=error_df)
-    plt.title("Errors vs Predictions")
-    plt.xlabel("Predictions")
-    plt.ylabel("Errors")
-    plt.show()
-
-    plt.figure(figsize=(8, 6))
-    sns.distplot(error_df["errors"], bins=100)
-    plt.title("Error Histogram")
-    plt.show()
 
 
 def test_once(train_affinities, validation_affinities, items, capabilities=["svdpp", "resnet", "content", "triplet", "implicit"]):
@@ -291,8 +159,11 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["svd
     if "dnn" in capabilities or "resnet" in capabilities:
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
             "use_dnn"] = True
+        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["lr"] = 0.1
 
-    recsys = HybridRecommenderSVDpp(embedding_mapper=embedding_mapper, knn_params=None, rating_scale=(1, 5),
+    recsys = HybridRecommenderSVDpp(embedding_mapper=embedding_mapper,
+                                    knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+                                    rating_scale=(1, 5),
                                     n_content_dims=32 * kfold_multiplier,
                                     n_collaborative_dims=32 * kfold_multiplier)
 
@@ -310,16 +181,14 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["svd
 
     end = time.time()
     total_time = end - start
-    predictions, actuals, rmse, mae = get_prediction_details(recsys, validation_affinities)
-    _, _, train_rmse, train_mae = get_prediction_details(recsys, train_affinities)
-    print("hybrid-" + "_".join(capabilities), ": ", rmse, mae, train_rmse, train_mae)
-    ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
+
+    res = {"algo":"hybrid-" + "_".join(capabilities), "time": total_time}
+    res.update(get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items))
+
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
         error_analysis(error_df, "Hybrid")
-    results = [{"algo":"hybrid-" + "_".join(capabilities), "rmse": rmse, "mae": mae,
-                "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
-                "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time}]
+    results = [res]
     return recsys, results, predictions, actuals
 
 
@@ -327,7 +196,13 @@ if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25, stratify=users_for_each_rating)
     results = []
 
-    capabilities = ["implicit"]
+    # capabilities = ["implicit"]
+    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
+    #                                               capabilities=capabilities)
+    # results.extend(res)
+    # display_results(results)
+
+    capabilities = ["implicit", "triplet"]
     recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
                                                   capabilities=capabilities)
     results.extend(res)
@@ -339,11 +214,11 @@ if not enable_kfold:
     # display_results(results)
     #
     # capabilities = ["resnet", "content", "triplet"]
-    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, capabilities=capabilities)
+    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
     # results.extend(res)
     # display_results(results)
 
-    results.extend(test_surprise(train_affinities, validation_affinities, item_list, algo=["baseline", "svd", "svdpp"]))
+    results.extend(test_surprise(train_affinities, validation_affinities, item_list, algo=["baseline", "svdpp"]))
     display_results(results)
     print(list(zip(actuals[:50], predictions[:50])))
     if test_retrieval:
