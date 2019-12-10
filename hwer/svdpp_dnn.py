@@ -50,9 +50,6 @@ class SVDppDNN(HybridRecommender):
         max_affinity = np.max(ratings)
         mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item_bs(user_item_affinities, rating_scale)
 
-        def inverse_fn(user_item_predictions):
-            rscaled = np.array([r for u, i, r in user_item_predictions])
-            return rscaled
 
         user_bias = np.array([user_bias[u] if u in user_bias else 0.0 for u in user_ids])
         item_bias = np.array([item_bias[i] if i in item_bias else 0.0 for i in item_ids])
@@ -69,41 +66,43 @@ class SVDppDNN(HybridRecommender):
             user_item_list[i].append(item_id_to_index[j])
             item_user_list[j].append(user_id_to_index[i])
 
+        def gen_fn(i, j):
+            user = user_id_to_index[i]
+            item = item_id_to_index[j]
+            items = np.array(user_item_list[i])
+            items = items[:padding_length]
+            items = items + 1
+            items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0))
+
+            users = np.array(item_user_list[j])
+            users = users[:padding_length]
+            users = users + 1
+            users = np.pad(users, (padding_length - len(users), 0), constant_values=(0, 0))
+
+            nu = 1 / np.sqrt(ratings_count_by_user[i])
+            ni = 1 / np.sqrt(ratings_count_by_item[j])
+            return user, item, users, items, nu, ni
+
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
                 for i, j, r in affinities:
-                    user = user_id_to_index[i]
-                    item = item_id_to_index[j]
-                    items = np.array(user_item_list[i])
-                    items = items[:padding_length]
-                    items = items + 1
-                    items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0))
-
-                    users = np.array(item_user_list[j])
-                    users = users[:padding_length]
-                    users = users + 1
-                    users = np.pad(users, (padding_length - len(users), 0), constant_values=(0, 0))
-
-                    nu = 1 / np.sqrt(ratings_count_by_user[i])
-                    ni = 1 / np.sqrt(ratings_count_by_item[j])
-                    yield (user, item, users, items, nu, ni), r
+                    yield gen_fn(i, j), r
 
             return generator
 
-        output_shapes = (
-            ((), (), padding_length, padding_length, (), ()),
-            ())
-        output_types = (
-            (tf.int64, tf.int64, tf.int64, tf.int64, tf.float64, tf.float64,),
-            tf.float64)
+        prediction_output_shape = ((), (), padding_length, padding_length, (), ())
+        prediction_output_types = (tf.int64, tf.int64, tf.int64, tf.int64, tf.float64, tf.float64,)
+        output_shapes = (prediction_output_shape, ())
+        output_types = (prediction_output_types, tf.float64)
 
         train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
 
         train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
-        return mu, user_bias, item_bias, inverse_fn, train, \
+        return mu, user_bias, item_bias, train, \
                ratings_count_by_user, ratings_count_by_item, \
-               min_affinity, max_affinity, user_item_list, item_user_list
+               min_affinity, max_affinity, user_item_list, item_user_list, \
+               gen_fn, prediction_output_shape, prediction_output_types
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
                                      user_item_affinities: List[Tuple[str, str, float]],
@@ -127,10 +126,11 @@ class SVDppDNN(HybridRecommender):
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
 
-        mu, user_bias, item_bias, inverse_fn, train, \
+        mu, user_bias, item_bias, train, \
         ratings_count_by_user, ratings_count_by_item, \
         min_affinity, \
-        max_affinity, user_item_list, item_user_list = self.__build_dataset__(user_ids, item_ids,
+        max_affinity, user_item_list, item_user_list, \
+        gen_fn, prediction_output_shape, prediction_output_types = self.__build_dataset__(user_ids, item_ids,
                                                                               user_item_affinities,
                                                                               user_content_vectors,
                                                                               item_content_vectors,
@@ -204,67 +204,48 @@ class SVDppDNN(HybridRecommender):
 
         model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
 
-        prediction_artifacts = {"model": model, "inverse_fn": inverse_fn, "user_item_list": user_item_list,
+        prediction_artifacts = {"model": model, "user_item_list": user_item_list,
                                 "item_user_list": item_user_list,
                                 "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
                                 "ratings_count_by_item": ratings_count_by_item,
-                                "batch_size": batch_size,}
+                                "batch_size": batch_size, "gen_fn": gen_fn,
+                                "prediction_output_shape": prediction_output_shape,
+                                "prediction_output_types": prediction_output_types}
         self.log.info("Built Prediction Network, model params = %s", model.count_params())
         return prediction_artifacts
 
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         start = time.time()
         model = self.prediction_artifacts["model"]
-        inverse_fn = self.prediction_artifacts["inverse_fn"]
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
         ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
         batch_size = self.prediction_artifacts["batch_size"]
         user_item_list = self.prediction_artifacts["user_item_list"]
         item_user_list = self.prediction_artifacts["item_user_list"]
         padding_length = self.prediction_artifacts["padding_length"]
+        gen_fn = self.prediction_artifacts["gen_fn"]
+        prediction_output_shape = self.prediction_artifacts["prediction_output_shape"]
+        prediction_output_types = self.prediction_artifacts["prediction_output_types"]
 
         def generate_prediction_samples(affinities: List[Tuple[str, str]],
                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                         ratings_count_by_user: Counter, ratings_count_by_item: Counter):
             def generator():
                 for i, j in affinities:
-                    user_idx = user_id_to_index[i]
-                    item_idx = item_id_to_index[j]
-                    items = np.array(user_item_list[i])
-                    items = items[:padding_length]
-                    items = items + 1
-                    items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0))
-
-                    users = np.array(item_user_list[j])
-                    users = users[:padding_length]
-                    users = users + 1
-                    users = np.pad(users, (padding_length - len(users), 0), constant_values=(0, 0))
-
-
-
-                    nu = 1 / np.sqrt(ratings_count_by_user[i])
-                    ni = 1 / np.sqrt(ratings_count_by_item[j])
-                    yield user_idx, item_idx, users, items, nu, ni
-
+                    yield gen_fn(i, j)
             return generator
 
-        output_shapes = (
-            (), (), padding_length, padding_length, (), ())
-        output_types = (tf.int64, tf.int64, tf.int64, tf.int64, tf.float64, tf.float64)
         predict = tf.data.Dataset.from_generator(generate_prediction_samples(user_item_pairs,
                                                                              self.user_id_to_index, self.item_id_to_index,
                                                                              ratings_count_by_user, ratings_count_by_item),
-                                                 output_types=output_types, output_shapes=output_shapes, )
+                                                 output_types=prediction_output_types, output_shapes=prediction_output_shape, )
         predict = predict.batch(batch_size).prefetch(16)
         predictions = np.array(list(flatten([model.predict(x).reshape((-1)) for x in predict])))
         self.log.debug("Predictions shape = %s", predictions.shape)
         assert len(predictions) == len(user_item_pairs)
-        users, items = zip(*user_item_pairs)
-        invert_start = time.time()
-        predictions = inverse_fn([(u, i, r) for u, i, r in zip(users, items, predictions)])
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
-        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f, Invert time = %.1f",
+        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f",
                       len(user_item_pairs),
-                      time.time() - start, time.time() - invert_start)
+                      time.time() - start)
         return predictions
