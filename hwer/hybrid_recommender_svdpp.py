@@ -335,8 +335,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
             user_vec = keras.layers.Embedding(len(user_ids), n_collaborative_dims, input_length=1)(input_user)
 
             item_initializer = tf.keras.initializers.Constant(item_vectors)
-            item_vec = keras.layers.Embedding(len(item_ids), n_collaborative_dims, input_length=1,
-                                              embeddings_initializer=initializer)(input_item)
+            item_vec = keras.layers.Embedding(len(item_ids), n_collaborative_dims, input_length=1)(input_item)
 
             user_initializer = tf.keras.initializers.Constant(
                 np.concatenate((np.array([[0.0] * n_collaborative_dims]), user_vectors), axis=0))
@@ -349,8 +348,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
             item_initializer = tf.keras.initializers.Constant(
                 np.concatenate((np.array([[0.0] * n_collaborative_dims]), item_vectors), axis=0))
             item_vecs = keras.layers.Embedding(len(item_ids) + 1, n_collaborative_dims,
-                                               input_length=padding_length, mask_zero=True,
-                                               embeddings_initializer=initializer)(input_items)
+                                               input_length=padding_length, mask_zero=True)(input_items)
             item_vecs = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vecs)
             item_vecs = tf.keras.layers.GlobalAveragePooling1D()(item_vecs)
             item_vecs = item_vecs * input_nu

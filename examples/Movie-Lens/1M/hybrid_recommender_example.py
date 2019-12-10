@@ -69,11 +69,11 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.05, epochs=6 * kfold_multiplier, batch_size=64,
+                           prediction_network_params=dict(lr=0.05, epochs=10 * kfold_multiplier, batch_size=64,
                                                           network_width=64, padding_length=50,
-                                                          network_depth=3 * kfold_multiplier, verbose=verbose,
+                                                          network_depth=4 * kfold_multiplier, verbose=verbose,
                                                           kernel_l2=0.0, rating_regularizer=0.0,
-                                                          bias_regularizer=0.02, dropout=0.2),
+                                                          bias_regularizer=0.02, dropout=0.1),
                            item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                  verbose=verbose),
                            user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
@@ -146,6 +146,8 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["svd
     if "content" in capabilities:
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
             "resnet_content_each_layer"] = True
+        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
+            "use_content"] = True
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = True
     if "triplet" in capabilities:
         kwargs["hyperparameters"]['collaborative_params'][
@@ -194,27 +196,22 @@ if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25, stratify=users_for_each_rating)
     results = []
 
-    # capabilities = ["implicit"]
-    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
-    #                                               capabilities=capabilities)
-    # results.extend(res)
-    # display_results(results)
-
-    capabilities = ["implicit", "triplet", "resnet", "svdpp"]
+    capabilities = []
     recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
                                                   capabilities=capabilities)
     results.extend(res)
     display_results(results)
 
-    # capabilities = ["implicit", "resnet", "content", "triplet"]
-    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
-    # results.extend(res)
-    # display_results(results)
-    #
-    # capabilities = ["resnet", "content", "triplet"]
-    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
-    # results.extend(res)
-    # display_results(results)
+    capabilities = ["triplet"]
+    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
+                                                  capabilities=capabilities)
+    results.extend(res)
+    display_results(results)
+
+    capabilities = ["triplet", "content"]
+    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
+    results.extend(res)
+    display_results(results)
 
     results.extend(test_surprise(train_affinities, validation_affinities, item_list, algo=["baseline", "svdpp"]))
     display_results(results)
@@ -240,17 +237,20 @@ else:
         train_affinities, validation_affinities = X[train_index], X[test_index]
         train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
         validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
-        recsys, res, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid-resnet")
-        # recsys, res1, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid")
-        # recsys, res2, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid-triplet")
-        # recsys, res3, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid-svdpp")
-        # recsys, res4, _, _ = test_once(train_affinities, validation_affinities, algo="hybrid-resnet-content")
-        # res.extend(res1)
-        # res.extend(res2)
-        # res.extend(res3)
-        # res.extend(res4)
-        res.extend(test_surprise(train_affinities, validation_affinities))
-        display_results(res)
+        capabilities = []
+        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
+                                                      capabilities=capabilities)
         results.extend(res)
+        capabilities = ["triplet"]
+        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
+                                      capabilities=capabilities)
+        results.extend(res)
+        capabilities = ["triplet", "content"]
+        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
+                                      capabilities=capabilities)
+        results.extend(res)
+        results.extend(test_surprise(train_affinities, validation_affinities, item_list, algo=["baseline", "svdpp"]))
+        display_results(results)
+
         print("#" * 80)
     display_results(results)
