@@ -69,20 +69,17 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.1, epochs=10 * kfold_multiplier, batch_size=32,
+                           prediction_network_params=dict(lr=0.05, epochs=6 * kfold_multiplier, batch_size=64,
                                                           network_width=64, padding_length=50,
                                                           network_depth=3 * kfold_multiplier, verbose=verbose,
                                                           kernel_l2=0.0, rating_regularizer=0.0,
-                                                          bias_regularizer=0.05, dropout=0.2),
+                                                          bias_regularizer=0.02, dropout=0.2),
                            item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
-                                                 verbose=verbose,
-                                                 kernel_l2=0.0),
+                                                 verbose=verbose),
                            user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
-                                                 verbose=verbose,
-                                                 kernel_l2=0.0),
+                                                 verbose=verbose),
                            user_item_params=dict(lr=0.05, epochs=10 * kfold_multiplier, batch_size=128,
-                                                 verbose=verbose,
-                                                 kernel_l2=0.0, margin=0.5)))
+                                                 verbose=verbose, margin=0.5)))
 
 if check_working:
     movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
@@ -161,7 +158,7 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["svd
             "use_dnn"] = True
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["lr"] = 0.1
 
-    recsys = HybridRecommenderSVDpp(embedding_mapper=embedding_mapper,
+    recsys = SVDppDNN(embedding_mapper=embedding_mapper,
                                     knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                                     rating_scale=(1, 5),
                                     n_content_dims=32 * kfold_multiplier,
@@ -183,7 +180,8 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["svd
     total_time = end - start
 
     res = {"algo":"hybrid-" + "_".join(capabilities), "time": total_time}
-    res.update(get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items))
+    predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items)
+    res.update(stats)
 
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
@@ -202,7 +200,7 @@ if not enable_kfold:
     # results.extend(res)
     # display_results(results)
 
-    capabilities = ["implicit", "triplet"]
+    capabilities = ["implicit", "triplet", "resnet", "svdpp"]
     recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
                                                   capabilities=capabilities)
     results.extend(res)

@@ -49,7 +49,6 @@ class HybridRecommender(RecommendationBase):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
@@ -123,7 +122,6 @@ class HybridRecommender(RecommendationBase):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.2
         random_positive_weight = hyperparams[
             "random_positive_weight"] if "random_positive_weight" in hyperparams else 0.05
@@ -315,7 +313,6 @@ class HybridRecommender(RecommendationBase):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
 
         # max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
         max_affinity = np.max([r for u, i, r in user_item_affinities])
@@ -402,11 +399,13 @@ class HybridRecommender(RecommendationBase):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.001
-        random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.4
-        random_pair_user_item_proba = hyperparams["random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.4
-        random_positive_weight = hyperparams["random_positive_weight"] if "random_positive_weight" in hyperparams else 0.25
-        random_negative_weight = hyperparams["random_negative_weight"] if "random_negative_weight" in hyperparams else 0.5
+        random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.2
+        random_pair_user_item_proba = hyperparams[
+            "random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.2
+        random_positive_weight = hyperparams[
+            "random_positive_weight"] if "random_positive_weight" in hyperparams else 0.1
+        random_negative_weight = hyperparams[
+            "random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
 
         max_affinity = np.max([r for u, i, r in user_item_affinities])
@@ -433,7 +432,7 @@ class HybridRecommender(RecommendationBase):
                 if r > 0:
                     user_close_dict[i].append((j, r))
                     item_close_dict[j].append((i, r))
-                if r < 0:
+                if r <= 0:
                     user_far_dict[i].append((j, r))
                     item_far_dict[j].append((i, r))
 
@@ -445,7 +444,7 @@ class HybridRecommender(RecommendationBase):
                     second_item = total_users + item_id_to_index[j]
                     random_item = total_users + item_id_to_index[item_ids[np.random.randint(0, total_items)]]
                     random_user = user_id_to_index[user_ids[np.random.randint(0, total_users)]]
-                    choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba/10)
+                    choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba/20)
                     choose_user_pair = np.random.rand() < random_pair_user_item_proba
                     if r < 0:
                         distant_item = second_item
@@ -519,6 +518,153 @@ class HybridRecommender(RecommendationBase):
         i1_i3_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_3])
         i1_i3_dist = 1 - i1_i3_dist
         i1_i3_dist = i1_i3_dist / K.abs(far_weight)
+
+        loss = K.relu(i1_i2_dist - i1_i3_dist + margin)
+        model = keras.Model(inputs=[input_1, input_2, input_3, close_weight, far_weight],
+                            outputs=[loss])
+
+        encoder = bn
+        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
+        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
+        model.compile(optimizer=sgd,
+                      loss=['mean_squared_error'], metrics=["mean_squared_error"])
+
+        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
+
+        user_vectors = encoder.predict(
+            tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
+        item_vectors = encoder.predict(
+            tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(batch_size).prefetch(16))
+        self.log.debug("End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s, margin = %.4f",
+                       unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
+        return user_vectors, item_vectors
+
+
+    def __user_item_affinities_sorted_triplet_trainer__(self,
+                                         user_ids: List[str], item_ids: List[str],
+                                         user_item_affinities: List[Tuple[str, str, float]],
+                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                         n_output_dims: int,
+                                         hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
+        self.log.debug("Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+                       len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
+        random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.2
+        random_pair_user_item_proba = hyperparams["random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.2
+        random_positive_weight = hyperparams["random_positive_weight"] if "random_positive_weight" in hyperparams else 0.1
+        random_negative_weight = hyperparams["random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
+        margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
+
+        max_affinity = np.max([r for u, i, r in user_item_affinities])
+        min_affinity = np.min([r for u, i, r in user_item_affinities])
+        user_item_affinities = [(u, i, (2 * (r - min_affinity) / (max_affinity - min_affinity)) - 1) for u, i, r in
+                                user_item_affinities]
+
+        n_input_dims = user_vectors.shape[1]
+        assert user_vectors.shape[1] == item_vectors.shape[1]
+        total_users = len(user_ids)
+        total_items = len(item_ids)
+        aff_range = np.max([r for u1, u2, r in user_item_affinities]) - np.min(
+            [r for u1, u2, r in user_item_affinities])
+        random_positive_weight = random_positive_weight * aff_range
+        random_negative_weight = random_negative_weight * aff_range
+
+        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
+            user_dict = defaultdict(list)
+            item_dict = defaultdict(list)
+            for i, j, r in affinities:
+                user_dict[i].append((j, r))
+                item_dict[j].append((i, r))
+
+            for u, i in user_dict.items():
+                user_dict[u] = list(sorted(i, key=operator.itemgetter(1), reverse=True))
+
+            for i, u in item_dict.items():
+                item_dict[i] = list(sorted(u, key=operator.itemgetter(1), reverse=True))
+
+            def triplet_wt_fn(x): return 1 + np.log1p(np.abs(x / aff_range))
+
+            def generator():
+                for i, j, r in affinities:
+                    user = user_id_to_index[i]
+                    second_item = total_users + item_id_to_index[j]
+                    random_item = total_users + item_id_to_index[item_ids[np.random.randint(0, total_items)]]
+                    random_user = user_id_to_index[user_ids[np.random.randint(0, total_users)]]
+                    choose_random_pair = np.random.rand() < random_pair_proba
+                    choose_user_pair = np.random.rand() < random_pair_user_item_proba
+
+                    user_items = user_dict[i]
+                    item_users = item_dict[j]
+                    user_items_length = len(user_items)
+                    item_users_length = len(item_users)
+                    close_item_weight = r
+                    if choose_random_pair or (user_items_length < 2 and item_users_length < 2):
+                        distant_item, distant_item_weight = random_user if choose_user_pair else random_item, random_positive_weight
+                    elif user_items_length >= 2 or item_users_length >= 2:
+                        if (choose_user_pair or user_items_length < 2) and item_users_length >= 2:
+                            udx = np.random.randint(0, item_users_length - 1)
+                            uidx, close_item_weight = item_users[udx]
+                            user = user_id_to_index[uidx]
+                            uidx2, distant_item_weight = item_users[np.random.randint(udx + 1, item_users_length)]
+                            distant_item = user_id_to_index[uidx2]
+                        else:
+                            idx = np.random.randint(0, user_items_length - 1)
+                            iidx, close_item_weight = user_items[idx]
+                            second_item = total_users + item_id_to_index[iidx]
+                            iidx2, distant_item_weight = user_items[np.random.randint(idx + 1, user_items_length)]
+                            distant_item = total_users + item_id_to_index[iidx2]
+
+                    close_item_weight = triplet_wt_fn(close_item_weight)
+                    distant_item_weight = triplet_wt_fn(distant_item_weight)
+                    yield (user, second_item, distant_item, close_item_weight, distant_item_weight), 0
+            return generator
+
+        output_shapes = (((), (), (), (), ()), ())
+        output_types = ((tf.int64, tf.int64, tf.int64, tf.float32, tf.float32), tf.float32)
+
+        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
+                                               output_types=output_types, output_shapes=output_shapes, )
+
+        train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
+
+        def build_base_network(embedding_size, n_output_dims, vectors):
+            avg_value = np.mean(vectors)
+            i1 = keras.Input(shape=(1,))
+
+            embeddings_initializer = tf.keras.initializers.Constant(vectors)
+            embeddings = keras.layers.Embedding(len(user_ids) + len(item_ids), embedding_size, input_length=1,
+                                                embeddings_initializer=embeddings_initializer)
+            item = embeddings(i1)
+            item = tf.keras.layers.Flatten()(item)
+            dense = keras.layers.Dense(n_output_dims, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
+            item = dense(item)
+            item = UnitLengthRegularization(l1=0.1)(item)
+            base_network = keras.Model(inputs=i1, outputs=item)
+            return base_network
+
+        bn = build_base_network(n_input_dims, n_output_dims, np.concatenate((user_vectors, item_vectors)))
+        input_1 = keras.Input(shape=(1,))
+        input_2 = keras.Input(shape=(1,))
+        input_3 = keras.Input(shape=(1,))
+
+        close_weight = keras.Input(shape=(1,))
+        far_weight = keras.Input(shape=(1,))
+
+        item_1 = bn(input_1)
+        item_2 = bn(input_2)
+        item_3 = bn(input_3)
+
+        i1_i2_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
+        i1_i2_dist = 1 - i1_i2_dist
+        i1_i2_dist = i1_i2_dist
+
+        i1_i3_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_3])
+        i1_i3_dist = 1 - i1_i3_dist
+        i1_i3_dist = i1_i3_dist
 
         loss = K.relu(i1_i2_dist - i1_i3_dist + margin)
         model = keras.Model(inputs=[input_1, input_2, input_3, close_weight, far_weight],

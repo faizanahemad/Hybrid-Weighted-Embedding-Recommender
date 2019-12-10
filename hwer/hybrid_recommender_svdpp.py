@@ -171,7 +171,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
             user_item_list[i].append(item_id_to_index[j])
             item_user_list[j].append(user_id_to_index[i])
 
-        user_item_affinities = list(sorted(user_item_affinities, key=operator.itemgetter(0)))
+        # user_item_affinities = list(sorted(user_item_affinities, key=operator.itemgetter(0)))
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             def generator():
@@ -362,7 +362,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
             user_item_vec_dot = tf.keras.layers.Dot(axes=1, normalize=False)([user_vec, item_vec])
             item_items_vec_dot = tf.keras.layers.Dot(axes=1, normalize=False)([item_vec, item_vecs])
             user_user_vec_dot = tf.keras.layers.Dot(axes=1, normalize=False)([user_vec, user_vecs])
-            implicit_term = user_item_vec_dot + item_items_vec_dot + user_user_vec_dot
+            implicit_term = user_item_vec_dot + item_items_vec_dot
 
             user_content = input_1
             item_content = input_2
@@ -418,7 +418,7 @@ class HybridRecommenderSVDpp(HybridRecommender):
                     # dense_representation = tf.keras.layers.BatchNormalization()(dense_representation)
                     dense_representation = tf.keras.layers.Dropout(dropout)(dense_representation)
 
-            rating = keras.layers.Dense(1, activation="linear", use_bias=False, kernel_initializer=ScaledGlorotNormal(),
+            rating = keras.layers.Dense(1, activation="tanh", use_bias=False, kernel_initializer=ScaledGlorotNormal(),
                                         kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(
                 dense_representation)
             result = 0.0

@@ -142,9 +142,10 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
     predictions, actuals, rmse, mae = get_details(recsys, validation_affinities)
     print(rmse, mae, train_rmse, train_mae)
     ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
-    return {"rmse": rmse, "mae": mae,
+    stats = {"rmse": rmse, "mae": mae,
             "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
             "train_rmse": train_rmse, "train_mae": train_mae}
+    return predictions, actuals, stats
 
 
 def error_analysis(error_df, title):
