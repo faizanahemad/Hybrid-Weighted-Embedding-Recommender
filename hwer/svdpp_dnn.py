@@ -24,8 +24,8 @@ from .utils import RatingPredRegularization, get_rng, \
 
 class SVDppDNN(HybridRecommender):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
-                 n_content_dims: int = 32, n_collaborative_dims: int = 32):
-        super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims)
+                 n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False):
+        super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims, fast_inference)
         self.log = getLogger(type(self).__name__)
 
     def __build_dataset__(self, user_ids: List[str], item_ids: List[str],
@@ -43,7 +43,7 @@ class SVDppDNN(HybridRecommender):
         item_content_vectors_mean = np.mean(item_content_vectors)
         user_vectors_mean = np.mean(user_vectors)
         item_vectors_mean = np.mean(item_vectors)
-        self.log.debug("For rng regularization, user_content_vectors_mean = %s,  item_content_vectors_mean = %s, user_vectors_mean = %s, item_vectors_mean = %s",
+        self.log.debug("user_content_vectors_mean = %s,  item_content_vectors_mean = %s, user_vectors_mean = %s, item_vectors_mean = %s",
                        user_content_vectors_mean, item_content_vectors_mean, user_vectors_mean, item_vectors_mean)
 
         ###
@@ -62,27 +62,31 @@ class SVDppDNN(HybridRecommender):
         ratings_count_by_user = Counter([u for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([i for u, i, r in user_item_affinities])
 
+        ratings_count_by_user = defaultdict(int, {k: 1/np.sqrt(v) for k, v in ratings_count_by_user.items()})
+        ratings_count_by_item = defaultdict(int, {k: 1/np.sqrt(v) for k, v in ratings_count_by_item.items()})
+
         user_item_list = defaultdict(list)
         item_user_list = defaultdict(list)
         for i, j, r in user_item_affinities:
             user_item_list[i].append(item_id_to_index[j])
             item_user_list[j].append(user_id_to_index[i])
+        for k, v in user_item_list.items():
+            user_item_list[k] = np.array(v)[:padding_length] + 1
+
+        for k, v in item_user_list.items():
+            item_user_list[k] = np.array(v)[:padding_length] + 1
 
         def gen_fn(i, j):
             user = user_id_to_index[i]
             item = item_id_to_index[j]
-            items = np.array(user_item_list[i])
-            items = items[:padding_length]
-            items = items + 1
+            items = user_item_list[i]
             items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0))
 
-            users = np.array(item_user_list[j])
-            users = users[:padding_length]
-            users = users + 1
+            users = item_user_list[j]
             users = np.pad(users, (padding_length - len(users), 0), constant_values=(0, 0))
 
-            nu = 1 / np.sqrt(ratings_count_by_user[i])
-            ni = 1 / np.sqrt(ratings_count_by_item[j])
+            nu = ratings_count_by_user[i]
+            ni = ratings_count_by_item[j]
             if use_content:
                 ucv = user_content_vectors[user]
                 uv = user_vectors[user]
@@ -229,6 +233,7 @@ class SVDppDNN(HybridRecommender):
                     dense_rep = tf.keras.layers.Dropout(dropout)(dense_rep)
                     dense_rep = keras.layers.Dense(network_width, activation="tanh",
                                                    kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(dense_rep)
+                    dense_rep = tf.keras.layers.BatchNormalization()(dense_rep)
                 rating = keras.layers.Dense(1, activation="tanh",
                                             kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(dense_rep)
                 implicit_term = implicit_term + rating
@@ -294,7 +299,7 @@ class SVDppDNN(HybridRecommender):
         assert len(predictions) == len(user_item_pairs)
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
-        self.log.info("Finished Predicting for n_samples = %s, time taken = %.1f",
+        self.log.info("Finished Predicting for n_samples = %s, time taken = %.2f",
                       len(user_item_pairs),
                       time.time() - start)
         return predictions

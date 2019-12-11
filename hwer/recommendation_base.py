@@ -233,10 +233,11 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         return np.average(embeddings, axis=0)
 
     def find_similar_items(self, item: str, positive: List[Tuple[str, EntityType]] = None,
-                           negative: List[Tuple[str, EntityType]] = None) \
+                           negative: List[Tuple[str, EntityType]] = None, k=None) \
             -> List[Tuple[str, float]]:
         assert self.fit_done
         assert item in self.items_set
+        k = self.knn_params['n_neighbors'] if k is None else k
         embedding_list = [self.get_average_embeddings([(item, EntityType.ITEM)])]
         if positive is not None and len(positive) > 0:
             embedding_list.append(self.get_average_embeddings(positive))
@@ -245,13 +246,14 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         embedding = np.average(embedding_list, axis=0)
 
-        (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=self.knn_params['n_neighbors'])
+        (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=k)
         return [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
 
     def find_similar_users(self, user: str, positive: List[Tuple[str, EntityType]] = None,
-                           negative: List[Tuple[str, EntityType]] = None) -> List[Tuple[str, float]]:
+                           negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
         assert self.fit_done
         assert user in self.users_set
+        k = self.knn_params['n_neighbors'] if k is None else k
         embedding_list = [self.get_average_embeddings([(user, EntityType.USER)])]
         if positive is not None and len(positive) > 0:
             embedding_list.append(self.get_average_embeddings(positive))
@@ -259,13 +261,14 @@ class RecommendationBase(metaclass=abc.ABCMeta):
             embedding_list.append(-1 * self.get_average_embeddings(negative))
 
         embedding = np.average(embedding_list, axis=0)
-        (neighbors,), (dist,) = self.user_knn.knn_query([embedding], k=self.knn_params['n_neighbors'])
+        (neighbors,), (dist,) = self.user_knn.knn_query([embedding], k=k)
         return [(self.user_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
 
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
-                            negative: List[Tuple[str, EntityType]] = None) -> List[Tuple[str, float]]:
+                            negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
         assert self.fit_done
         assert user in self.users_set
+        k = self.knn_params['n_neighbors'] if k is None else k
         embedding_list = [self.get_average_embeddings([(user, EntityType.USER)])]
         if positive is not None and len(positive) > 0:
             embedding_list.append(self.get_average_embeddings(positive))
@@ -273,7 +276,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
             embedding_list.append(-1 * self.get_average_embeddings(negative))
 
         embedding = np.average(embedding_list, axis=0)
-        (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=self.knn_params['n_neighbors'])
+        (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=k)
         return [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
 
     @staticmethod

@@ -69,7 +69,7 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.05, epochs=10 * kfold_multiplier, batch_size=64,
+                           prediction_network_params=dict(lr=0.05, epochs=11 * kfold_multiplier, batch_size=64,
                                                           network_width=64, padding_length=50,
                                                           network_depth=4 * kfold_multiplier, verbose=verbose,
                                                           kernel_l2=0.0, rating_regularizer=0.0,
@@ -104,16 +104,16 @@ users_for_each_rating = [row[0] for row in ratings.values]
 item_list = list(set([i for u, i, r in user_item_affinities]))
 
 
-def test_once(train_affinities, validation_affinities, items, capabilities=["svdpp", "resnet", "content", "triplet", "implicit"]):
+def prepare_data_mappers():
     embedding_mapper = {}
     embedding_mapper['gender'] = CategoricalEmbedding(n_dims=2)
     embedding_mapper['age'] = CategoricalEmbedding(n_dims=2)
-    embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=4*kfold_multiplier)
-    embedding_mapper['zip'] = CategoricalEmbedding(n_dims=2*kfold_multiplier)
+    embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=4 * kfold_multiplier)
+    embedding_mapper['zip'] = CategoricalEmbedding(n_dims=2 * kfold_multiplier)
 
     embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
-    embedding_mapper['numeric'] = NumericEmbedding(4*kfold_multiplier)
-    embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4*kfold_multiplier)
+    embedding_mapper['numeric'] = NumericEmbedding(4 * kfold_multiplier)
+    embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4 * kfold_multiplier)
 
     u1 = Feature(feature_name="gender", feature_type=FeatureType.CATEGORICAL, values=users.gender.values)
     u2 = Feature(feature_name="age", feature_type=FeatureType.CATEGORICAL, values=users.age.astype(str).values)
@@ -127,20 +127,17 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["svd
     i3 = Feature(feature_name="numeric", feature_type=FeatureType.NUMERIC,
                  values=movies[["title_length", "overview_length", "runtime"]].values)
     item_data = FeatureSet([i1, i2, i3])
+    return embedding_mapper, user_data, item_data
 
+
+def test_once(train_affinities, validation_affinities, items, capabilities=["resnet", "content"]):
+    embedding_mapper, user_data, item_data = prepare_data_mappers()
     kwargs = {}
     kwargs['user_data'] = user_data
     kwargs['item_data'] = item_data
     kwargs["hyperparameters"] = copy.deepcopy(hyperparameters)
-    kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_svd"] = False
     kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = False
     kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_content_each_layer"] = False
-    kwargs["hyperparameters"]['collaborative_params'][
-        "use_triplet"] = False
-    kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
-        "use_implicit"] = False
-    if "svdpp" in capabilities:
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_svd"] = True
     if "resnet" in capabilities:
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = True
     if "content" in capabilities:
@@ -148,23 +145,11 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["svd
             "resnet_content_each_layer"] = True
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
             "use_content"] = True
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = True
-    if "triplet" in capabilities:
-        kwargs["hyperparameters"]['collaborative_params'][
-            "use_triplet"] = True
-    if "implicit" in capabilities:
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
-            "use_implicit"] = True
-    if "dnn" in capabilities or "resnet" in capabilities:
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
-            "use_dnn"] = True
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["lr"] = 0.1
-
     recsys = SVDppDNN(embedding_mapper=embedding_mapper,
                                     knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                                     rating_scale=(1, 5),
                                     n_content_dims=32 * kfold_multiplier,
-                                    n_collaborative_dims=32 * kfold_multiplier)
+                                    n_collaborative_dims=32 * kfold_multiplier, fast_inference=False)
 
     start = time.time()
     user_vectors, item_vectors = recsys.fit(users.user_id.values, movies.movie_id.values,
@@ -187,7 +172,7 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["svd
 
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
-        error_analysis(error_df, "Hybrid")
+        error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
     results = [res]
     return recsys, results, predictions, actuals
 
@@ -196,19 +181,13 @@ if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25, stratify=users_for_each_rating)
     results = []
 
-    capabilities = []
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
-                                                  capabilities=capabilities)
-    results.extend(res)
-    display_results(results)
+    # capabilities = []
+    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
+    #                                               capabilities=capabilities)
+    # results.extend(res)
+    # display_results(results)
 
-    capabilities = ["triplet"]
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
-                                                  capabilities=capabilities)
-    results.extend(res)
-    display_results(results)
-
-    capabilities = ["triplet", "content"]
+    capabilities = ["content"]
     recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
     results.extend(res)
     display_results(results)
@@ -241,11 +220,7 @@ else:
         recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
                                                       capabilities=capabilities)
         results.extend(res)
-        capabilities = ["triplet"]
-        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
-                                      capabilities=capabilities)
-        results.extend(res)
-        capabilities = ["triplet", "content"]
+        capabilities = ["content"]
         recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
                                       capabilities=capabilities)
         results.extend(res)

@@ -20,7 +20,7 @@ from .utils import unit_length, normalize_affinity_scores_by_user, UnitLengthReg
 
 class HybridRecommender(RecommendationBase):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
-                 n_content_dims: int = 32, n_collaborative_dims: int = 32):
+                 n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False):
         super().__init__(knn_params=knn_params, rating_scale=rating_scale,
                          n_output_dims=n_content_dims + n_collaborative_dims)
         self.cb = ContentRecommendation(embedding_mapper, knn_params, rating_scale,
@@ -30,84 +30,7 @@ class HybridRecommender(RecommendationBase):
         self.content_data_used = None
         self.prediction_artifacts = None
         self.log = getLogger(type(self).__name__)
-
-    def __entity_entity_affinities_trainer__(self,
-                                             entity_ids: List[str],
-                                             entity_entity_affinities: List[Tuple[str, str, float]],
-                                             entity_id_to_index: Dict[str, int],
-                                             vectors: np.ndarray,
-                                             n_output_dims: int,
-                                             hyperparams: Dict) -> np.ndarray:
-        self.log.debug("Start Training Entity Affinities, n_entities = %s, n_samples = %s, in_dims = %s, out_dims = %s",
-                       len(entity_ids), len(entity_entity_affinities), vectors.shape, n_output_dims)
-        ratings = np.array([r for u, i, r in entity_entity_affinities])
-        min_affinity = np.min(ratings)
-        max_affinity = np.max(ratings)
-        entity_entity_affinities = [(u, i, (2 * 0.8 * (r - min_affinity) / (max_affinity - min_affinity)) - 0.8) for u, i, r in
-                                    entity_entity_affinities]
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-
-        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            def generator():
-                for i, j, r in affinities:
-                    first_item = entity_id_to_index[i]
-                    second_item = entity_id_to_index[j]
-                    r = np.clip(r, -1.0, 1.0)
-                    yield (first_item, second_item), r
-
-            return generator
-
-        output_shapes = (((), ()), ())
-        output_types = ((tf.int64, tf.int64), tf.float32)
-
-        train = tf.data.Dataset.from_generator(generate_training_samples(entity_entity_affinities),
-                                               output_types=output_types, output_shapes=output_shapes, )
-        train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
-
-        input_1 = keras.Input(shape=(1,))
-        input_2 = keras.Input(shape=(1,))
-
-        def build_base_network(embedding_size, vectors):
-            avg_value = np.mean(vectors)
-            i1 = keras.Input(shape=(1,))
-
-            embeddings_initializer = tf.keras.initializers.Constant(vectors)
-            embeddings = keras.layers.Embedding(len(entity_ids), embedding_size, input_length=1,
-                                                embeddings_initializer=embeddings_initializer)
-            item = embeddings(i1)
-            item = tf.keras.layers.Flatten()(item)
-            dense = keras.layers.Dense(embedding_size, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
-            item = dense(item)
-            item = UnitLengthRegularization(l1=0.1)(item)
-            base_network = keras.Model(inputs=i1, outputs=item)
-            return base_network
-
-        bn = build_base_network(n_output_dims, vectors)
-
-        item_1 = bn(input_1)
-        item_2 = bn(input_2)
-
-        pred = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
-        pred = K.tanh(pred)
-        model = keras.Model(inputs=[input_1, input_2],
-                            outputs=[pred])
-        encoder = bn
-
-        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(entity_entity_affinities))
-        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
-        model.compile(optimizer=sgd,
-                      loss=['mean_squared_error'], metrics=["mean_squared_error"])
-
-        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
-
-        vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size).prefetch(16))
-        self.log.debug("End Training Entity Affinities, Unit Length Violations = %s",
-                       unit_length_violations(vectors, axis=1))
-        return vectors
+        self.fast_inference = fast_inference
 
     def __entity_entity_affinities_triplet_trainer__(self,
                                              entity_ids: List[str],
@@ -260,13 +183,8 @@ class HybridRecommender(RecommendationBase):
                                            user_vectors: np.ndarray, item_vectors: np.ndarray,
                                            hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
 
-        use_triplet = hyperparams["use_triplet"] if "use_triplet" in hyperparams else False
-        entity_affiity_fn = self.__entity_entity_affinities_trainer__
-        user_item_affinity_fn = self.__user_item_affinities_trainer__
-        if use_triplet:
-            self.log.debug("Triplet Loss Based Training")
-            entity_affiity_fn = self.__entity_entity_affinities_triplet_trainer__
-            user_item_affinity_fn = self.__user_item_affinities_triplet_trainer__
+        entity_affiity_fn = self.__entity_entity_affinities_triplet_trainer__
+        user_item_affinity_fn = self.__user_item_affinities_triplet_trainer__
 
         if len(item_item_affinities) > 0:
             item_item_params = {} if "item_item_params" not in hyperparams else hyperparams["item_item_params"]
@@ -297,93 +215,6 @@ class HybridRecommender(RecommendationBase):
                                                                                user_item_params)
         self.log.info("Built Collaborative Embeddings, user_vectors shape = %s, item_vectors shape = %s",
                       user_vectors.shape, item_vectors.shape)
-        return user_vectors, item_vectors
-
-    def __user_item_affinities_trainer__(self,
-                                         user_ids: List[str], item_ids: List[str],
-                                         user_item_affinities: List[Tuple[str, str, float]],
-                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                         n_output_dims: int,
-                                         hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
-        self.log.debug(
-            "Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
-            len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-
-        # max_affinity = np.max(np.abs([r for u, i, r in user_item_affinities]))
-        max_affinity = np.max([r for u, i, r in user_item_affinities])
-        min_affinity = np.min([r for u, i, r in user_item_affinities])
-        user_item_affinities = [(u, i, (2 * 0.9 * (r - min_affinity) / (max_affinity - min_affinity)) - 0.9) for u, i, r
-                                in
-                                user_item_affinities]
-
-        n_input_dims = user_vectors.shape[1]
-        assert user_vectors.shape[1] == item_vectors.shape[1]
-        total_users = len(user_ids)
-
-        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            def generator():
-                for i, j, r in affinities:
-                    user = user_id_to_index[i]
-                    item = total_users + item_id_to_index[j]
-                    yield (user, item), r
-
-            return generator
-
-        output_shapes = (((), ()), ())
-        output_types = ((tf.int64, tf.int64), tf.float32)
-        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
-                                               output_types=output_types, output_shapes=output_shapes, )
-
-        train = train.shuffle(batch_size*10).batch(batch_size)
-
-        def build_base_network(embedding_size, n_output_dims, vectors):
-            avg_value = np.mean(vectors)
-            i1 = keras.Input(shape=(1,))
-
-            embeddings_initializer = tf.keras.initializers.Constant(vectors)
-            embeddings = keras.layers.Embedding(len(user_ids) + len(item_ids), embedding_size, input_length=1,
-                                                embeddings_initializer=embeddings_initializer)
-            item = embeddings(i1)
-            item = tf.keras.layers.Flatten()(item)
-            #
-            dense = keras.layers.Dense(n_output_dims, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
-            item = dense(item)
-
-            item = UnitLengthRegularization(l1=0.1)(item)
-            base_network = keras.Model(inputs=i1, outputs=item)
-            return base_network
-
-        input_1 = keras.Input(shape=(1,))
-        input_2 = keras.Input(shape=(1,))
-
-        bn = build_base_network(n_input_dims, n_output_dims, np.concatenate((user_vectors, item_vectors)))
-        user = bn(input_1)
-        item = bn(input_2)
-
-        pred = tf.keras.layers.Dot(axes=1, normalize=True)([user, item])
-        pred = K.tanh(pred)
-
-        model = keras.Model(inputs=[input_1, input_2],
-                            outputs=[pred])
-        encoder = bn
-        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
-        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
-        model.compile(optimizer=sgd,
-                      loss=['mean_squared_error'], metrics=["mean_squared_error"])
-
-        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
-
-        user_vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
-        item_vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(batch_size).prefetch(16))
-        self.log.debug("End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s",
-                       unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
         return user_vectors, item_vectors
 
     def __user_item_affinities_triplet_trainer__(self,
@@ -496,6 +327,8 @@ class HybridRecommender(RecommendationBase):
             dense = keras.layers.Dense(n_output_dims, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
             item = dense(item)
             item = UnitLengthRegularization(l1=0.1)(item)
+            item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
+            item = K.l2_normalize(item, axis=-1)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
@@ -642,6 +475,8 @@ class HybridRecommender(RecommendationBase):
             item = tf.keras.layers.Flatten()(item)
             dense = keras.layers.Dense(n_output_dims, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
             item = dense(item)
+            item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
+            item = K.l2_normalize(item, axis=-1)
             item = UnitLengthRegularization(l1=0.1)(item)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
@@ -753,8 +588,6 @@ class HybridRecommender(RecommendationBase):
                        unit_length_violations(user_content_vectors, axis=1), unit_length_violations(item_content_vectors, axis=1),
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
 
-        user_content_vectors, item_content_vectors = user_content_vectors * alpha, item_content_vectors * alpha
-        user_vectors, item_vectors = user_vectors * (1 - alpha), item_vectors * (1 - alpha)
         assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
         prediction_network_params = {} if "prediction_network_params" not in collaborative_params else \
         collaborative_params[
@@ -773,6 +606,8 @@ class HybridRecommender(RecommendationBase):
                                                                      self.user_id_to_index, self.item_id_to_index,
                                                                      self.rating_scale, prediction_network_params)
         self.prediction_artifacts = prediction_artifacts
+        user_content_vectors, item_content_vectors = user_content_vectors * alpha, item_content_vectors * alpha
+        user_vectors, item_vectors = user_vectors * (1 - alpha), item_vectors * (1 - alpha)
         if content_data_used:
             user_vectors = np.concatenate((user_content_vectors, user_vectors), axis=1)
             item_vectors = np.concatenate((item_content_vectors, item_vectors), axis=1)
@@ -795,8 +630,16 @@ class HybridRecommender(RecommendationBase):
         pass
 
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
-                            negative: List[Tuple[str, EntityType]] = None) -> List[Tuple[str, float]]:
-        results = super().find_items_for_user(user, positive, negative)
+                            negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
+        start = time.time()
+        results = super().find_items_for_user(user, positive, negative, k=k)
         res, dist = zip(*results)
-        ratings = self.predict([(user, i) for i in res])
-        return list(sorted(zip(res, ratings), key=operator.itemgetter(1), reverse=True))
+        if self.fast_inference:
+            results = list(sorted(zip(res, dist), key=operator.itemgetter(1), reverse=False))
+        else:
+            ratings = self.predict([(user, i) for i in res])
+            results = list(sorted(zip(res, ratings), key=operator.itemgetter(1), reverse=True))
+        self.log.info("Find K Items for user = %s, time taken = %.4f",
+                      user,
+                      time.time() - start)
+        return results

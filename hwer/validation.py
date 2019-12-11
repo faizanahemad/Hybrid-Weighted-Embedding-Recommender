@@ -148,7 +148,8 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
     return predictions, actuals, stats
 
 
-def error_analysis(error_df, title):
+def error_analysis(train_affinities, validation_affinities, error_df, title):
+    # TODO: Error vs User Rating Count
     print("-x-" * 30)
     print("%s: Error Analysis -: " % title)
 

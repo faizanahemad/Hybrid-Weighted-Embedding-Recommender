@@ -427,9 +427,10 @@ class UnitLengthRegularizer(keras.regularizers.Regularizer):
         if not self.l1 and not self.l2:
             return K.constant(0.)
         regularization = 0.
-        x = 1 - K.sqrt(K.sum(K.square(x)))
+        vl = K.sqrt(K.sum(K.square(x)))
+        x = K.exp(K.abs(K.log(vl)))
         if self.l1:
-            regularization += self.l1 * K.abs(x)
+            regularization += self.l1 * x
         if self.l2:
             regularization += self.l2 * K.square(x)
         return regularization
