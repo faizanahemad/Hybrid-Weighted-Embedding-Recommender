@@ -164,8 +164,6 @@ class ContentRecommendation(RecommendationBase):
         user_vectors = all_vectors[:user_vectors_length]
         item_vectors = all_vectors[user_vectors_length:]
 
-        user_vectors = unit_length(user_vectors, axis=1)
-        item_vectors = unit_length(item_vectors, axis=1)
         return user_vectors, item_vectors
 
     def __build_content_embeddings__(self,

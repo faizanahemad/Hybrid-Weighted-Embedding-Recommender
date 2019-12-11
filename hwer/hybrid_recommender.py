@@ -7,7 +7,13 @@ from typing import List, Dict, Tuple, Optional
 import numpy as np
 import tensorflow as tf
 import tensorflow.keras.backend as K
+from sklearn.preprocessing import StandardScaler
 from tensorflow import keras
+
+from surprise import Dataset
+from surprise import Reader
+from surprise import SVDpp
+import pandas as pd
 
 from .content_recommender import ContentRecommendation
 from .logging import getLogger
@@ -521,6 +527,17 @@ class HybridRecommender(RecommendationBase):
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
         return user_vectors, item_vectors
 
+    def __build_svd_model__(self, user_ids: List[str], item_ids: List[str],
+                                 user_item_affinities: List[Tuple[str, str, float]],
+                                 user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                 rating_scale: Tuple[float, float]):
+        reader = Reader(rating_scale=rating_scale)
+        train = pd.DataFrame(user_item_affinities)
+        train = Dataset.load_from_df(train, reader).build_full_trainset()
+        svd_model = SVDpp(n_factors=int(self.n_collaborative_dims/2), n_epochs=10)
+        svd_model.fit(train)
+        return svd_model
+
     @abc.abstractmethod
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
                                      user_item_affinities: List[Tuple[str, str, float]],
@@ -543,11 +560,15 @@ class HybridRecommender(RecommendationBase):
         item_data: FeatureSet = kwargs["item_data"] if "item_data" in kwargs else FeatureSet([])
         user_data: FeatureSet = kwargs["user_data"] if "user_data" in kwargs else FeatureSet([])
         hyperparameters = {} if "hyperparameters" not in kwargs else kwargs["hyperparameters"]
+        collaborative_params = {} if "collaborative_params" not in hyperparameters else hyperparameters["collaborative_params"]
+        prediction_network_params = {} if "prediction_network_params" not in collaborative_params else \
+            collaborative_params["prediction_network_params"]
 
         combining_factor: int = hyperparameters["combining_factor"] if "combining_factor" in hyperparameters else 0.5
         alpha = combining_factor
         assert 0 <= alpha <= 1
-        content_data_used = ("item_data" in kwargs or "user_data" in kwargs) and alpha > 0
+        use_content = prediction_network_params["use_content"] if "use_content" in prediction_network_params else False
+        content_data_used = ("item_data" in kwargs or "user_data" in kwargs) and alpha > 0 and use_content
         self.content_data_used = content_data_used
 
         self.n_output_dims = self.n_content_dims + self.n_collaborative_dims if content_data_used else self.n_collaborative_dims
@@ -572,8 +593,6 @@ class HybridRecommender(RecommendationBase):
         user_content_vectors, item_content_vectors = user_vectors.copy(), item_vectors.copy()
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1] == self.n_content_dims
 
-        collaborative_params = {} if "collaborative_params" not in hyperparameters else hyperparameters[
-            "collaborative_params"]
         user_vectors, item_vectors = self.__build_collaborative_embeddings__(user_normalized_affinities,
                                                                              item_item_affinities,
                                                                              user_user_affinities, user_ids, item_ids,
@@ -583,17 +602,13 @@ class HybridRecommender(RecommendationBase):
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
 
-        self.log.debug("Fit Method, Unit Length Violations:: user_content = %s, item_content = %s" +
-                       "user_collab = %s, item_collab = %s",
+        self.log.debug("Fit Method, Use content = %s, Unit Length Violations:: user_content = %s, item_content = %s" +
+                       "user_collab = %s, item_collab = %s", content_data_used,
                        unit_length_violations(user_content_vectors, axis=1), unit_length_violations(item_content_vectors, axis=1),
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
 
         assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
-        prediction_network_params = {} if "prediction_network_params" not in collaborative_params else \
-        collaborative_params[
-            "prediction_network_params"]
         if content_data_used:
-
             prediction_artifacts = self.__build_prediction_network__(user_ids, item_ids, user_item_affinities,
                                                                      user_content_vectors, item_content_vectors,
                                                                      user_vectors, item_vectors,
@@ -606,15 +621,16 @@ class HybridRecommender(RecommendationBase):
                                                                      self.user_id_to_index, self.item_id_to_index,
                                                                      self.rating_scale, prediction_network_params)
         self.prediction_artifacts = prediction_artifacts
+        svd_model = self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
+                                             self.user_id_to_index, self.item_id_to_index, self.rating_scale)
+        self.prediction_artifacts["svd_model"] = svd_model
+
         user_content_vectors, item_content_vectors = user_content_vectors * alpha, item_content_vectors * alpha
         user_vectors, item_vectors = user_vectors * (1 - alpha), item_vectors * (1 - alpha)
         if content_data_used:
             user_vectors = np.concatenate((user_content_vectors, user_vectors), axis=1)
             item_vectors = np.concatenate((item_content_vectors, item_vectors), axis=1)
             assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_output_dims
-
-        user_vectors = unit_length(user_vectors, axis=1)
-        item_vectors = unit_length(item_vectors, axis=1)
 
         self.log.debug("Fit Method, Before KNN, Unit Length Violations:: user = %s, item = %s",
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
@@ -629,16 +645,20 @@ class HybridRecommender(RecommendationBase):
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         pass
 
+    def fast_predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+        svd_model = self.prediction_artifacts["svd_model"]
+        return [svd_model.predict(u, i).est for u, i in user_item_pairs]
+
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
                             negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
         start = time.time()
         results = super().find_items_for_user(user, positive, negative, k=k)
         res, dist = zip(*results)
         if self.fast_inference:
-            results = list(sorted(zip(res, dist), key=operator.itemgetter(1), reverse=False))
+            ratings = self.fast_predict([(user, i) for i in res])
         else:
             ratings = self.predict([(user, i) for i in res])
-            results = list(sorted(zip(res, ratings), key=operator.itemgetter(1), reverse=True))
+        results = list(sorted(zip(res, ratings), key=operator.itemgetter(1), reverse=True))
         self.log.info("Find K Items for user = %s, time taken = %.4f",
                       user,
                       time.time() - start)

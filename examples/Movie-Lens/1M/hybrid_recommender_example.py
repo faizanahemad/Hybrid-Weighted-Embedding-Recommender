@@ -137,12 +137,9 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     kwargs['item_data'] = item_data
     kwargs["hyperparameters"] = copy.deepcopy(hyperparameters)
     kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = False
-    kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["resnet_content_each_layer"] = False
     if "resnet" in capabilities:
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = True
     if "content" in capabilities:
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
-            "resnet_content_each_layer"] = True
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
             "use_content"] = True
     recsys = SVDppDNN(embedding_mapper=embedding_mapper,
@@ -170,10 +167,16 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items)
     res.update(stats)
 
+    recsys.fast_inference = True
+    res2 = {"algo": "fast-hybrid-" + "_".join(capabilities), "time": total_time}
+    _, _, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
+                                                         model_get_topk, items)
+    res2.update(stats)
+
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
         error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
-    results = [res]
+    results = [res, res2]
     return recsys, results, predictions, actuals
 
 
@@ -181,14 +184,20 @@ if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25, stratify=users_for_each_rating)
     results = []
 
-    # capabilities = []
-    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
-    #                                               capabilities=capabilities)
-    # results.extend(res)
-    # display_results(results)
+    capabilities = []
+    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
+                                                  capabilities=capabilities)
+    results.extend(res)
+    display_results(results)
 
     capabilities = ["content"]
     recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
+    results.extend(res)
+    display_results(results)
+
+    capabilities = ["content", "resnet"]
+    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
+                                                  capabilities=capabilities)
     results.extend(res)
     display_results(results)
 

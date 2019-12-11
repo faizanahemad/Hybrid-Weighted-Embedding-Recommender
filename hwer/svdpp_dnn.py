@@ -142,6 +142,7 @@ class SVDppDNN(HybridRecommender):
         network_width = hyperparams["network_width"] if "network_width" in hyperparams else 128
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
+        use_resnet = hyperparams["use_resnet"] if "use_resnet" in hyperparams else False
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
@@ -231,8 +232,12 @@ class SVDppDNN(HybridRecommender):
                 dense_rep = K.concatenate([vectors, meta_data])
                 for i in range(network_depth):
                     dense_rep = tf.keras.layers.Dropout(dropout)(dense_rep)
-                    dense_rep = keras.layers.Dense(network_width, activation="tanh",
-                                                   kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(dense_rep)
+                    if use_resnet:
+                        dense_rep = resnet_layer_with_content(network_width, network_width, dropout, kernel_l2)(
+                            dense_rep)
+                    else:
+                        dense_rep = keras.layers.Dense(network_width, activation="tanh",
+                                                       kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(dense_rep)
                     dense_rep = tf.keras.layers.BatchNormalization()(dense_rep)
                 rating = keras.layers.Dense(1, activation="tanh",
                                             kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(dense_rep)
@@ -289,6 +294,9 @@ class SVDppDNN(HybridRecommender):
                 for i, j in affinities:
                     yield gen_fn(i, j)
             return generator
+
+        if self.fast_inference:
+            return self.fast_predict(user_item_pairs)
 
         predict = tf.data.Dataset.from_generator(generate_prediction_samples(user_item_pairs,
                                                                              self.user_id_to_index, self.item_id_to_index,
