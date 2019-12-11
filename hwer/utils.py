@@ -83,6 +83,7 @@ def shuffle_copy(*args):
 
 
 def average_precision_v1(y_true, y_pred):
+    len_y_true = max(1, len(y_true))
     y_pred = np.array(y_pred)
     if len(y_pred.shape) == 2:
         y_pred = y_pred[:, 0]
@@ -95,10 +96,11 @@ def average_precision_v1(y_true, y_pred):
     divisors = np.arange(1, len(y_pred) + 1)
     score = np.divide(score, divisors)
     score = np.sum(score)
-    return score / len(y_true)
+    return score / len_y_true
 
 
 def average_precision_v2(y_true, y_pred):
+    len_y_true = max(1, len(y_true))
     y_pred = np.array(y_pred)
     if len(y_pred.shape) == 2:
         y_pred = y_pred[:, 0]
@@ -113,7 +115,7 @@ def average_precision_v2(y_true, y_pred):
             matches_till_now = matches_till_now + 1
             score = score + matches_till_now / (i + 1)
 
-    return score / len(y_true)
+    return score / len_y_true
 
 
 def mean_average_precision(y_true: List[List[str]], y_pred: List[List[str]]):
