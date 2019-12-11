@@ -60,7 +60,7 @@ movies["runtime"] = movies["runtime"].fillna(0.0)
 
 # print(ratings[ratings["user_id"]=="1051"])
 
-check_working = False  # Setting to False uses all the data
+check_working = True  # Setting to False uses all the data
 enable_kfold = False
 enable_error_analysis = False
 kfold_multiplier = 2 if enable_kfold else 1

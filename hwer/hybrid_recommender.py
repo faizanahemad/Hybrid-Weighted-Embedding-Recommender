@@ -578,6 +578,7 @@ class HybridRecommender(RecommendationBase):
         user_user_affinities: List[Tuple[str, str, bool]] = kwargs[
             "user_user_affinities"] if "user_user_affinities" in kwargs else list()
 
+        self.log.debug("Fit Method: content_data_used = %s, content_dims = %s", content_data_used, self.n_content_dims)
         if content_data_used:
             super(type(self.cb), self.cb).fit(user_ids, item_ids, user_item_affinities, **kwargs)
             user_vectors, item_vectors = self.cb.__build_content_embeddings__(user_ids, item_ids,
@@ -585,8 +586,7 @@ class HybridRecommender(RecommendationBase):
                                                                               user_normalized_affinities,
                                                                               self.n_content_dims)
         else:
-            user_vectors, item_vectors = np.random.rand((len(user_ids), self.n_content_dims)), np.random.rand(
-                (len(item_ids), self.n_content_dims))
+            user_vectors, item_vectors = np.random.rand(len(user_ids), self.n_content_dims), np.random.rand(len(item_ids), self.n_content_dims)
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
 
