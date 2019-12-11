@@ -60,7 +60,7 @@ movies["runtime"] = movies["runtime"].fillna(0.0)
 
 # print(ratings[ratings["user_id"]=="1051"])
 
-check_working = True  # Setting to False uses all the data
+check_working = False  # Setting to False uses all the data
 enable_kfold = False
 enable_error_analysis = False
 kfold_multiplier = 2 if enable_kfold else 1
@@ -225,14 +225,22 @@ else:
         train_affinities, validation_affinities = X[train_index], X[test_index]
         train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
         validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
+        #
         capabilities = []
         recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
                                                       capabilities=capabilities)
         results.extend(res)
+        #
         capabilities = ["content"]
         recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
                                       capabilities=capabilities)
         results.extend(res)
+        #
+        capabilities = ["content", "resnet"]
+        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
+                                      capabilities=capabilities)
+        results.extend(res)
+
         results.extend(test_surprise(train_affinities, validation_affinities, item_list, algo=["baseline", "svdpp"]))
         display_results(results)
 
