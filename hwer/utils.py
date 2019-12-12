@@ -571,5 +571,16 @@ def root_mean_squared_error(y_true, y_pred):
     return K.sqrt(K.mean(K.square(y_pred - y_true)))
 
 
+def get_clipped_rmse(margin=0.25, upper=1e8):
+    def rmse(y_true, y_pred):
+        error = K.abs(y_pred - y_true)
+        error = error - margin
+        error = K.clip(error, 0, upper)
+        error = K.square(error)
+        return K.sqrt(K.mean(error))
+
+    return rmse
+
+
 def mean_absolute_error(y_true, y_pred):
     return K.mean(K.abs(y_pred - y_true))

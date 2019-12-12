@@ -32,7 +32,7 @@ from ast import literal_eval
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
     normalize_affinity_scores_by_user
 from hwer import Feature, FeatureSet, FeatureType
-from hwer import HybridRecommenderSVDpp, SVDppDNN
+from hwer import SVDppDNN
 
 # tf.compat.v1.disable_eager_execution()
 
@@ -60,7 +60,7 @@ movies["runtime"] = movies["runtime"].fillna(0.0)
 
 # print(ratings[ratings["user_id"]=="1051"])
 
-check_working = True  # Setting to False uses all the data
+check_working = False  # Setting to False uses all the data
 enable_kfold = False
 enable_error_analysis = False
 kfold_multiplier = 2 if enable_kfold else 1
@@ -69,11 +69,11 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.05, epochs=11 * kfold_multiplier, batch_size=64,
+                           prediction_network_params=dict(lr=0.5, epochs=11 * kfold_multiplier, batch_size=64,
                                                           network_width=64, padding_length=50,
                                                           network_depth=4 * kfold_multiplier, verbose=verbose,
-                                                          kernel_l2=0.0, rating_regularizer=0.0,
-                                                          bias_regularizer=0.02, dropout=0.1),
+                                                          kernel_l2=0.0,
+                                                          bias_regularizer=0.02, dropout=0.2),
                            item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
                                                  verbose=verbose),
                            user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
