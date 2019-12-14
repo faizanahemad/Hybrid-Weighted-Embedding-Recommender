@@ -134,12 +134,13 @@ def display_results(results: List[Dict[str, Any]]):
 def get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items):
     def get_details(recsys, affinities):
         predictions = recsys.predict([(u, i) for u, i, r in affinities])
+        assert np.sum(np.isnan(predictions)) == 0
         actuals = np.array([r for u, i, r in affinities])
         rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
         mae = np.mean(np.abs(actuals - predictions))
         return predictions, actuals, rmse, mae
-    _, _, train_rmse, train_mae = get_details(recsys, train_affinities)
     predictions, actuals, rmse, mae = get_details(recsys, validation_affinities)
+    _, _, train_rmse, train_mae = get_details(recsys, train_affinities)
     print(rmse, mae, train_rmse, train_mae)
     ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
     stats = {"rmse": rmse, "mae": mae,

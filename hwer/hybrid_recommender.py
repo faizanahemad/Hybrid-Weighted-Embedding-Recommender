@@ -264,53 +264,57 @@ class HybridRecommender(RecommendationBase):
             user_far_dict = defaultdict(list)
             item_close_dict = defaultdict(list)
             item_far_dict = defaultdict(list)
+            affinities = [(user_id_to_index[i], item_id_to_index[j], r)for i, j, r in affinities]
             for i, j, r in affinities:
                 assert r != 0
                 if r > 0:
-                    user_close_dict[i].append((j, r))
+                    user_close_dict[i].append((total_users + j, r))
                     item_close_dict[j].append((i, r))
                 if r <= 0:
-                    user_far_dict[i].append((j, r))
+                    user_far_dict[i].append((total_users + j, r))
                     item_far_dict[j].append((i, r))
 
-            triplet_wt_fn = lambda x: 1 + np.log1p(np.abs(x / aff_range))
+            def triplet_wt_fn(x): return 1 + np.log1p(np.abs(x / aff_range))
+
+            def get_one_example(i, j, r):
+                user = i
+                second_item = total_users + j
+                random_item = total_users + np.random.randint(0, total_items)
+                random_user = np.random.randint(0, total_users)
+                choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba / 10)
+                choose_user_pair = np.random.rand() < random_pair_user_item_proba
+                if r < 0:
+                    distant_item = second_item
+                    distant_item_weight = r
+
+                    if choose_random_pair or (i not in user_close_dict and j not in item_close_dict):
+                        second_item, close_item_weight = random_user if choose_user_pair else random_item, random_positive_weight
+                    else:
+                        if (choose_user_pair and j in item_close_dict) or i not in user_close_dict:
+                            second_item, close_item_weight = item_close_dict[j][np.random.randint(0, len(item_close_dict[j]))]
+                        else:
+                            second_item, close_item_weight = user_close_dict[i][np.random.randint(0, len(user_close_dict[i]))]
+                else:
+                    close_item_weight = r
+                    if choose_random_pair or (i not in user_far_dict and j not in item_far_dict):
+                        distant_item, distant_item_weight = random_user if choose_user_pair else random_item, random_negative_weight
+                    else:
+                        if (choose_user_pair and j in item_far_dict) or i not in user_far_dict:
+                            distant_item, distant_item_weight = item_far_dict[j][np.random.randint(0, len(item_far_dict[j]))]
+                        else:
+                            distant_item, distant_item_weight = user_far_dict[i][np.random.randint(0, len(user_far_dict[i]))]
+
+                close_item_weight = triplet_wt_fn(close_item_weight)
+                distant_item_weight = triplet_wt_fn(distant_item_weight)
+                return (user, second_item, distant_item, close_item_weight, distant_item_weight), 0
 
             def generator():
-                for i, j, r in affinities:
-                    user = user_id_to_index[i]
-                    second_item = total_users + item_id_to_index[j]
-                    random_item = total_users + item_id_to_index[item_ids[np.random.randint(0, total_items)]]
-                    random_user = user_id_to_index[user_ids[np.random.randint(0, total_users)]]
-                    choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba/20)
-                    choose_user_pair = np.random.rand() < random_pair_user_item_proba
-                    if r < 0:
-                        distant_item = second_item
-                        distant_item_weight = r
-
-                        if choose_random_pair or (i not in user_close_dict and j not in item_close_dict):
-                            second_item, close_item_weight = random_user if choose_user_pair else random_item, random_positive_weight
-                        else:
-                            if (choose_user_pair and j in item_close_dict) or i not in user_close_dict:
-                                second_item, close_item_weight = item_close_dict[j][np.random.randint(0, len(item_close_dict[j]))]
-                                second_item = user_id_to_index[second_item]
-                            else:
-                                second_item, close_item_weight = user_close_dict[i][np.random.randint(0, len(user_close_dict[i]))]
-                                second_item = total_users + item_id_to_index[second_item]
-                    else:
-                        close_item_weight = r
-                        if choose_random_pair or (i not in user_far_dict and j not in item_far_dict):
-                            distant_item, distant_item_weight = random_user if choose_user_pair else random_item, random_negative_weight
-                        else:
-                            if (choose_user_pair and j in item_far_dict) or i not in user_far_dict:
-                                distant_item, distant_item_weight = item_far_dict[j][np.random.randint(0, len(item_far_dict[j]))]
-                                distant_item = user_id_to_index[distant_item]
-                            else:
-                                distant_item, distant_item_weight = user_far_dict[i][np.random.randint(0, len(user_far_dict[i]))]
-                                distant_item = total_users + item_id_to_index[distant_item]
-
-                    close_item_weight = triplet_wt_fn(close_item_weight)
-                    distant_item_weight = triplet_wt_fn(distant_item_weight)
-                    yield (user, second_item, distant_item, close_item_weight, distant_item_weight), 0
+                for i in range(0, len(affinities), batch_size*10):
+                    start = i
+                    end = min(i + batch_size*10, len(affinities))
+                    generated = [get_one_example(u, v, w) for u, v, w in affinities[start:end]]
+                    for g in generated:
+                        yield g
             return generator
 
         output_shapes = (((), (), (), (), ()), ())
@@ -322,7 +326,6 @@ class HybridRecommender(RecommendationBase):
         train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
 
         def build_base_network(embedding_size, n_output_dims, vectors):
-            avg_value = np.mean(vectors)
             i1 = keras.Input(shape=(1,))
 
             embeddings_initializer = tf.keras.initializers.Constant(vectors)

@@ -102,6 +102,7 @@ print("Total Samples Taken = %s" % (ratings.shape[0]))
 user_item_affinities = [(row[0], row[1], row[2]) for row in ratings.values]
 users_for_each_rating = [row[0] for row in ratings.values]
 item_list = list(set([i for u, i, r in user_item_affinities]))
+user_list = list(set([u for u, i, r in user_item_affinities]))
 
 
 def prepare_data_mappers():
@@ -130,7 +131,16 @@ def prepare_data_mappers():
     return embedding_mapper, user_data, item_data
 
 
+def check_users_items_train_test(train_affinities, validation_affinities,):
+    users = set([u for u, i, r in train_affinities])
+    items = set([i for u, i, r in train_affinities])
+    val_exluded_users = [u for u, i, r in validation_affinities if u not in users]
+    val_exluded_items = [i for u, i, r in validation_affinities if i not in items]
+    print(len(val_exluded_users), len(val_exluded_items), len(val_exluded_users) + len(val_exluded_items))
+
+
 def test_once(train_affinities, validation_affinities, items, capabilities=["resnet", "content"]):
+    check_users_items_train_test(train_affinities, validation_affinities, )
     embedding_mapper, user_data, item_data = prepare_data_mappers()
     kwargs = {}
     kwargs['user_data'] = user_data
@@ -162,6 +172,7 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
 
     end = time.time()
     total_time = end - start
+    assert np.sum(np.isnan(recsys.predict([(user_list[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
 
     res = {"algo":"hybrid-" + "_".join(capabilities), "time": total_time}
     predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items)
