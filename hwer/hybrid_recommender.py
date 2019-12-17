@@ -53,73 +53,66 @@ class HybridRecommender(RecommendationBase):
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.2
         random_positive_weight = hyperparams[
-            "random_positive_weight"] if "random_positive_weight" in hyperparams else 0.05
+            "random_positive_weight"] if "random_positive_weight" in hyperparams else 0.1
         random_negative_weight = hyperparams[
-            "random_negative_weight"] if "random_negative_weight" in hyperparams else 0.2
+            "random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.1
 
+        total_items = len(entity_ids)
         aff_range = np.max([r for u1, u2, r in entity_entity_affinities]) - np.min([r for u1, u2, r in entity_entity_affinities])
         random_positive_weight = random_positive_weight * aff_range
         random_negative_weight = random_negative_weight * aff_range
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            item_close_dict = {}
-            item_far_dict = {}
+            item_close_dict = defaultdict(list)
+            item_far_dict = defaultdict(list)
+            affinities = [(entity_id_to_index[i], entity_id_to_index[j], r) for i, j, r in affinities]
             for i, j, r in affinities:
-                assert r != 0
                 if r > 0:
-                    if i in item_close_dict:
-                        item_close_dict[i].append((j, r))
-                    else:
-                        item_close_dict[i] = [(j, r)]
+                    item_close_dict[i].append((j, r))
+                    item_close_dict[j].append((i, r))
 
-                    if j in item_close_dict:
-                        item_close_dict[j].append((i, r))
-                    else:
-                        item_close_dict[j] = [(i, r)]
+                if r <= 0:
+                    item_far_dict[i].append((j, r))
+                    item_far_dict[j].append((i, r))
+
+            def triplet_wt_fn(x): return 1 + np.log1p(np.abs(x / aff_range))
+
+            def get_one_example(i, j, r):
+                first_item = i
+                second_item = j
+                random_item = np.random.randint(0, total_items)
+                choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba / 10)
                 if r < 0:
-                    if i in item_far_dict:
-                        item_far_dict[i].append((j, r))
-                    else:
-                        item_far_dict[i] = [(j, r)]
+                    distant_item = second_item
+                    distant_item_weight = r
 
-                    if j in item_far_dict:
-                        item_far_dict[j].append((i, r))
+                    if choose_random_pair or i not in item_close_dict:
+                        second_item, close_item_weight = random_item, random_positive_weight
+
                     else:
-                        item_far_dict[j] = [(i, r)]
-            total_items = len(entity_ids)
-            triplet_wt_fn = lambda x: 1 + np.log1p(np.abs(x/aff_range))
+                        second_item, close_item_weight = item_close_dict[i][
+                            np.random.randint(0, len(item_close_dict[i]))]
+                else:
+                    close_item_weight = r
+                    if choose_random_pair or i not in item_far_dict:
+                        distant_item, distant_item_weight = random_item, random_negative_weight
+
+                    else:
+                        distant_item, distant_item_weight = item_far_dict[i][
+                            np.random.randint(0, len(item_far_dict[i]))]
+
+                close_item_weight = triplet_wt_fn(close_item_weight)
+                distant_item_weight = triplet_wt_fn(distant_item_weight)
+                return (first_item, second_item, distant_item, close_item_weight, distant_item_weight), 0
 
             def generator():
-                for i, j, r in affinities:
-                    first_item = entity_id_to_index[i]
-                    second_item = entity_id_to_index[j]
-                    random_item = entity_id_to_index[entity_ids[np.random.randint(0, total_items)]]
-                    choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba/10)
-                    if r < 0:
-                        distant_item = second_item
-                        distant_item_weight = r
-
-                        if choose_random_pair or i not in item_close_dict:
-                            second_item, close_item_weight = random_item, random_positive_weight
-
-                        else:
-                            second_item, close_item_weight = item_close_dict[i][
-                                np.random.randint(0, len(item_close_dict[i]))]
-                            second_item = entity_id_to_index[second_item]
-                    else:
-                        close_item_weight = r
-                        if choose_random_pair or i not in item_far_dict:
-                            distant_item, distant_item_weight = random_item, random_negative_weight
-
-                        else:
-                            distant_item, distant_item_weight = item_far_dict[i][
-                                np.random.randint(0, len(item_far_dict[i]))]
-                            distant_item = entity_id_to_index[distant_item]
-                    close_item_weight = triplet_wt_fn(close_item_weight)
-                    distant_item_weight = triplet_wt_fn(distant_item_weight)
-                    yield (first_item, second_item, distant_item, close_item_weight, distant_item_weight), 0
-
+                for i in range(0, len(affinities), batch_size*4):
+                    start = i
+                    end = min(i + batch_size*4, len(affinities))
+                    generated = [get_one_example(u, v, w) for u, v, w in affinities[start:end]]
+                    for g in generated:
+                        yield g
             return generator
 
         output_shapes = (((), (), (), (), ()), ())
@@ -137,7 +130,6 @@ class HybridRecommender(RecommendationBase):
         far_weight = keras.Input(shape=(1,))
 
         def build_base_network(embedding_size, vectors):
-            avg_value = np.mean(vectors)
             i1 = keras.Input(shape=(1,))
 
             embeddings_initializer = tf.keras.initializers.Constant(vectors)
@@ -148,6 +140,8 @@ class HybridRecommender(RecommendationBase):
             dense = keras.layers.Dense(embedding_size, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
             item = dense(item)
             item = UnitLengthRegularization(l1=0.1)(item)
+            # item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
+            item = K.l2_normalize(item, axis=-1)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
 
@@ -266,7 +260,6 @@ class HybridRecommender(RecommendationBase):
             item_far_dict = defaultdict(list)
             affinities = [(user_id_to_index[i], item_id_to_index[j], r)for i, j, r in affinities]
             for i, j, r in affinities:
-                assert r != 0
                 if r > 0:
                     user_close_dict[i].append((total_users + j, r))
                     item_close_dict[j].append((i, r))
@@ -336,7 +329,7 @@ class HybridRecommender(RecommendationBase):
             dense = keras.layers.Dense(n_output_dims, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
             item = dense(item)
             item = UnitLengthRegularization(l1=0.1)(item)
-            item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
+            # item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
             item = K.l2_normalize(item, axis=-1)
             base_network = keras.Model(inputs=i1, outputs=item)
             return base_network
@@ -602,13 +595,12 @@ class HybridRecommender(RecommendationBase):
                                                                              user_vectors, item_vectors,
                                                                              collaborative_params)
 
-        user_vectors = unit_length(user_vectors, axis=1)
-        item_vectors = unit_length(item_vectors, axis=1)
-
         self.log.debug("Fit Method, Use content = %s, Unit Length Violations:: user_content = %s, item_content = %s" +
                        "user_collab = %s, item_collab = %s", content_data_used,
                        unit_length_violations(user_content_vectors, axis=1), unit_length_violations(item_content_vectors, axis=1),
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
+        user_vectors = unit_length(user_vectors, axis=1)
+        item_vectors = unit_length(item_vectors, axis=1)
 
         assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
         if content_data_used:

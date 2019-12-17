@@ -33,6 +33,7 @@ from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, C
     normalize_affinity_scores_by_user
 from hwer import Feature, FeatureSet, FeatureType
 from hwer import SVDppDNN
+from hwer import FasttextEmbedding
 
 # tf.compat.v1.disable_eager_execution()
 
@@ -63,22 +64,21 @@ movies["runtime"] = movies["runtime"].fillna(0.0)
 check_working = False  # Setting to False uses all the data
 enable_kfold = False
 enable_error_analysis = False
-kfold_multiplier = 2 if enable_kfold else 1
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.5, epochs=11 * kfold_multiplier, batch_size=64,
-                                                          network_width=64, padding_length=50,
-                                                          network_depth=4 * kfold_multiplier, verbose=verbose,
+                           prediction_network_params=dict(lr=0.75, epochs=20, batch_size=64,
+                                                          network_width=128, padding_length=50,
+                                                          network_depth=4, verbose=verbose,
                                                           kernel_l2=0.0,
                                                           bias_regularizer=0.02, dropout=0.2),
-                           item_item_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
+                           item_item_params=dict(lr=0.05, epochs=10, batch_size=512,
                                                  verbose=verbose),
-                           user_user_params=dict(lr=0.001, epochs=5 * kfold_multiplier, batch_size=512,
+                           user_user_params=dict(lr=0.05, epochs=10, batch_size=512,
                                                  verbose=verbose),
-                           user_item_params=dict(lr=0.05, epochs=10 * kfold_multiplier, batch_size=128,
+                           user_item_params=dict(lr=0.05, epochs=20, batch_size=128,
                                                  verbose=verbose, margin=0.5)))
 
 if check_working:
@@ -97,24 +97,25 @@ if check_working:
     samples = min(100000, ratings.shape[0])
     ratings = ratings.sample(samples)
 
-print("Total Samples Taken = %s" % (ratings.shape[0]))
 
 user_item_affinities = [(row[0], row[1], row[2]) for row in ratings.values]
 users_for_each_rating = [row[0] for row in ratings.values]
 item_list = list(set([i for u, i, r in user_item_affinities]))
 user_list = list(set([u for u, i, r in user_item_affinities]))
 
+print("Total Samples Taken = %s, |Users| = %s |Items| = %s" % (ratings.shape[0], len(user_list), len(item_list)))
+
 
 def prepare_data_mappers():
     embedding_mapper = {}
     embedding_mapper['gender'] = CategoricalEmbedding(n_dims=2)
     embedding_mapper['age'] = CategoricalEmbedding(n_dims=2)
-    embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=4 * kfold_multiplier)
-    embedding_mapper['zip'] = CategoricalEmbedding(n_dims=2 * kfold_multiplier)
+    embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=4)
+    embedding_mapper['zip'] = CategoricalEmbedding(n_dims=2)
 
-    embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
-    embedding_mapper['numeric'] = NumericEmbedding(4 * kfold_multiplier)
-    embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4 * kfold_multiplier)
+    embedding_mapper['text'] = FasttextEmbedding(n_dims=32)
+    embedding_mapper['numeric'] = NumericEmbedding(4)
+    embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
 
     u1 = Feature(feature_name="gender", feature_type=FeatureType.CATEGORICAL, values=users.gender.values)
     u2 = Feature(feature_name="age", feature_type=FeatureType.CATEGORICAL, values=users.age.astype(str).values)
@@ -155,8 +156,8 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     recsys = SVDppDNN(embedding_mapper=embedding_mapper,
                                     knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                                     rating_scale=(1, 5),
-                                    n_content_dims=32 * kfold_multiplier,
-                                    n_collaborative_dims=32 * kfold_multiplier, fast_inference=False)
+                                    n_content_dims=32,
+                                    n_collaborative_dims=32, fast_inference=False)
 
     start = time.time()
     user_vectors, item_vectors = recsys.fit(users.user_id.values, movies.movie_id.values,
@@ -168,7 +169,7 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     #         sim = cos_sim(item_vectors[i], item_vectors[j])
     #         cos_sims[i].append(sim)
     # cos_sims = np.array(cos_sims)
-    # print(cos_sims.min(), cos_sims.max(), cos_sims.mean())
+    # print("Cos Sim Min and Max = ",cos_sims.min(), cos_sims.max(), cos_sims.mean())
 
     end = time.time()
     total_time = end - start
