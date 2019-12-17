@@ -22,7 +22,7 @@ from .utils import RatingPredRegularization, get_rng, \
     normalize_affinity_scores_by_user_item_bs, get_clipped_rmse
 
 
-class SVDppDNN(HybridRecommender):
+class SVDppHybrid(HybridRecommender):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False):
         super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims, fast_inference)

@@ -32,7 +32,7 @@ from ast import literal_eval
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
     normalize_affinity_scores_by_user
 from hwer import Feature, FeatureSet, FeatureType
-from hwer import SVDppDNN
+from hwer import SVDppHybrid
 from hwer import FasttextEmbedding
 
 # tf.compat.v1.disable_eager_execution()
@@ -153,11 +153,11 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     if "content" in capabilities:
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
             "use_content"] = True
-    recsys = SVDppDNN(embedding_mapper=embedding_mapper,
-                                    knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
-                                    rating_scale=(1, 5),
-                                    n_content_dims=32,
-                                    n_collaborative_dims=32, fast_inference=False)
+    recsys = SVDppHybrid(embedding_mapper=embedding_mapper,
+                         knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+                         rating_scale=(1, 5),
+                         n_content_dims=32,
+                         n_collaborative_dims=32, fast_inference=False)
 
     start = time.time()
     user_vectors, item_vectors = recsys.fit(users.user_id.values, movies.movie_id.values,
