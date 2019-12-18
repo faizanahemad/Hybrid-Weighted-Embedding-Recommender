@@ -8,7 +8,7 @@ import numpy as np
 from bidict import bidict
 
 from .logging import getLogger
-from .utils import is_num, is_2d_array
+from .utils import is_num, is_2d_array, UserNotFoundException, ItemNotFoundException
 from .utils import normalize_affinity_scores_by_user_item_bs, unit_length
 
 
@@ -53,7 +53,7 @@ class Feature:
         if feature_type is FeatureType.STR:
             assert isinstance(self.values[0], str)
         if feature_type is FeatureType.CATEGORICAL:
-            assert isinstance(self.values[0], str)
+            assert isinstance(self.values[0], str) or (is_2d_array(self.values) and isinstance(self.values[0][0], str))
         if feature_type is FeatureType.MULTI_CATEGORICAL:
             assert is_2d_array(self.values)
 
@@ -236,7 +236,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
                            negative: List[Tuple[str, EntityType]] = None, k=None) \
             -> List[Tuple[str, float]]:
         assert self.fit_done
-        assert item in self.items_set
+        if item not in self.items_set:
+            raise ItemNotFoundException("Item with itemID = %s, was not provided in training" % item)
         k = self.knn_params['n_neighbors'] if k is None else k
         embedding_list = [self.get_average_embeddings([(item, EntityType.ITEM)])]
         if positive is not None and len(positive) > 0:
@@ -252,7 +253,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
     def find_similar_users(self, user: str, positive: List[Tuple[str, EntityType]] = None,
                            negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
         assert self.fit_done
-        assert user in self.users_set
+        if user not in self.users_set:
+            raise UserNotFoundException("User with userID = %s, was not provided in training" % user)
         k = self.knn_params['n_neighbors'] if k is None else k
         embedding_list = [self.get_average_embeddings([(user, EntityType.USER)])]
         if positive is not None and len(positive) > 0:
@@ -267,7 +269,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
                             negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
         assert self.fit_done
-        assert user in self.users_set
+        if user not in self.users_set:
+            raise UserNotFoundException("User with userID = %s, was not provided in training" % user)
         k = self.knn_params['n_neighbors'] if k is None else k
         embedding_list = [self.get_average_embeddings([(user, EntityType.USER)])]
         if positive is not None and len(positive) > 0:

@@ -82,7 +82,7 @@ class HybridRecommender(RecommendationBase):
                 first_item = i
                 second_item = j
                 random_item = np.random.randint(0, total_items)
-                choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba / 10)
+                choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba / 100)
                 if r < 0:
                     distant_item = second_item
                     distant_item_weight = r
@@ -274,7 +274,7 @@ class HybridRecommender(RecommendationBase):
                 second_item = total_users + j
                 random_item = total_users + np.random.randint(0, total_items)
                 random_user = np.random.randint(0, total_users)
-                choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba / 10)
+                choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba / 100)
                 choose_user_pair = np.random.rand() < random_pair_user_item_proba
                 if r < 0:
                     distant_item = second_item

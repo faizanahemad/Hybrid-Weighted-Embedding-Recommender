@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from .logging import getLogger
 from .recommendation_base import Feature, FeatureSet, FeatureType
-from .utils import auto_encoder_transform, unit_length, clean_text
+from .utils import auto_encoder_transform, unit_length, clean_text, is_1d_array
 
 
 class ContentEmbeddingBase(metaclass=abc.ABCMeta):
@@ -59,27 +59,30 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         self.encoder = None
         self.ohe = None
         self.log = getLogger(type(self).__name__)
+        self.columns = None
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
-        assert type(feature.values[0]) == str
-        df = pd.DataFrame(data=feature.values, columns=["input"], dtype=str)
-        # pd.DataFrame(data=np.array([feature.values]).reshape(-1,1))
-
+        columns = list(range(len(feature.values[0]))) if is_1d_array(feature.values[0]) else ["input"]
+        self.columns = columns
+        df = pd.DataFrame(data=feature.values, columns=columns, dtype=str)
+        inputs = df[columns]
         if "target" in kwargs:
             target: FeatureSet = kwargs["target"]
             assert set([len(f) for f in target.features]) == {len(feature)}
-
             for i, feat in enumerate(target.features):
                 df['target_'+str(i)] = feat.values
                 # mode -> pd.Series.mode
-            df = df.groupby(["input"]).agg(['mean', 'median', 'min', 'max', 'std', 'count']).reset_index().fillna(0)
+            df = df.groupby(df[columns].apply(tuple, axis=1), as_index=False).agg(['mean', 'median', 'min', 'max', 'std', 'count']).reset_index().fillna(0)
+            df = df.drop(columns=["index"])
+            df[columns] = inputs
         else:
-            df = df.groupby(["input"], as_index=False).agg(lambda x: set(x))
+            # df = df.groupby(columns, as_index=False).agg(set)
+            df = df.groupby(columns, group_keys=False).apply(lambda x: x.sample(1))
 
         ohe = OneHotEncoder(handle_unknown='ignore', sparse=False)
-        network_inputs = ohe.fit_transform(df[['input']])
-        network_output = np.concatenate((network_inputs, df.drop(columns=["input"])), axis=1)
+        network_inputs = ohe.fit_transform(df[columns])
+        network_output = np.concatenate((network_inputs, df.drop(columns=columns)), axis=1)
 
         min_max_scaler = MinMaxScaler(feature_range=(-0.95, 0.95))
         network_output = min_max_scaler.fit_transform(network_output)
@@ -91,8 +94,8 @@ class CategoricalEmbedding(ContentEmbeddingBase):
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
         self.log.debug("Start Transform CategoricalEmbedding for feature name %s", feature.feature_name)
-        df = pd.DataFrame(data=feature.values, columns=["input"], dtype=str)
-        network_inputs = self.ohe.transform(df[['input']])
+        df = pd.DataFrame(data=feature.values, columns=self.columns, dtype=str)
+        network_inputs = self.ohe.transform(df[self.columns])
 
         outputs = unit_length(self.encoder.predict(network_inputs), axis=1) if self.make_unit_length else self.encoder.predict(network_inputs)
         self.log.debug("End Transform CategoricalEmbedding for feature name %s", feature.feature_name)

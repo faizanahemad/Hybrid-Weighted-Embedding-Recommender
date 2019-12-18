@@ -108,21 +108,14 @@ print("Total Samples Taken = %s, |Users| = %s |Items| = %s" % (ratings.shape[0],
 
 def prepare_data_mappers():
     embedding_mapper = {}
-    embedding_mapper['gender'] = CategoricalEmbedding(n_dims=2)
-    embedding_mapper['age'] = CategoricalEmbedding(n_dims=2)
-    embedding_mapper['occupation'] = CategoricalEmbedding(n_dims=4)
-    embedding_mapper['zip'] = CategoricalEmbedding(n_dims=2)
+    embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=8)
 
     embedding_mapper['text'] = FasttextEmbedding(n_dims=32)
     embedding_mapper['numeric'] = NumericEmbedding(4)
     embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
 
-    u1 = Feature(feature_name="gender", feature_type=FeatureType.CATEGORICAL, values=users.gender.values)
-    u2 = Feature(feature_name="age", feature_type=FeatureType.CATEGORICAL, values=users.age.astype(str).values)
-    u3 = Feature(feature_name="occupation", feature_type=FeatureType.CATEGORICAL,
-                 values=users.occupation.astype(str).values)
-    u4 = Feature(feature_name="zip", feature_type=FeatureType.CATEGORICAL, values=users.zip.astype(str).values)
-    user_data = FeatureSet([u1, u2, u3, u4])
+    u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL, values=users[["gender", "age", "occupation", "zip"]].values)
+    user_data = FeatureSet([u1])
 
     i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=movies.text.values)
     i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=movies.genres.values)

@@ -584,3 +584,11 @@ def get_clipped_rmse(margin=0.25, upper=1e8):
 
 def mean_absolute_error(y_true, y_pred):
     return K.mean(K.abs(y_pred - y_true))
+
+
+class UserNotFoundException(Exception):
+    pass
+
+
+class ItemNotFoundException(Exception):
+    pass
