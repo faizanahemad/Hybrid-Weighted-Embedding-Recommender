@@ -18,15 +18,6 @@ warnings.filterwarnings('ignore')
 from typing import List, Dict, Any, Tuple
 import numpy as np
 import time
-import datetime
-import matplotlib.pyplot as plt
-import seaborn as sns
-from scipy.stats import describe
-from surprise import SVD, SVDpp
-from surprise import accuracy
-from surprise import BaselineOnly
-from surprise import Dataset
-from surprise import Reader
 from ast import literal_eval
 
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
@@ -61,7 +52,7 @@ movies["runtime"] = movies["runtime"].fillna(0.0)
 
 # print(ratings[ratings["user_id"]=="1051"])
 
-check_working = False  # Setting to False uses all the data
+check_working = True  # Setting to False uses all the data
 enable_kfold = False
 enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
@@ -83,18 +74,18 @@ hyperparameters = dict(combining_factor=0.1,
 
 if check_working:
     movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
-    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(2000)
+    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(1000)
     movies = movies[movies["movie_id"].isin(movie_counts.movie_id)]
 
     ratings = ratings[(ratings.movie_id.isin(movie_counts.movie_id))]
 
     user_counts = ratings.groupby(["user_id"])[["movie_id"]].count().reset_index()
-    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(500)
+    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(100)
     ratings = ratings.merge(user_counts[["user_id"]], on="user_id")
     users = users[users["user_id"].isin(user_counts.user_id)]
     ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]
     print("Total Samples Present = %s" % (ratings.shape[0]))
-    samples = min(100000, ratings.shape[0])
+    samples = min(10000, ratings.shape[0])
     ratings = ratings.sample(samples)
 
 

@@ -7,7 +7,7 @@ from sklearn.preprocessing import RobustScaler, StandardScaler
 from .content_embedders import ContentEmbeddingBase
 from .logging import getLogger
 from .recommendation_base import RecommendationBase, FeatureSet
-from .utils import unit_length, build_user_item_dict, build_item_user_dict
+from .utils import unit_length, build_user_item_dict, build_item_user_dict, get_nan_rows
 
 
 class ContentRecommendation(RecommendationBase):
@@ -26,6 +26,9 @@ class ContentRecommendation(RecommendationBase):
             if feature.feature_type != "id" and feature_name in self.user_only_features:
                 embedding = self.embedding_mapper[feature_name].fit_transform(feature)
                 assert embedding.shape[0] == len(user_ids)
+                if np.sum(np.isnan(embedding)) != 0:
+                    self.log.info("User Only Embedding: Feature = %s, Nan Users = %s", feature_name, get_nan_rows(embedding))
+                assert np.sum(np.isnan(embedding)) == 0
                 user_embeddings[feature_name] = embedding
 
         return user_embeddings
@@ -41,6 +44,10 @@ class ContentRecommendation(RecommendationBase):
             feature_name = feature.feature_name
             embedding = self.embedding_mapper[feature_name].fit_transform(feature)
             assert embedding.shape[0] == len(item_ids)
+            if np.sum(np.isnan(embedding)) != 0:
+                self.log.info("Item Embedding: Feature = %s, Nan Items = %s", feature_name,
+                              get_nan_rows(embedding))
+            assert np.sum(np.isnan(embedding)) == 0
             item_embeddings[feature_name] = embedding
 
         item_user_dict: Dict[str, Dict[str, float]] = build_item_user_dict(user_item_affinities)
@@ -61,6 +68,10 @@ class ContentRecommendation(RecommendationBase):
                     item_embedding[i] = item_em
                 else:
                     item_embedding[i] = average_embedding.copy()
+            if np.sum(np.isnan(item_embedding)) != 0:
+                self.log.info("Item Embedding:user_only_features: Feature = %s, Nan Items = %s", feature_name,
+                              get_nan_rows(item_embedding))
+            assert np.sum(np.isnan(item_embedding)) == 0
             item_embeddings[feature_name] = item_embedding
         return item_embeddings
 
@@ -78,6 +89,9 @@ class ContentRecommendation(RecommendationBase):
             feature_name = feature.feature_name
             if feature.feature_type != "id" and feature_name not in self.user_only_features:
                 embedding = self.embedding_mapper[feature_name].transform(feature)
+                if np.sum(np.isnan(embedding)) != 0:
+                    self.log.info("User Embedding for Item Feature: Feature = %s, Nan Users = %s", feature_name, get_nan_rows(embedding))
+                assert np.sum(np.isnan(embedding)) == 0
                 user_embeddings[feature_name] = embedding
 
         # For features which are not in user_data take average of item_features, while for ones present follow above method
@@ -92,6 +106,14 @@ class ContentRecommendation(RecommendationBase):
             feature_name = feature.feature_name
             user_embedding = user_embeddings[feature_name]
             item_embedding = item_embeddings[feature_name]
+            if np.sum(np.isnan(user_embedding)) != 0:
+                self.log.info("User Embedding: Feature = %s, Nan Users = %s", feature_name,
+                              get_nan_rows(user_embedding))
+            assert np.sum(np.isnan(item_embedding)) == 0
+            if np.sum(np.isnan(item_embedding)) != 0:
+                self.log.info("Item Embedding: Feature = %s, Nan Users = %s", feature_name,
+                              get_nan_rows(item_embedding))
+            assert np.sum(np.isnan(user_embedding)) == 0
             for i, embedding in enumerate(user_embedding):
                 user = user_ids[i]
                 if user not in user_item_dict:
@@ -144,11 +166,17 @@ class ContentRecommendation(RecommendationBase):
 
         user_vectors = user_embeddings[processed_features[0]]
         item_vectors = item_embeddings[processed_features[0]]
+        assert np.sum(np.isnan(user_vectors)) == 0
+        assert np.sum(np.isnan(item_vectors)) == 0
 
         for feature_name in processed_features[1:]:
             user_vectors = np.concatenate((user_vectors, user_embeddings[feature_name]), axis=1)
             item_vectors = np.concatenate((item_vectors, item_embeddings[feature_name]), axis=1)
+            if np.sum(np.isnan(user_vectors)) != 0 or np.sum(np.isnan(item_vectors)) != 0:
+                self.log.info("Feature = %s, Nan Users = %s, Nan Items = %s", feature_name, get_nan_rows(user_vectors), get_nan_rows(item_vectors))
 
+        assert np.sum(np.isnan(user_vectors)) == 0
+        assert np.sum(np.isnan(item_vectors)) == 0
         # PCA
         user_vectors_length = len(user_vectors)
         all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)

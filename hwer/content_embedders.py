@@ -203,12 +203,14 @@ class NumericEmbedding(ContentEmbeddingBase):
         self.scaler = None
         self.encoder = None
         self.standard_scaler = None
-        self.log = getLogger(type(self).__name__)
+        self.logger = getLogger(type(self).__name__)
 
     def __prepare_inputs(self, inputs):
         scaled_inputs = self.scaler.transform(inputs)
         standardized_inputs = self.standard_scaler.transform(inputs)
         outputs = np.concatenate((scaled_inputs, standardized_inputs), axis=1)
+        assert np.sum(inputs <= 0) == 0 or not self.log
+        assert np.sum(inputs < 0) == 0 or not self.sqrt
         if self.log and np.sum(inputs <= 0) == 0:
             outputs = np.concatenate((outputs, np.log(inputs)), axis=1)
         if self.sqrt and np.sum(inputs <= 0) == 0:
@@ -239,7 +241,7 @@ class NumericEmbedding(ContentEmbeddingBase):
         _, encoder = auto_encoder_transform(inputs, inputs.copy(), n_dims=self.n_dims, verbose=0,
                                             epochs=self.n_iters)
         self.encoder = encoder
-        self.log.debug("End Fitting NumericEmbedding for feature name %s", feature.feature_name)
+        self.logger.debug("End Fitting NumericEmbedding for feature name %s", feature.feature_name)
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
         self.log.debug("Start Transform NumericEmbedding for feature name %s", feature.feature_name)
@@ -250,7 +252,7 @@ class NumericEmbedding(ContentEmbeddingBase):
         inputs = self.__prepare_inputs(inputs)
         outputs = unit_length(self.encoder.predict(inputs),
                               axis=1) if self.make_unit_length else self.encoder.predict(inputs)
-        self.log.debug("End Transform NumericEmbedding for feature name %s", feature.feature_name)
+        self.logger.debug("End Transform NumericEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
 
 

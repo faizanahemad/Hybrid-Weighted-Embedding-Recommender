@@ -62,6 +62,10 @@ def unit_length(a, axis=0):
     return a / np.expand_dims(norm(a, axis=axis), axis=axis)
 
 
+def get_nan_rows(a, axis=1):
+    return np.sum(np.sum(np.isnan(a), axis=axis) > 0)
+
+
 def unit_length_violations(a, axis=0, epsilon=1e-2):
     vector_lengths = np.expand_dims(norm(a, axis=axis), axis=axis)
     positive_violations = np.sum(vector_lengths > 1 + epsilon)
@@ -344,10 +348,11 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
     log = getLogger("normalize_affinity_scores_by_user")
     start = time.time()
     uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
+    uid["rating"] = uid["rating"].astype(float)
     # Calculating Biases
     mean = uid.rating.mean()
     uid["rating"] = uid["rating"] - mean
-    bu = uid.groupby(['user']).agg(['mean', 'min', 'max'])
+    bu = uid.groupby(['user'])[["rating"]].agg(['mean', 'min', 'max'])
     bu.columns = bu.columns.get_level_values(1)
     bu["spread"] = np.max((bu["max"] - bu["mean"], bu["mean"] - bu["min"]), axis=0)
     bu = bu.reset_index()
@@ -375,7 +380,7 @@ def normalize_affinity_scores_by_user_item_bs(user_item_affinities: List[Tuple[s
     reader = Reader(rating_scale=rating_scale)
     trainset = Dataset.load_from_df(train, reader).build_full_trainset()
     trainset_for_testing = trainset.build_testset()
-    algo = BaselineOnly(bsl_options={'method': 'sgd'})
+    algo = BaselineOnly(bsl_options={'method': 'sgd', "n_epochs": 10, "reg": 0.01})
     algo.fit(trainset)
     predictions = algo.test(trainset_for_testing)
     mean = algo.trainset.global_mean

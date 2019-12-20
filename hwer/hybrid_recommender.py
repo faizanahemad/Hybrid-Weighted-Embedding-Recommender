@@ -63,6 +63,8 @@ class HybridRecommender(RecommendationBase):
         random_positive_weight = random_positive_weight * aff_range
         random_negative_weight = random_negative_weight * aff_range
 
+        assert np.sum(np.isnan(vectors)) == 0
+
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             item_close_dict = defaultdict(list)
             item_far_dict = defaultdict(list)
@@ -215,6 +217,8 @@ class HybridRecommender(RecommendationBase):
                                                                                user_item_params)
         self.log.info("Built Collaborative Embeddings, user_vectors shape = %s, item_vectors shape = %s",
                       user_vectors.shape, item_vectors.shape)
+        assert np.sum(np.isnan(user_vectors)) == 0
+        assert np.sum(np.isnan(item_vectors)) == 0
         return user_vectors, item_vectors
 
     def __user_item_affinities_triplet_trainer__(self,
@@ -238,6 +242,9 @@ class HybridRecommender(RecommendationBase):
         random_negative_weight = hyperparams[
             "random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
+
+        assert np.sum(np.isnan(user_vectors)) == 0
+        assert np.sum(np.isnan(item_vectors)) == 0
 
         max_affinity = np.max([r for u, i, r in user_item_affinities])
         min_affinity = np.min([r for u, i, r in user_item_affinities])
