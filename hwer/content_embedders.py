@@ -60,6 +60,7 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         self.ohe = None
         self.log = getLogger(type(self).__name__)
         self.columns = None
+        self.verbose = kwargs["verbose"] if "verbose" in kwargs else 0
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
@@ -87,7 +88,7 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         min_max_scaler = MinMaxScaler(feature_range=(-0.95, 0.95))
         network_output = min_max_scaler.fit_transform(network_output)
 
-        _, encoder = auto_encoder_transform(network_inputs, network_output, n_dims=self.n_dims, verbose=0, epochs=self.n_iters)
+        _, encoder = auto_encoder_transform(network_inputs, network_output, n_dims=self.n_dims, verbose=self.verbose, epochs=self.n_iters)
         self.encoder = encoder
         self.ohe = ohe
         self.log.debug("End Fitting CategoricalEmbedding for feature name %s", feature.feature_name)
@@ -110,6 +111,7 @@ class MultiCategoricalEmbedding(ContentEmbeddingBase):
         self.vectorizer = None
         self.input_mapper = lambda x: " ".join(map(lambda y: "__" + str(y).strip() + "__", x))
         self.log = getLogger(type(self).__name__)
+        self.verbose = kwargs["verbose"] if "verbose" in kwargs else 0
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
@@ -138,7 +140,7 @@ class MultiCategoricalEmbedding(ContentEmbeddingBase):
         min_max_scaler = MinMaxScaler(feature_range=(-0.95, 0.95))
         network_output = min_max_scaler.fit_transform(network_output)
 
-        _, encoder = auto_encoder_transform(network_inputs, network_output, n_dims=self.n_dims, verbose=0, epochs=self.n_iters)
+        _, encoder = auto_encoder_transform(network_inputs, network_output, n_dims=self.n_dims, verbose=self.verbose, epochs=self.n_iters)
         self.encoder = encoder
         self.vectorizer = vectorizer
         self.log.debug("End Fitting MultiCategoricalEmbedding for feature name %s", feature.feature_name)
@@ -159,7 +161,7 @@ class FasttextEmbedding(ContentEmbeddingBase):
         self.text_model = None
         self.fasttext_params = kwargs["fasttext_params"] \
             if "fasttext_params" in kwargs else dict(neg=10, ws=7, minCount=3, bucket=1000000, minn=4, maxn=5,
-                                                     dim=self.n_dims, epoch=10, lr=0.1, thread=os.cpu_count())
+                                                     dim=self.n_dims, epoch=20, lr=0.1, thread=os.cpu_count())
         self.log = getLogger(type(self).__name__)
 
     def get_sentence_vector(self, text):
@@ -203,12 +205,12 @@ class NumericEmbedding(ContentEmbeddingBase):
         self.scaler = None
         self.encoder = None
         self.standard_scaler = None
+        self.verbose = kwargs["verbose"] if "verbose" in kwargs else 0
         self.log = getLogger(type(self).__name__)
 
     def __prepare_inputs(self, inputs):
-        scaled_inputs = self.scaler.transform(inputs)
         standardized_inputs = self.standard_scaler.transform(inputs)
-        outputs = np.concatenate((scaled_inputs, standardized_inputs), axis=1)
+        outputs = np.concatenate((inputs, standardized_inputs, np.sign(inputs)), axis=1)
         assert np.sum(inputs <= 0) == 0 or not self.log_enabled
         assert np.sum(inputs < 0) == 0 or not self.sqrt
         if self.log_enabled and np.sum(inputs <= 0) == 0:
@@ -231,14 +233,14 @@ class NumericEmbedding(ContentEmbeddingBase):
             inputs = inputs.reshape(-1, 1)
         scaler = MinMaxScaler(feature_range=(-0.95, 0.95))
         standard_scaler = StandardScaler()
-        _ = scaler.fit(inputs)
         _ = standard_scaler.fit(inputs)
         self.scaler = scaler
         self.standard_scaler = standard_scaler
 
         inputs = self.__prepare_inputs(inputs)
+        inputs = self.scaler.fit_transform(inputs)
 
-        _, encoder = auto_encoder_transform(inputs, inputs.copy(), n_dims=self.n_dims, verbose=0,
+        _, encoder = auto_encoder_transform(inputs, inputs.copy(), n_dims=self.n_dims, verbose=self.verbose,
                                             epochs=self.n_iters)
         self.encoder = encoder
         self.log.debug("End Fitting NumericEmbedding for feature name %s", feature.feature_name)
@@ -250,7 +252,14 @@ class NumericEmbedding(ContentEmbeddingBase):
         if len(inputs.shape) == 1:
             inputs = inputs.reshape(-1, 1)
         inputs = self.__prepare_inputs(inputs)
-        outputs = unit_length(self.encoder.predict(inputs),
+        inputs = self.scaler.transform(inputs)
+        assert np.sum(np.isnan(inputs)) == 0
+        assert np.sum(np.isinf(inputs)) == 0
+        outputs = self.encoder.predict(inputs)
+        print(np.sum(np.isnan(outputs)), np.sum(np.isinf(outputs)))
+        assert np.sum(np.isnan(outputs)) == 0
+        assert np.sum(np.isinf(outputs)) == 0
+        outputs = unit_length(outputs,
                               axis=1) if self.make_unit_length else self.encoder.predict(inputs)
         self.log.debug("End Transform NumericEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)

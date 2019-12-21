@@ -249,27 +249,23 @@ def compare_embedding_global_distance_mismatches(high_dim_embeddigs, low_dim_emb
 
 def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=1, epochs=25):
     loss = "mean_squared_error"
-    initial_dims = Inputs.shape[1]
-    avg_value = 1.0 / np.sqrt(initial_dims)
     es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=5, verbose=0, )
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=4, min_lr=0.0001)
+    nan_prevent = tf.keras.callbacks.TerminateOnNaN()
     input_layer = tf.keras.Input(shape=(Inputs.shape[1],))
-    # encoded = tf.keras.layers.GaussianNoise(0.01)(input_layer)
-    encoded = tf.keras.layers.Dense(n_dims * 4, activation='elu')(input_layer)
-    encoded = tf.keras.layers.GaussianNoise(0.01 * avg_value)(encoded)
-    encoded = tf.keras.layers.Dense(n_dims * 2, activation='elu')(encoded)
-    # encoded = tf.keras.layers.GaussianNoise(0.01)(encoded)
+    encoded = tf.keras.layers.Dense(n_dims * 8, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(input_layer)
+    encoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(encoded)
     encoded = tf.keras.layers.Dense(n_dims, activation='elu')(encoded)
 
-    decoded = tf.keras.layers.Dense(n_dims * 2, activation='elu')(encoded)
-    decoded = tf.keras.layers.GaussianNoise(0.01 * avg_value)(decoded)
-    decoded = tf.keras.layers.Dense(n_dims * 4, activation='elu')(decoded)
-    decoded = tf.keras.layers.Dense(Outputs.shape[1], activation='elu')(decoded)
+    decoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(encoded)
+    decoded = tf.keras.layers.Dense(n_dims * 8, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(decoded)
+    decoded = tf.keras.layers.Dense(Outputs.shape[1])(decoded)
+    decoded = tf.keras.layers.LeakyReLU(alpha=0.1)(decoded)
 
     autoencoder = tf.keras.Model(input_layer, decoded)
     encoder = tf.keras.Model(input_layer, encoded)
-    adam = tf.keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.05, amsgrad=False)
-    autoencoder.compile(optimizer=adam, loss=loss)
+    adam = tf.keras.optimizers.Adam(lr=0.01, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
+    autoencoder.compile(optimizer=adam, loss=loss, metrics=["mean_squared_error"])
     X1, X2, Y1, Y2 = train_test_split(Inputs, Outputs, test_size=0.5)
     autoencoder.fit(X1, Y1,
                     epochs=epochs,
@@ -277,7 +273,7 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=1, epochs=25):
                     shuffle=True,
                     verbose=verbose,
                     validation_data=(X2, Y2),
-                    callbacks=[es])
+                    callbacks=[es, nan_prevent])
 
     autoencoder.fit(X2, Y2,
                     epochs=epochs,
@@ -285,7 +281,7 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=1, epochs=25):
                     shuffle=True,
                     verbose=verbose,
                     validation_data=(X1, Y1),
-                    callbacks=[es, reduce_lr])
+                    callbacks=[es, reduce_lr, nan_prevent])
 
     Z = encoder.predict(Inputs)
     return Z, encoder

@@ -74,18 +74,18 @@ hyperparameters = dict(combining_factor=0.1,
 
 if check_working:
     movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
-    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(1000)
+    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(2000)
     movies = movies[movies["movie_id"].isin(movie_counts.movie_id)]
 
     ratings = ratings[(ratings.movie_id.isin(movie_counts.movie_id))]
 
     user_counts = ratings.groupby(["user_id"])[["movie_id"]].count().reset_index()
-    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(100)
+    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(500)
     ratings = ratings.merge(user_counts[["user_id"]], on="user_id")
     users = users[users["user_id"].isin(user_counts.user_id)]
     ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]
     print("Total Samples Present = %s" % (ratings.shape[0]))
-    samples = min(10000, ratings.shape[0])
+    samples = min(100000, ratings.shape[0])
     ratings = ratings.sample(samples)
 
 
@@ -99,19 +99,22 @@ print("Total Samples Taken = %s, |Users| = %s |Items| = %s" % (ratings.shape[0],
 
 def prepare_data_mappers():
     embedding_mapper = {}
-    embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=8)
+    embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=4)
 
-    embedding_mapper['text'] = FasttextEmbedding(n_dims=32)
+    embedding_mapper['text'] = FasttextEmbedding(n_dims=24)
     embedding_mapper['numeric'] = NumericEmbedding(4)
     embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
 
     u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL, values=users[["gender", "age", "occupation", "zip"]].values)
     user_data = FeatureSet([u1])
 
+    print("Numeric Nans = \n", np.sum(movies[["title_length", "overview_length", "runtime"]].isna()))
+    print("Numeric Zeros = \n", np.sum(movies[["title_length", "overview_length", "runtime"]] <= 0))
+
     i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=movies.text.values)
     i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=movies.genres.values)
     i3 = Feature(feature_name="numeric", feature_type=FeatureType.NUMERIC,
-                 values=movies[["title_length", "overview_length", "runtime"]].values)
+                 values=np.abs(movies[["title_length", "overview_length", "runtime"]].values) + 1)
     item_data = FeatureSet([i1, i2, i3])
     return embedding_mapper, user_data, item_data
 
@@ -180,16 +183,16 @@ if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25, stratify=users_for_each_rating)
     results = []
 
-    capabilities = []
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
-                                                  capabilities=capabilities)
-    results.extend(res)
-    display_results(results)
-
-    capabilities = ["content"]
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
-    results.extend(res)
-    display_results(results)
+    # capabilities = []
+    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
+    #                                               capabilities=capabilities)
+    # results.extend(res)
+    # display_results(results)
+    #
+    # capabilities = ["content"]
+    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
+    # results.extend(res)
+    # display_results(results)
 
     capabilities = ["content", "resnet"]
     recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
