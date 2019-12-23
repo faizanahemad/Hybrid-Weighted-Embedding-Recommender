@@ -50,10 +50,11 @@ pip install -r requirements.txt
 
 # Experiments
 - Content Based
-- Collaborative NMF Matrix Based from surprise
-- Content + Collaborative NMF
 - Content + Collaborative with extra features
 - Content + Collaborative with extra features with alpha tree
+
+# TODO
+- Add new item/user with content features
 
 # Innovation
 - Heterogenous Features via Deep Networks

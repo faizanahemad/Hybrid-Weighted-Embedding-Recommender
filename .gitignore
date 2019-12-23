@@ -124,3 +124,5 @@ examples/Movie-Lens/1M/users.csv
 examples/Movie-Lens/downloaded-data/films.pkl
 examples/Movie-Lens/downloaded-data/the-movies-dataset/
 examples/Movie-Lens/tmbd_api_key.txt
+*.bin
+*.txt

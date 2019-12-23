@@ -60,7 +60,7 @@ test_retrieval = False
 
 hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.75, epochs=20, batch_size=64,
+                           prediction_network_params=dict(lr=0.6, epochs=15, batch_size=64,
                                                           network_width=128, padding_length=50,
                                                           network_depth=4, verbose=verbose,
                                                           kernel_l2=0.0,
@@ -69,7 +69,7 @@ hyperparameters = dict(combining_factor=0.1,
                                                  verbose=verbose),
                            user_user_params=dict(lr=0.05, epochs=10, batch_size=512,
                                                  verbose=verbose),
-                           user_item_params=dict(lr=0.05, epochs=20, batch_size=128,
+                           user_item_params=dict(lr=0.03, epochs=10, batch_size=128,
                                                  verbose=verbose, margin=0.5)))
 
 if check_working:

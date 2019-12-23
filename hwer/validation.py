@@ -33,7 +33,6 @@ from ast import literal_eval
 from .utils import normalize_affinity_scores_by_user
 
 
-
 def surprise_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
@@ -51,7 +50,7 @@ def model_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, floa
     return predictions
 
 
-def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):
+def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list, base_rating=None):
     validation_users = list(set([u for u, i, r in validation_affinities]))
     train_uid = defaultdict(set)
     items_extracted_length = []
@@ -63,8 +62,8 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         train_uid[u].add(i)
     mean, bu, bi, _, _ = normalize_affinity_scores_by_user(train_affinities)
     for u, i in predictions.items():
-        base_rating = mean + bu[u]
-        remaining_items = list(sorted(filter(lambda x: x[1] >= base_rating, i), key=operator.itemgetter(1), reverse=True))
+        br = mean + bu[u] if base_rating is None else base_rating
+        remaining_items = list(sorted(filter(lambda x: x[1] >= br, i), key=operator.itemgetter(1), reverse=True))
         remaining_items = list(filter(lambda x: x[0] not in train_uid[u], remaining_items))
         remaining_items = [i for i, r in remaining_items]
         items_extracted_length.append(len(remaining_items))
@@ -75,9 +74,9 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         validation_actuals[u].append((i, r))
 
     for u, i in validation_actuals.items():
-        base_rating = mean + bu[u]
+        br = mean + bu[u] if base_rating is None else base_rating
         remaining_items = list(
-            sorted(filter(lambda x: x[1] >= base_rating, i), key=operator.itemgetter(1), reverse=True))
+            sorted(filter(lambda x: x[1] >= br, i), key=operator.itemgetter(1), reverse=True))
         remaining_items = list(filter(lambda x: x[0] not in train_uid[u], remaining_items))
         remaining_items = [i for i, r in remaining_items]
         items_extracted_length.append(len(remaining_items))
@@ -89,7 +88,7 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
     return {"map": mean_ap, "retrieval_time": pred_time, "ndcg": 0.0}
 
 
-def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5)):
+def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5), base_rating=None):
     train_affinities = train
     validation_affinities = test
     train = pd.DataFrame(train)
@@ -108,7 +107,7 @@ def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_pa
         rmse = accuracy.rmse(predictions, verbose=False)
         mae = accuracy.mae(predictions, verbose=False)
 
-        ex_ee = extraction_efficiency(algo, train_affinities, validation_affinities, surprise_get_topk, items)
+        ex_ee = extraction_efficiency(algo, train_affinities, validation_affinities, surprise_get_topk, items, base_rating=base_rating)
 
         predictions = algo.test(trainset_for_testing)
         train_rmse = accuracy.rmse(predictions, verbose=False)
@@ -131,7 +130,7 @@ def display_results(results: List[Dict[str, Any]]):
     print(df)
 
 
-def get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items):
+def get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items, base_rating=None):
     def get_details(recsys, affinities):
         predictions = recsys.predict([(u, i) for u, i, r in affinities])
         assert np.sum(np.isnan(predictions)) == 0
@@ -142,7 +141,7 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
     predictions, actuals, rmse, mae = get_details(recsys, validation_affinities)
     _, _, train_rmse, train_mae = get_details(recsys, train_affinities)
     print(rmse, mae, train_rmse, train_mae)
-    ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
+    ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items, base_rating=base_rating)
     stats = {"rmse": rmse, "mae": mae,
             "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
             "train_rmse": train_rmse, "train_mae": train_mae}

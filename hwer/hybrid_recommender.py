@@ -533,11 +533,13 @@ class HybridRecommender(RecommendationBase):
     def __build_svd_model__(self, user_ids: List[str], item_ids: List[str],
                                  user_item_affinities: List[Tuple[str, str, float]],
                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                 rating_scale: Tuple[float, float]):
+                                 rating_scale: Tuple[float, float], **svd_params):
         reader = Reader(rating_scale=rating_scale)
         train = pd.DataFrame(user_item_affinities)
         train = Dataset.load_from_df(train, reader).build_full_trainset()
-        svd_model = SVDpp(n_factors=int(self.n_collaborative_dims/2), n_epochs=10)
+        n_epochs = svd_params["n_epochs"] if "n_epochs" in svd_params else 10
+        n_factors = svd_params["n_factors"] if "n_factors" in svd_params else 10
+        svd_model = SVDpp(n_factors=n_factors, n_epochs=n_epochs)
         svd_model.fit(train)
         return svd_model
 
@@ -563,6 +565,7 @@ class HybridRecommender(RecommendationBase):
         item_data: FeatureSet = kwargs["item_data"] if "item_data" in kwargs else FeatureSet([])
         user_data: FeatureSet = kwargs["user_data"] if "user_data" in kwargs else FeatureSet([])
         hyperparameters = {} if "hyperparameters" not in kwargs else kwargs["hyperparameters"]
+        svd_params = {} if "svd_params" not in hyperparameters else hyperparameters["svd_params"]
         collaborative_params = {} if "collaborative_params" not in hyperparameters else hyperparameters["collaborative_params"]
         prediction_network_params = {} if "prediction_network_params" not in collaborative_params else \
             collaborative_params["prediction_network_params"]
@@ -624,7 +627,7 @@ class HybridRecommender(RecommendationBase):
                                                                      self.rating_scale, prediction_network_params)
         self.prediction_artifacts = prediction_artifacts
         svd_model = self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
-                                             self.user_id_to_index, self.item_id_to_index, self.rating_scale)
+                                             self.user_id_to_index, self.item_id_to_index, self.rating_scale, **svd_params)
         self.prediction_artifacts["svd_model"] = svd_model
 
         user_content_vectors, item_content_vectors = user_content_vectors * alpha, item_content_vectors * alpha

@@ -10,6 +10,7 @@ from bidict import bidict
 from .logging import getLogger
 from .utils import is_num, is_2d_array, UserNotFoundException, ItemNotFoundException
 from .utils import normalize_affinity_scores_by_user_item_bs, unit_length
+import operator
 
 
 # TODO: Add Validations for add apis
@@ -248,7 +249,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         embedding = np.average(embedding_list, axis=0)
 
         (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=k)
-        return [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
+        results = [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
+        return list(sorted(results, key=operator.itemgetter(1), reverse=False))
 
     def find_similar_users(self, user: str, positive: List[Tuple[str, EntityType]] = None,
                            negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
@@ -264,7 +266,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         embedding = np.average(embedding_list, axis=0)
         (neighbors,), (dist,) = self.user_knn.knn_query([embedding], k=k)
-        return [(self.user_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
+        results = [(self.user_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
+        return list(sorted(results, key=operator.itemgetter(1), reverse=False))
 
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
                             negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
@@ -280,7 +283,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         embedding = np.average(embedding_list, axis=0)
         (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=k)
-        return [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
+        results = [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
+        return list(sorted(results, key=operator.itemgetter(1), reverse=False))
 
     @staticmethod
     def persist(filename: str, instance):

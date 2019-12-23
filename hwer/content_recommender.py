@@ -180,10 +180,11 @@ class ContentRecommendation(RecommendationBase):
         # PCA
         user_vectors_length = len(user_vectors)
         all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)
-        if n_output_dims < all_vectors.shape[1]:
+        if n_output_dims <= all_vectors.shape[1]:
             # all_vectors = StandardScaler().fit_transform(all_vectors)
             pca = PCA(n_components=n_output_dims, )
             all_vectors = pca.fit_transform(all_vectors)
+            all_vectors = StandardScaler().fit_transform(all_vectors)
             self.log.debug("Content Recommender::__concat_feature_vectors__, PCA explained variance:  %.4f, explained variance ratio: %.4f",
                            np.sum(pca.explained_variance_), np.sum(pca.explained_variance_ratio_))
 

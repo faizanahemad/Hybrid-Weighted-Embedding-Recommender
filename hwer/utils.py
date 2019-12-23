@@ -247,7 +247,7 @@ def compare_embedding_global_distance_mismatches(high_dim_embeddigs, low_dim_emb
     return score, score2
 
 
-def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=1, epochs=25):
+def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
     loss = "mean_squared_error"
     es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=5, verbose=0, )
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=4, min_lr=0.0001)
@@ -345,6 +345,7 @@ def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str,
     start = time.time()
     uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
     uid["rating"] = uid["rating"].astype(float)
+    user_item_affinities = uid.values
     # Calculating Biases
     mean = uid.rating.mean()
     uid["rating"] = uid["rating"] - mean
