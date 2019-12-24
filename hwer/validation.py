@@ -2,6 +2,7 @@
 import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
+from surprise.prediction_algorithms.co_clustering import CoClustering
 
 from hwer.utils import average_precision
 
@@ -23,7 +24,7 @@ import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import describe
-from surprise import SVD, SVDpp
+from surprise import SVD, SVDpp, NormalPredictor
 from surprise import accuracy
 from surprise import BaselineOnly
 from surprise import Dataset
@@ -117,7 +118,9 @@ def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_pa
 
     algo_map = {"svd": SVD(**(algo_params["svd"] if "svd" in algo_params else {})),
                 "svdpp": SVDpp(**(algo_params["svdpp"] if "svdpp" in algo_params else {})),
-                "baseline": BaselineOnly(bsl_options={'method': 'sgd'})}
+                "baseline": BaselineOnly(bsl_options={'method': 'sgd'}),
+                "clustering": CoClustering(**(algo_params["clustering"] if "clustering" in algo_params else dict(n_cltr_u=5, n_cltr_i=10))),
+                "normal": NormalPredictor()}
     results = list(map(lambda a: use_algo(algo_map[a], a), algo))
     return results
 
@@ -134,6 +137,7 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
     def get_details(recsys, affinities):
         predictions = recsys.predict([(u, i) for u, i, r in affinities])
         assert np.sum(np.isnan(predictions)) == 0
+        assert np.sum(np.array(predictions) <= 0) == 0
         actuals = np.array([r for u, i, r in affinities])
         rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
         mae = np.mean(np.abs(actuals - predictions))

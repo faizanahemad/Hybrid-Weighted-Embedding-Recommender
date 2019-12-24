@@ -180,7 +180,7 @@ class ContentRecommendation(RecommendationBase):
         # PCA
         user_vectors_length = len(user_vectors)
         all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)
-        if n_output_dims <= all_vectors.shape[1]:
+        if n_output_dims < all_vectors.shape[1]:
             # all_vectors = StandardScaler().fit_transform(all_vectors)
             pca = PCA(n_components=n_output_dims, )
             all_vectors = pca.fit_transform(all_vectors)
@@ -192,6 +192,8 @@ class ContentRecommendation(RecommendationBase):
             raise AssertionError("Output Dims are higher than Total Feature Dims.")
         user_vectors = all_vectors[:user_vectors_length]
         item_vectors = all_vectors[user_vectors_length:]
+        user_vectors = unit_length(user_vectors, axis=1)
+        item_vectors = unit_length(item_vectors, axis=1)
 
         return user_vectors, item_vectors
 

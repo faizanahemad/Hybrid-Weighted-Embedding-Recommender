@@ -21,7 +21,7 @@ import time
 from ast import literal_eval
 
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
-    normalize_affinity_scores_by_user
+    normalize_affinity_scores_by_user, ContentRecommendation
 from hwer import Feature, FeatureSet, FeatureType
 from hwer import SVDppHybrid
 from hwer import FasttextEmbedding
@@ -69,7 +69,7 @@ hyperparameters = dict(combining_factor=0.1,
                                                  verbose=verbose),
                            user_user_params=dict(lr=0.05, epochs=10, batch_size=512,
                                                  verbose=verbose),
-                           user_item_params=dict(lr=0.03, epochs=10, batch_size=128,
+                           user_item_params=dict(lr=0.05, epochs=10, batch_size=128,
                                                  verbose=verbose, margin=0.5)))
 
 if check_working:
@@ -160,6 +160,17 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
 
     end = time.time()
     total_time = end - start
+
+    embedding_mapper, user_data, item_data = prepare_data_mappers()
+    kwargs['user_data'] = user_data
+    kwargs['item_data'] = item_data
+    content_recsys = ContentRecommendation(embedding_mapper=embedding_mapper,
+                                           knn_params=dict(n_neighbors=200,
+                                                           index_time_params={'M': 15, 'ef_construction': 200,}),
+                                           rating_scale=(1, 5), n_output_dims=32)
+    _, _ = content_recsys.fit(users.user_id.values, movies.movie_id.values,
+                              train_affinities, **kwargs)
+
     assert np.sum(np.isnan(recsys.predict([(user_list[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
 
     res = {"algo":"hybrid-" + "_".join(capabilities), "time": total_time}
@@ -171,6 +182,11 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     _, _, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
                                                          model_get_topk, items)
     res2.update(stats)
+
+    res4 = {"algo": "pure-content", "time": total_time}
+    _, _, stats = get_prediction_details(content_recsys, train_affinities, validation_affinities,
+                                         model_get_topk, items, base_rating=0.1)
+    res4.update(stats)
 
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})

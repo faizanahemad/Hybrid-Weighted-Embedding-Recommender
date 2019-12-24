@@ -160,8 +160,8 @@ class FasttextEmbedding(ContentEmbeddingBase):
         self.fasttext_file = fasttext_file
         self.text_model = None
         self.fasttext_params = kwargs["fasttext_params"] \
-            if "fasttext_params" in kwargs else dict(neg=10, ws=7, minCount=3, bucket=1000000, minn=4, maxn=5,
-                                                     dim=self.n_dims, epoch=20, lr=0.1, thread=os.cpu_count())
+            if "fasttext_params" in kwargs else dict(neg=20, ws=9, minCount=3, bucket=1000000, minn=4, maxn=5,
+                                                     dim=self.n_dims, epoch=10, lr=0.1, thread=os.cpu_count())
         self.log = getLogger(type(self).__name__)
 
     def get_sentence_vector(self, text):

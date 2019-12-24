@@ -2,7 +2,7 @@ import pandas as pd
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
 from hwer.validation import *
-from hwer.utils import average_precision
+from hwer.utils import average_precision, cos_sim
 import networkx as nx
 
 pd.set_option('display.max_rows', 500)
@@ -34,7 +34,7 @@ from sklearn.utils import shuffle
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
     normalize_affinity_scores_by_user
 from hwer import Feature, FeatureSet, FeatureType
-from hwer import SVDppHybrid
+from hwer import SVDppHybrid, ContentRecommendation
 from hwer import FasttextEmbedding
 
 df_item = pd.read_csv("small_items.csv")
@@ -65,26 +65,21 @@ enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = True
 
-hyperparameters = dict(combining_factor=0.9,
+hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.001, epochs=1, batch_size=512,
+                           prediction_network_params=dict(lr=0.01, epochs=15, batch_size=128,
                                                           network_width=16, padding_length=50,
                                                           network_depth=1, verbose=verbose,
-                                                          kernel_l2=0.05,
-                                                          bias_regularizer=0.05, dropout=0.0),
-                           user_item_params=dict(lr=0.001, epochs=2, batch_size=128,
-                                                 verbose=verbose, margin=0.1)))
+                                                          kernel_l2=0.02,
+                                                          bias_regularizer=0.02, dropout=0.0),
+                           user_item_params=dict(lr=0.5, epochs=20, batch_size=64,
+                                                 verbose=verbose, margin=0.5)))
 
 if check_working:
     G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= 2])
     k_core_edges = list(nx.k_core(G, k=10).edges())
     users = set([u for u, i in k_core_edges])
     items = set([i for u, i in k_core_edges])
-    # high_rating_users = ratings.groupby(["user"])[["item"]].count().reset_index()
-    # high_rating_users = high_rating_users.sort_values(["item"], ascending=False)
-    # high_rating_users = high_rating_users[high_rating_users["item"] < 200]
-    # high_rating_users = high_rating_users.head(2000)
-    # df_item = df_item[df_item["item"].isin(set(ratings.item))]
     df_user = df_user[df_user.user.isin(set(users))]
     negatives = ratings[(ratings.user.isin(users))]
     negatives = negatives[negatives.rating == 0]
@@ -142,16 +137,7 @@ def prepare_data_mappers():
     return embedding_mapper, user_data, item_data
 
 
-def check_users_items_train_test(train_affinities, validation_affinities,):
-    users = set([u for u, i, r in train_affinities])
-    items = set([i for u, i, r in train_affinities])
-    val_exluded_users = [u for u, i, r in validation_affinities if u not in users]
-    val_exluded_items = [i for u, i, r in validation_affinities if i not in items]
-    print(len(val_exluded_users), len(val_exluded_items), len(val_exluded_users) + len(val_exluded_items))
-
-
 def test_once(train_affinities, validation_affinities, items, capabilities=["resnet", "content"]):
-    check_users_items_train_test(train_affinities, validation_affinities, )
     embedding_mapper, user_data, item_data = prepare_data_mappers()
     kwargs = {}
     kwargs['user_data'] = user_data
@@ -166,43 +152,65 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     recsys = SVDppHybrid(embedding_mapper=embedding_mapper,
                          knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                          rating_scale=rating_scale,
-                         n_content_dims=40,
-                         n_collaborative_dims=40,
+                         n_content_dims=32,
+                         n_collaborative_dims=32,
                          fast_inference=False, content_only_inference=False)
 
     start = time.time()
     user_vectors, item_vectors = recsys.fit(df_user.user.values, df_item.item.values,
                                             train_affinities, **kwargs)
-
-
+    cos_sims = []
+    for i in range(100):
+        cos_sims.append([])
+        for j in range(100):
+            sim = cos_sim(item_vectors[i], item_vectors[j])
+            cos_sims[i].append(sim)
+    cos_sims = np.array(cos_sims)
+    print("Cos Sim Min and Max = ", cos_sims.min(), cos_sims.max(), cos_sims.mean())
     end = time.time()
     total_time = end - start
-    assert np.sum(np.isnan(recsys.predict([(user_list[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
 
-    recsys.fast_inference = False
-    recsys.content_only_inference = True
-    res3 = {"algo": "cb-" + "_".join(capabilities), "time": total_time}
-    _, _, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                         model_get_topk, items)
-    res3.update(stats)
+    embedding_mapper, user_data, item_data = prepare_data_mappers()
+    kwargs['user_data'] = user_data
+    kwargs['item_data'] = item_data
+    content_recsys = ContentRecommendation(embedding_mapper=embedding_mapper,
+                                           knn_params=dict(n_neighbors=200,
+                                                           index_time_params={'M': 15, 'ef_construction': 200, }),
+                                           rating_scale=rating_scale, n_output_dims=32)
+    _, _ = content_recsys.fit(df_user.user.values, df_item.item.values,
+                              train_affinities, **kwargs)
+
+    assert np.sum(np.isnan(recsys.predict([(user_list[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
 
     recsys.fast_inference = True
     recsys.content_only_inference = False
     res2 = {"algo": "fast-hybrid-" + "_".join(capabilities), "time": total_time}
     predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                                         model_get_topk, items)
+                                                         model_get_topk, items, base_rating=0.1)
     res2.update(stats)
 
-    # recsys.fast_inference = False
-    # recsys.content_only_inference = False
-    # res = {"algo":"hybrid-" + "_".join(capabilities), "time": total_time}
-    # predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items, base_rating=0.1)
-    # res.update(stats)
+    recsys.fast_inference = False
+    recsys.content_only_inference = True
+    res3 = {"algo": "cb", "time": total_time}
+    _, _, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
+                                         model_get_topk, items, base_rating=0.1)
+    res3.update(stats)
+
+    res4 = {"algo": "pure-content", "time": total_time}
+    _, _, stats = get_prediction_details(content_recsys, train_affinities, validation_affinities,
+                                         model_get_topk, items, base_rating=0.1)
+    res4.update(stats)
+
+    recsys.fast_inference = False
+    recsys.content_only_inference = False
+    res = {"algo":"hybrid-" + "_".join(capabilities), "time": total_time}
+    predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items, base_rating=0.1)
+    res.update(stats)
 
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
         error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
-    results = [res2, res3]
+    results = [res, res2, res3, res4]
     return recsys, results, predictions, actuals
 
 
@@ -226,14 +234,14 @@ if not enable_kfold:
     train_affinities, validation_affinities, val_pos = stratified_split(user_item_affinities)
     results = []
 
-    capabilities = []
+    capabilities = ["resnet", "content"]
     recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
                                                   capabilities=capabilities)
     results.extend(res)
     display_results(results)
 
-    # results.extend(test_surprise(train_affinities, validation_affinities, item_list,
-    #                              algo=["baseline", "svdpp"], algo_params={"svdpp": {}}, rating_scale=rating_scale, base_rating=1.0))
+    results.extend(test_surprise(train_affinities, validation_affinities, item_list,
+                                 algo=["baseline", "svdpp", "clustering", "normal"], algo_params={"svdpp": {"n_factors": 10}}, rating_scale=rating_scale, base_rating=0.1))
     display_results(results)
     print(list(zip(actuals[:50], predictions[:50])))
     if test_retrieval:
