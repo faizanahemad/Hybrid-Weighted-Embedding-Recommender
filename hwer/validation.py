@@ -63,7 +63,7 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         train_uid[u].add(i)
     mean, bu, bi, _, _ = normalize_affinity_scores_by_user(train_affinities)
     for u, i in predictions.items():
-        br = mean + bu[u] if base_rating is None else base_rating
+        br = (mean + bu[u]) if base_rating is None else base_rating
         remaining_items = list(sorted(filter(lambda x: x[1] >= br, i), key=operator.itemgetter(1), reverse=True))
         remaining_items = list(filter(lambda x: x[0] not in train_uid[u], remaining_items))
         remaining_items = [i for i, r in remaining_items]
@@ -75,7 +75,7 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         validation_actuals[u].append((i, r))
 
     for u, i in validation_actuals.items():
-        br = mean + bu[u] if base_rating is None else base_rating
+        br = (mean + bu[u]) if base_rating is None else base_rating
         remaining_items = list(
             sorted(filter(lambda x: x[1] >= br, i), key=operator.itemgetter(1), reverse=True))
         remaining_items = list(filter(lambda x: x[0] not in train_uid[u], remaining_items))
