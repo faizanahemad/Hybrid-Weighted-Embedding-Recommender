@@ -67,11 +67,11 @@ test_retrieval = True
 
 hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.01, epochs=15, batch_size=128,
-                                                          network_width=16, padding_length=50,
-                                                          network_depth=1, verbose=verbose,
-                                                          kernel_l2=0.02,
-                                                          bias_regularizer=0.02, dropout=0.0),
+                           prediction_network_params=dict(lr=0.01, epochs=25, batch_size=128,
+                                                          network_width=32, padding_length=50,
+                                                          network_depth=2, verbose=verbose,
+                                                          kernel_l2=0.05,
+                                                          bias_regularizer=0.05, dropout=0.1),
                            user_item_params=dict(lr=0.5, epochs=20, batch_size=64,
                                                  verbose=verbose, margin=0.5)))
 
@@ -132,7 +132,7 @@ def prepare_data_mappers():
     embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=4, n_iters=20)
     embedding_mapper['browse_node_l2'] = MultiCategoricalEmbedding(n_dims=4, n_iters=20)
     embedding_mapper['subcategory_code'] = MultiCategoricalEmbedding(n_dims=4, n_iters=20)
-    embedding_mapper['sentence'] = FasttextEmbedding(n_dims=24, fasttext_file="fasttext.bin")
+    embedding_mapper['sentence'] = FasttextEmbedding(n_dims=24, fasttext_file="fasttext_new.bin")
 
     return embedding_mapper, user_data, item_data
 
@@ -241,7 +241,7 @@ if not enable_kfold:
     display_results(results)
 
     results.extend(test_surprise(train_affinities, validation_affinities, item_list,
-                                 algo=["baseline", "svdpp", "clustering", "normal"], algo_params={"svdpp": {"n_factors": 10}}, rating_scale=rating_scale, base_rating=0.1))
+                                 algo=["baseline", "normal"], algo_params={"svdpp": {"n_factors": 10}}, rating_scale=rating_scale, base_rating=0.1))
     display_results(results)
     print(list(zip(actuals[:50], predictions[:50])))
     if test_retrieval:
