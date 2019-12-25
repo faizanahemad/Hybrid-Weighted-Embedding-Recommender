@@ -67,13 +67,13 @@ test_retrieval = True
 
 hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.01, epochs=25, batch_size=128,
-                                                          network_width=32, padding_length=50,
-                                                          network_depth=2, verbose=verbose,
+                           prediction_network_params=dict(lr=0.01, epochs=15, batch_size=128,
+                                                          network_width=64, padding_length=50,
+                                                          network_depth=4, verbose=verbose,
                                                           kernel_l2=0.05,
                                                           bias_regularizer=0.05, dropout=0.1),
                            user_item_params=dict(lr=0.5, epochs=20, batch_size=64,
-                                                 verbose=verbose, margin=0.5)))
+                                                 verbose=verbose, margin=1.0)))
 
 if check_working:
     G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= 2])
@@ -229,6 +229,7 @@ def stratified_split(user_item_affinities):
     validation_affinities = [[u, i, float(r)] for u, i, r in validation_affinities]
     val_pos = [[u, i, float(r)] for u, i, r in val_pos]
     return train_affinities, validation_affinities, val_pos
+
 
 if not enable_kfold:
     train_affinities, validation_affinities, val_pos = stratified_split(user_item_affinities)
