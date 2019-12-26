@@ -63,21 +63,22 @@ check_working = True
 enable_kfold = False
 enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
-test_retrieval = True
+test_retrieval = False
+cores = 20
 
 hyperparameters = dict(combining_factor=0.1,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.01, epochs=15, batch_size=128,
+                           prediction_network_params=dict(lr=0.01, epochs=40, batch_size=128,
                                                           network_width=64, padding_length=50,
                                                           network_depth=4, verbose=verbose,
-                                                          kernel_l2=0.05,
-                                                          bias_regularizer=0.05, dropout=0.1),
+                                                          kernel_l2=0.01,
+                                                          bias_regularizer=0.02, dropout=0.1),
                            user_item_params=dict(lr=0.5, epochs=20, batch_size=64,
                                                  verbose=verbose, margin=1.0)))
 
 if check_working:
-    G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= 2])
-    k_core_edges = list(nx.k_core(G, k=10).edges())
+    G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= 1])
+    k_core_edges = list(nx.k_core(G, k=cores).edges())
     users = set([u for u, i in k_core_edges])
     items = set([i for u, i in k_core_edges])
     df_user = df_user[df_user.user.isin(set(users))]
@@ -185,37 +186,44 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     recsys.fast_inference = True
     recsys.content_only_inference = False
     res2 = {"algo": "fast-hybrid-" + "_".join(capabilities), "time": total_time}
-    predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                                         model_get_topk, items, base_rating=0.1)
+    predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities, validation_affinities,
+                                                         model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.1)
     res2.update(stats)
+    user_rating_count_metrics["algo"] = res2["algo"]
 
     recsys.fast_inference = False
     recsys.content_only_inference = True
     res3 = {"algo": "cb", "time": total_time}
-    _, _, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                         model_get_topk, items, base_rating=0.1)
+    _, _, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities,
+                                         model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.1)
     res3.update(stats)
+    urcm["algo"] = res3["algo"]
+    user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
 
     res4 = {"algo": "pure-content", "time": total_time}
-    _, _, stats = get_prediction_details(content_recsys, train_affinities, validation_affinities,
-                                         model_get_topk, items, base_rating=0.1)
+    _, _, stats, urcm = get_prediction_details(content_recsys, train_affinities, validation_affinities,
+                                         model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.1)
     res4.update(stats)
+    urcm["algo"] = res4["algo"]
+    user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
 
     recsys.fast_inference = False
     recsys.content_only_inference = False
     res = {"algo":"hybrid-" + "_".join(capabilities), "time": total_time}
-    predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items, base_rating=0.1)
+    predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.1)
     res.update(stats)
+    urcm["algo"] = res["algo"]
+    user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
 
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
         error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
     results = [res, res2, res3, res4]
-    return recsys, results, predictions, actuals
+    return recsys, results, user_rating_count_metrics, predictions, actuals
 
 
 def stratified_split(user_item_affinities):
-    positive_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r >= 2]
+    positive_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r >= 1]
     negative_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r == 0]
     train_pos, val_pos = train_test_split(positive_samples, test_size=0.2, stratify=[u for u, i, r in positive_samples])
     train_neg, val_neg = train_test_split(negative_samples, test_size=0.2, stratify=[u for u, i, r in negative_samples])
@@ -236,14 +244,26 @@ if not enable_kfold:
     results = []
 
     capabilities = ["resnet", "content"]
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
+    recsys, res, user_rating_count_metrics, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
                                                   capabilities=capabilities)
     results.extend(res)
     display_results(results)
 
-    results.extend(test_surprise(train_affinities, validation_affinities, item_list,
-                                 algo=["baseline", "normal"], algo_params={"svdpp": {"n_factors": 10}}, rating_scale=rating_scale, base_rating=0.1))
-    display_results(results)
+    surprise_results = test_surprise(train_affinities, validation_affinities, item_list,
+                                     algo=["baseline", "normal"], algo_params={"svdpp": {"n_factors": 10}},
+                                     rating_scale=rating_scale, min_positive_rating=0.1, ignore_below_rating=0.1)
+    ucrms = [s["user_rating_count_metrics"] for s in surprise_results]
+    ucrms = pd.concat(ucrms)
+    user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
+    for s in surprise_results:
+        del s["user_rating_count_metrics"]
+    results.extend(surprise_results)
+    results = display_results(results)
+    user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
+    print(user_rating_count_metrics)
+    user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % cores, index=False)
+    results.to_csv("overall_results.csv", index=False)
+    visualize_results(results, user_rating_count_metrics)
     print(list(zip(actuals[:50], predictions[:50])))
     if test_retrieval:
         user_id = df_user.user.values[0]
