@@ -90,17 +90,14 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
 
 def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5),
                   ignore_below_rating=None, min_positive_rating=None):
-    if ignore_below_rating is not None:
-        train = [(u, i, r) for u, i, r in train if r >= ignore_below_rating]
-        test = [(u, i, r) for u, i, r in test if r >= ignore_below_rating]
     train_affinities = train
     validation_affinities = test
     train = pd.DataFrame(train)
-    test = pd.DataFrame(test)
+    test = pd.DataFrame([(u, i, r) for u, i, r in test if r >= ignore_below_rating])
     reader = Reader(rating_scale=rating_scale)
     trainset = Dataset.load_from_df(train, reader).build_full_trainset()
     testset = Dataset.load_from_df(test, reader).build_full_trainset().build_testset()
-    trainset_for_testing = trainset.build_testset()
+    trainset_for_testing = Dataset.load_from_df(pd.DataFrame([(u, i, r) for u, i, r in train_affinities if r >= ignore_below_rating]), reader).build_full_trainset().build_testset()
 
     def use_algo(algo, name):
         start = time.time()
@@ -110,15 +107,18 @@ def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_pa
         total_time = end - start
         rmse = accuracy.rmse(predictions, verbose=False)
         mae = accuracy.mae(predictions, verbose=False)
+        if ignore_below_rating is not None:
+            train_aff = [(u, i, r) for u, i, r in train_affinities if r >= ignore_below_rating]
+            validation_aff = [(u, i, r) for u, i, r in validation_affinities if r >= ignore_below_rating]
 
-        ex_ee = extraction_efficiency(algo, train_affinities, validation_affinities, surprise_get_topk, items, min_positive_rating=min_positive_rating)
+        ex_ee = extraction_efficiency(algo, train_aff, validation_aff, surprise_get_topk, items, min_positive_rating=min_positive_rating)
 
         train_predictions = algo.test(trainset_for_testing)
         train_rmse = accuracy.rmse(train_predictions, verbose=False)
         train_mae = accuracy.mae(train_predictions, verbose=False)
         train_predictions = [p.est for p in train_predictions]
         predictions = [p.est for p in predictions]
-        user_rating_count_metrics = metrics_by_num_interactions_user(train_affinities, validation_affinities,
+        user_rating_count_metrics = metrics_by_num_interactions_user(train_aff, validation_aff,
                                                                      train_predictions, predictions,
                                                                      ex_ee["actuals"], ex_ee["predictions"])
         user_rating_count_metrics["algo"] = name
@@ -139,7 +139,7 @@ def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_pa
 def metrics_by_num_interactions_user(train_affinities: List[Tuple[str, str, float]], validation_affinities: List[Tuple[str, str, float]],
                                      train_predictions: np.ndarray, val_predictions: np.ndarray,
                                      val_user_topk_actuals: Dict[str, List[str]], val_user_topk_predictions: Dict[str, List[str]],
-                                     mode="ge",
+                                     mode="le",
                                      increments=2):
     columns = ["user", "item", "rating"]
     train_affinities = pd.DataFrame(train_affinities, columns=columns)
@@ -157,7 +157,7 @@ def metrics_by_num_interactions_user(train_affinities: List[Tuple[str, str, floa
         return rmse, mae
 
     results = []
-    for i in range(min_count, max_count+increments, increments):
+    for i in range(min_count, max_count, increments):
         uc = min(i, max_count)
         if mode == "exact":
             users = set(user_rating_count[user_rating_count["count"] == uc]['user'])
@@ -180,36 +180,52 @@ def display_results(results: List[Dict[str, Any]]):
     df = pd.DataFrame.from_records(results)
     df = df.groupby(['algo']).mean()
     df['time'] = df['time'].apply(lambda s: str(datetime.timedelta(seconds=s)))
+    time = df['retrieval_time']
     df['retrieval_time'] = df['retrieval_time'].apply(lambda s: str(datetime.timedelta(seconds=s)))
     print(df)
+    df['retrieval_time'] = time
     return df
 
 
-def visualize_results(results, user_rating_count_metrics):
+def visualize_results(results, user_rating_count_metrics, num_samples):
     # TODO: combining factor as X-axis, y-axis as map, hue as user_rating_count
-    plt.figure(figsize=(8, 6))
+    results['retrieval_time'] = results['retrieval_time'] / num_samples
+    results['retrieval_time'] = results['retrieval_time'] * 1000
+    plt.figure(figsize=(12, 8))
+    plt.title("Retrieval Time vs Algorithm")
+    sns.barplot(results.index, results.retrieval_time)
+    plt.xlabel("Algorithm")
+    plt.ylabel("Retrieval Time in milli-seconds")
+    plt.xticks(rotation=45, ha='right')
+    plt.legend()
+    plt.show()
+
+
+    plt.figure(figsize=(12, 8))
     plt.title("Mean Absolute Error vs Algorithm")
     sns.barplot(results.index, results.mae)
     plt.xlabel("Algorithm")
     plt.ylabel("Mean Absolute Error")
     plt.xticks(rotation=45, ha='right')
+    plt.legend()
     plt.show()
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(12, 8))
     plt.title("Mean Average Precision vs Algorithm")
     sns.barplot(results.index, results.map)
     plt.xlabel("Algorithm")
     plt.ylabel("Mean Average Precision")
     plt.xticks(rotation=45, ha='right')
+    plt.legend()
     plt.show()
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(12, 8))
     plt.title("Mean Absolute Error vs User Rating Count")
     sns.lineplot(x="user_rating_count", y="mae", hue="algo", style="algo", markers=True, data=user_rating_count_metrics)
     plt.xticks(rotation=45, ha='right')
     plt.show()
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(12, 8))
     plt.title("Mean Average Precision vs User Rating Count")
     sns.lineplot(x="user_rating_count", y="map", hue="algo", style="algo", markers=True, data=user_rating_count_metrics)
     plt.xticks(rotation=45, ha='right')

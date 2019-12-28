@@ -54,7 +54,8 @@ pip install -r requirements.txt
 - Content + Collaborative with extra features with alpha tree
 
 # TODO
-- Add new item/user with content features
+- Add new item/user with content features https://stats.stackexchange.com/questions/320962/matrix-factorization-in-recommender-systems-adding-a-new-user?rq=1
+- Add Testing for Implicit and content data framework like https://github.com/benfred/implicit and https://github.com/lyst/lightfm
 
 # Innovation
 - Heterogenous Features via Deep Networks

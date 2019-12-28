@@ -131,15 +131,6 @@ def mean_average_precision(y_true: List[List[str]], y_pred: List[List[str]]):
     return np.mean(sn)
 
 
-def mean_average_precision_by_users(y_true: Dict[str, List[str]], y_pred: Dict[str, List[str]]):
-    sn = []
-    for k, v in y_true.items():
-        yp = y_pred[k] if k in y_pred else []
-        y = v
-        sn.append(average_precision(y, yp))
-    return np.mean(sn)
-
-
 def ndcg(y_true: List[str], y_pred: List[str]):
     y_pred = np.array(y_pred)
     if len(y_pred.shape) == 2:
