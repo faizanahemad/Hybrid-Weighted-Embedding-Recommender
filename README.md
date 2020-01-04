@@ -45,6 +45,32 @@ pip install --upgrade pip
 pip install tensorflow
 ```
 
+Install DGL from source [Docs](https://docs.dgl.ai/install/index.html#install-from-source)
+```bash
+pip install -e git+https://github.com/dmlc/dgl.git#egg=dgl\&#subdirectory=python
+
+git clone --progress --recursive https://github.com/dmlc/dgl.git
+cd dgl
+mkdir build && cd build
+cmake -D CMAKE_C_COMPILER=/usr/local/opt/gcc/bin/gcc-9 -D CMAKE_CXX_COMPILER=/usr/local/opt/gcc/bin/g++-9 OpenMP_C=/usr/local/opt/gcc/bin/gcc-9 -D OpenMP_CXX=/usr/local/opt/gcc/bin/g++-9  ..
+cd ../python
+python setup.py install
+```
+
+Install tf-dlpack
+```bash
+git clone --recursive https://github.com/VoVAllen/tf-dlpack.git
+cd tf-dlpack
+mkdir build && cd build
+cmake -DUSE_CUDA=OFF ..
+make -j4
+cp libtfdlpack.dylib ../python/tfdlpack
+cd ../python && python setup.py develop --no-deps
+export PYTHONPATH=$(pwd)/tf-dlpack/python/:${PYTHONPATH}
+export TFDLPACK_LIBRARY_PATH=$(pwd)/tf-dlpack/python/tfdlpack
+
+```
+
 pip install -r requirements.txt
 
 
@@ -56,6 +82,16 @@ pip install -r requirements.txt
 # TODO
 - Add new item/user with content features https://stats.stackexchange.com/questions/320962/matrix-factorization-in-recommender-systems-adding-a-new-user?rq=1
 - Add Testing for Implicit and content data framework like https://github.com/benfred/implicit and https://github.com/lyst/lightfm
+- Add Testing for Fast.ai recommendation framework
+- Add `Recall@K` for user's with less than `L` ratings in training.
+- Add support to detect if gpu present and change `env_setup.sh` accordingly. 
+- Add Filter Function support for search functions
+- Weighted node combination in GCN
+- Try Huber Loss
+- SVDpp DNN combine multiple user vectors and multiple item vectors
+- Ability to Test with multiple recsys with different hyper-params
+- Hyper param optimisation via bayesian opt
+- Image Auto-Encoder File based, Image Auto-Encoder DVAE.
 
 # Innovation
 - Heterogenous Features via Deep Networks
@@ -110,5 +146,6 @@ pip install -r requirements.txt
 - https://stackoverflow.com/questions/34252298/why-rank-based-recommendation-use-ndcg
     
 
- 
+### Trouble-Shooting
+- https://medium.com/@HojjatA/could-not-find-valid-device-for-node-while-eagerly-executing-8f2ff588d1e
 

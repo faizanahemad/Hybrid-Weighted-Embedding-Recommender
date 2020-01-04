@@ -495,7 +495,7 @@ class RatingPredRegularization(keras.layers.Layer):
 class LRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
     def __init__(self, lr, epochs, batch_size, n_examples):
         super(LRSchedule, self).__init__()
-        self.lr = lr
+        self.start_lr = lr
         self.lrs = []
         self.log = getLogger(type(self).__name__)
         self.step = 0
@@ -503,16 +503,18 @@ class LRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
         self.epochs = epochs
         self.batch_size = batch_size
         self.n_examples = n_examples
+        self.lr = lr
 
     def __call__(self, step):
         steps_per_epoch = int(np.ceil(self.n_examples / self.batch_size))
         total_steps = steps_per_epoch * self.epochs
-        lr = self.lr
+        lr = self.start_lr
         step = self.step
         new_lr = np.interp(float(K.eval(step)), [0, total_steps / 4, total_steps - steps_per_epoch, total_steps],
                            [lr / 20, lr, lr / 10, lr / 100])
         self.lrs.append(new_lr)
         self.step += 1
+        self.lr = new_lr
         return new_lr
 
 

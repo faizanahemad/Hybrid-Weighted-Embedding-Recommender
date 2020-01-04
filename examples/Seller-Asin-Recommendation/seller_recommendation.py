@@ -34,30 +34,36 @@ from sklearn.utils import shuffle
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
     normalize_affinity_scores_by_user
 from hwer import Feature, FeatureSet, FeatureType
-from hwer import SVDppHybrid, ContentRecommendation
+from hwer import SVDppHybrid, ContentRecommendation, HybridGCNRec
 from hwer import FasttextEmbedding
 
-df_item = pd.read_csv("small_items.csv")
-df_item["item"] = df_item["item"].astype(str)
 
-df_user = pd.read_csv("small_users.csv")
-df_user["user"] = df_user["user"].astype(str)
+def read_data():
+    df_item = pd.read_csv("small_items.csv")
+    df_item["item"] = df_item["item"].astype(str)
 
-user_item_affinity = pd.read_csv("small_user_item_affinity.csv")
-user_item_affinity["affinity"] = user_item_affinity["affinity"].astype(float)
-user_item_affinity.rename(columns={"affinity": "rating"}, inplace=True)
-user_item_affinity["user"] = user_item_affinity["user"].astype(str)
-user_item_affinity["item"] = user_item_affinity["item"].astype(str)
-ratings = user_item_affinity
+    df_user = pd.read_csv("small_users.csv")
+    df_user["user"] = df_user["user"].astype(str)
 
-df_user[["min_item_price", "avg_item_price", "num_asins"]] = np.clip(df_user[["min_item_price", "avg_item_price", "num_asins"]], 1, 1e6)
+    user_item_affinity = pd.read_csv("small_user_item_affinity.csv")
+    user_item_affinity["affinity"] = user_item_affinity["affinity"].astype(float)
+    user_item_affinity.rename(columns={"affinity": "rating"}, inplace=True)
+    user_item_affinity["user"] = user_item_affinity["user"].astype(str)
+    user_item_affinity["item"] = user_item_affinity["item"].astype(str)
+    ratings = user_item_affinity
 
-df_item["browse_node_l2"] = df_item["browse_node_l2"].apply(lambda x: str(x).split())
-df_user["browse_node_l2"] = df_user["browse_node_l2"].apply(lambda x: str(x).split())
+    df_user[["min_item_price", "avg_item_price", "num_asins"]] = np.clip(
+        df_user[["min_item_price", "avg_item_price", "num_asins"]], 1, 1e6)
+
+    df_item["browse_node_l2"] = df_item["browse_node_l2"].apply(lambda x: str(x).split())
+    df_user["browse_node_l2"] = df_user["browse_node_l2"].apply(lambda x: str(x).split())
+
+    df_item["subcategory_code"] = df_item["subcategory_code"].apply(lambda x: str(x).split())
+    df_user["subcategory_code"] = df_user["subcategory_code"].apply(lambda x: str(x).split())
+    return df_user, df_item, ratings
 
 
-df_item["subcategory_code"] = df_item["subcategory_code"].apply(lambda x: str(x).split())
-df_user["subcategory_code"] = df_user["subcategory_code"].apply(lambda x: str(x).split())
+df_user, df_item, ratings = read_data()
 #
 check_working = True
 enable_kfold = False
@@ -65,28 +71,31 @@ enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
 cores = 10
-
+# Diff init, low lr, high lr
 hyperparameters = dict(combining_factor=0.2,
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.02, epochs=50, batch_size=128,
+                           prediction_network_params=dict(lr=0.03, epochs=10, batch_size=128,
                                                           network_width=96, padding_length=50,
                                                           network_depth=4, verbose=verbose,
                                                           kernel_l2=0.001,
                                                           bias_regularizer=0.01, dropout=0.05),
-                           user_item_params=dict(lr=0.5, epochs=40, batch_size=64,
+                           user_item_params=dict(lr=0.5, epochs=20, batch_size=64,
+                                                 gcn_lr=0.005, gcn_epochs=20, gcn_layers=3,
                                                  verbose=verbose, margin=1.0)))
 
 if check_working:
-    G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= 1])
+    G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= 0])
     k_core_edges = list(nx.k_core(G, k=cores).edges())
     users = set([u for u, i in k_core_edges])
     items = set([i for u, i in k_core_edges])
     df_user = df_user[df_user.user.isin(set(users))]
     negatives = ratings[(ratings.user.isin(users))]
-    negatives = negatives[negatives.rating == 0]
-    negatives = negatives.groupby('user', group_keys=False).apply(lambda x: x.head(min(5, len(x))))
     ratings = ratings[(ratings.user.isin(users)) & (ratings.item.isin(items))]
-    ratings = pd.concat((negatives, ratings)).sample(frac=1.0)
+    negatives = negatives[negatives.rating < 0]
+    if len(negatives) > 0:
+        negatives = negatives.sort_values(["item"])
+        negatives = negatives.groupby('user', group_keys=False).apply(lambda x: x.head(min(5, len(x))))
+        ratings = pd.concat((negatives, ratings)).sample(frac=1.0)
     df_item = df_item[df_item["item"].isin(set(ratings.item))]
     print("Total Samples Present = %s" % (ratings.shape[0]))
 
@@ -150,7 +159,7 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     if "content" in capabilities:
         kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
             "use_content"] = True
-    recsys = SVDppHybrid(embedding_mapper=embedding_mapper,
+    recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
                          knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                          rating_scale=rating_scale,
                          n_content_dims=40,
@@ -158,16 +167,8 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
                          fast_inference=False, content_only_inference=False)
 
     start = time.time()
-    user_vectors, item_vectors = recsys.fit(df_user.user.values, df_item.item.values,
+    _, _ = recsys.fit(df_user.user.values, df_item.item.values,
                                             train_affinities, **kwargs)
-    cos_sims = []
-    for i in range(100):
-        cos_sims.append([])
-        for j in range(101, 200):
-            sim = cos_sim(item_vectors[i], item_vectors[j])
-            cos_sims[i].append(sim)
-    cos_sims = np.array(cos_sims)
-    print("Cos Sim Min and Max = ", cos_sims.min(), cos_sims.max(), cos_sims.mean())
     end = time.time()
     total_time = end - start
 
@@ -187,22 +188,13 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     recsys.content_only_inference = False
     res2 = {"algo": "Fast-SVDPP", "time": total_time}
     predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                                         model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.1)
+                                                         model_get_topk, items, min_positive_rating=0.0, ignore_below_rating=0.0)
     res2.update(stats)
     user_rating_count_metrics["algo"] = res2["algo"]
 
-    # recsys.fast_inference = False
-    # recsys.content_only_inference = True
-    # res3 = {"algo": "Triplet-Loss", "time": total_time}
-    # _, _, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities,
-    #                                      model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.1)
-    # res3.update(stats)
-    # urcm["algo"] = res3["algo"]
-    # user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
-
     res4 = {"algo": "Content-Only", "time": total_time}
     _, _, stats, urcm = get_prediction_details(content_recsys, train_affinities, validation_affinities,
-                                         model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.1)
+                                         model_get_topk, items, min_positive_rating=0.0, ignore_below_rating=0.0)
     res4.update(stats)
     urcm["algo"] = res4["algo"]
     user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
@@ -210,7 +202,7 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
     recsys.fast_inference = False
     recsys.content_only_inference = False
     res = {"algo":"Hybrid", "time": total_time}
-    predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.1)
+    predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.0)
     res.update(stats)
     urcm["algo"] = res["algo"]
     user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
@@ -223,12 +215,17 @@ def test_once(train_affinities, validation_affinities, items, capabilities=["res
 
 
 def stratified_split(user_item_affinities):
-    positive_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r >= 1]
-    negative_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r == 0]
+    positive_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r >= 0]
+    negative_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r < 0]
     train_pos, val_pos = train_test_split(positive_samples, test_size=0.2, stratify=[u for u, i, r in positive_samples])
-    train_neg, val_neg = train_test_split(negative_samples, test_size=0.2, stratify=[u for u, i, r in negative_samples])
-    train_affinities = np.concatenate((train_pos, train_neg))
-    validation_affinities = np.concatenate((val_pos, val_neg))
+    print(len(negative_samples))
+    if len(negative_samples) > 0:
+        train_neg, val_neg = train_test_split(negative_samples, test_size=0.2, stratify=[u for u, i, r in negative_samples])
+        train_affinities = np.concatenate((train_pos, train_neg))
+        validation_affinities = np.concatenate((val_pos, val_neg))
+    else:
+        train_affinities = train_pos
+        validation_affinities = val_pos
     print("Total Train Set = %s, Test Set = %s, Positive Test Set = %s" % (len(train_affinities), len(validation_affinities), len(val_pos)))
     train_affinities = shuffle(train_affinities)
     validation_affinities = shuffle(validation_affinities)
@@ -241,6 +238,9 @@ def stratified_split(user_item_affinities):
 
 if not enable_kfold:
     train_affinities, validation_affinities, val_pos = stratified_split(user_item_affinities)
+    surprise_results = test_surprise(train_affinities, validation_affinities, item_list,
+                                     algo=["svdpp"], algo_params={"svdpp": {"n_factors": 10}},
+                                     rating_scale=rating_scale, min_positive_rating=0.0, ignore_below_rating=0.0)
     results = []
 
     capabilities = ["resnet", "content"]
@@ -249,9 +249,6 @@ if not enable_kfold:
     results.extend(res)
     display_results(results)
 
-    surprise_results = test_surprise(train_affinities, validation_affinities, item_list,
-                                     algo=["svdpp"], algo_params={"svdpp": {"n_factors": 10}},
-                                     rating_scale=rating_scale, min_positive_rating=0.1, ignore_below_rating=0.1)
     ucrms = [s["user_rating_count_metrics"] for s in surprise_results]
     ucrms = pd.concat(ucrms)
     user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
@@ -287,23 +284,25 @@ else:
         train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
         validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
         #
-        capabilities = []
-        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
-                                                      capabilities=capabilities)
-        results.extend(res)
-        #
-        capabilities = ["content"]
-        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
-                                      capabilities=capabilities)
-        results.extend(res)
-        #
         capabilities = ["content", "resnet"]
-        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
-                                      capabilities=capabilities)
+        recsys, res, user_rating_count_metrics, predictions, actuals = test_once(train_affinities,
+                                                                                 validation_affinities, item_list,
+                                                                                 capabilities=capabilities)
         results.extend(res)
-
-        results.extend(test_surprise(train_affinities, validation_affinities, item_list, algo=["baseline", "svdpp"]))
+        surprise_results = test_surprise(train_affinities, validation_affinities, item_list,
+                                         algo=["svdpp"], algo_params={"svdpp": {"n_factors": 10}},
+                                         rating_scale=rating_scale, min_positive_rating=0.0, ignore_below_rating=0.0)
+        ucrms = [s["user_rating_count_metrics"] for s in surprise_results]
+        ucrms = pd.concat(ucrms)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
+        for s in surprise_results:
+            del s["user_rating_count_metrics"]
+        results.extend(surprise_results)
+        user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
         display_results(results)
-
         print("#" * 80)
+
+    results = results.groupby(["algo"]).mean().reset_index()
+    user_rating_count_metrics = user_rating_count_metrics.groupby(["algo", "user_rating_count"]).mean().reset_index()
     display_results(results)
+    visualize_results(results, user_rating_count_metrics, len(user_item_affinities))
