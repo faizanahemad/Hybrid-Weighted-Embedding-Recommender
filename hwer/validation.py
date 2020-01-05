@@ -4,8 +4,6 @@ from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
 from surprise.prediction_algorithms.co_clustering import CoClustering
 
-from hwer.utils import average_precision
-
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
@@ -31,7 +29,8 @@ from surprise import Dataset
 from surprise import Reader
 from ast import literal_eval
 
-from .utils import normalize_affinity_scores_by_user
+from .utils import normalize_affinity_scores_by_user, average_precision
+from . import SVDppHybrid, ContentRecommendation, HybridGCNRec
 
 
 def surprise_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, float]]]:
@@ -133,7 +132,175 @@ def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_pa
                 "clustering": CoClustering(**(algo_params["clustering"] if "clustering" in algo_params else dict(n_cltr_u=5, n_cltr_i=10))),
                 "normal": NormalPredictor()}
     results = list(map(lambda a: use_algo(algo_map[a], a), algo))
-    return results
+    user_rating_count_metrics = pd.concat([r["user_rating_count_metrics"] for r in results])
+    for s in results:
+        del s["user_rating_count_metrics"]
+    return None, results, user_rating_count_metrics, None, None
+
+
+def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
+                      get_data_mappers, rating_scale,
+                min_positive_rating, ignore_below_rating, algo,
+                      enable_error_analysis=False):
+    embedding_mapper, user_data, item_data = get_data_mappers()
+    kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
+    if algo == "svdpp_hybrid":
+        recsys = SVDppHybrid(embedding_mapper=embedding_mapper,
+                             knn_params=hyperparameters["knn_params"],
+                             rating_scale=rating_scale,
+                             n_content_dims=hyperparameters["n_dims"],
+                             n_collaborative_dims=hyperparameters["n_dims"],
+                             fast_inference=False, super_fast_inference=False)
+    elif algo == "gcn_hybrid":
+        recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
+                              knn_params=hyperparameters["knn_params"],
+                              rating_scale=rating_scale,
+                              n_content_dims=hyperparameters["n_dims"],
+                              n_collaborative_dims=hyperparameters["n_dims"],
+                              fast_inference=False, super_fast_inference=False)
+
+    start = time.time()
+    _, _ = recsys.fit(users, items,
+                      train_affinities, **kwargs)
+    end = time.time()
+    total_time = end - start
+
+    assert np.sum(np.isnan(recsys.predict([(users[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
+
+    recsys.fast_inference = True
+    recsys.super_fast_inference = False
+    res2 = {"algo": "Fast-%s" % algo, "time": total_time}
+    predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities,
+                                                                                    validation_affinities,
+                                                                                    model_get_topk, items,
+                                                                                    min_positive_rating=min_positive_rating,
+                                                                                    ignore_below_rating=ignore_below_rating)
+    res2.update(stats)
+    user_rating_count_metrics["algo"] = res2["algo"]
+
+    #
+    recsys.fast_inference = False
+    recsys.super_fast_inference = True
+    res4 = {"algo": "Super-Fast-%s" % algo, "time": total_time}
+    predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities,
+                                                                                    validation_affinities,
+                                                                                    model_get_topk, items,
+                                                                                    min_positive_rating=min_positive_rating,
+                                                                                    ignore_below_rating=ignore_below_rating)
+    res4.update(stats)
+    user_rating_count_metrics["algo"] = res4["algo"]
+
+    recsys.fast_inference = False
+    recsys.super_fast_inference = False
+    res = {"algo": algo, "time": total_time}
+    predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities,
+                                                               model_get_topk, items, min_positive_rating=min_positive_rating,
+                                                               ignore_below_rating=ignore_below_rating)
+    res.update(stats)
+    urcm["algo"] = res["algo"]
+    user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
+
+    recsys.fast_inference = False
+    recsys.super_fast_inference = False
+    res = {"algo": "Hybrid", "time": total_time}
+    predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities,
+                                                               model_get_topk, items, min_positive_rating=min_positive_rating,
+                                                               ignore_below_rating=ignore_below_rating)
+    res.update(stats)
+    urcm["algo"] = res["algo"]
+    user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
+
+    if enable_error_analysis:
+        error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
+        error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
+    results = [res, res2, res4]
+    return recsys, results, user_rating_count_metrics, predictions, actuals
+
+
+def test_content_only(train_affinities, validation_affinities, users, items, hyperparameters,
+                      get_data_mappers, rating_scale, min_positive_rating, ignore_below_rating,
+                      enable_error_analysis=False):
+    embedding_mapper, user_data, item_data = get_data_mappers()
+    kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
+    recsys = ContentRecommendation(embedding_mapper=embedding_mapper,
+                                           knn_params=hyperparameters["knn_params"],
+                                           rating_scale=rating_scale, n_output_dims=hyperparameters["n_dims"], )
+    start = time.time()
+    _, _ = recsys.fit(users, items,
+                              train_affinities, **kwargs)
+    end = time.time()
+    total_time = end - start
+    assert np.sum(np.isnan(recsys.predict([(users[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
+
+    res = {"algo": "Content-Only", "time": total_time}
+    predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities,
+                                                                                    validation_affinities,
+                                                                                    model_get_topk, items,
+                                                                                    min_positive_rating=min_positive_rating,
+                                                                                    ignore_below_rating=ignore_below_rating)
+    res.update(stats)
+    user_rating_count_metrics["algo"] = res["algo"]
+
+    if enable_error_analysis:
+        error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
+        error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
+    results = [res]
+    return recsys, results, user_rating_count_metrics, predictions, actuals
+
+
+def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
+              get_data_mappers, rating_scale, min_positive_rating, ignore_below_rating,
+              svdpp_hybrid=True, gcn_hybrid=True, surprise=True, content_only=True, enable_error_analysis=False):
+    results = []
+    recs = []
+    user_rating_count_metrics = pd.DataFrame([], columns=["algo", "user_rating_count", "rmse", "mae", "map", "train_rmse", "train_mae"])
+    if surprise:
+        hyperparameters_surprise = hyperparamters_dict["surprise"]
+        _, surprise_results, surprise_user_rating_count_metrics, _, _ = test_surprise(train_affinities,
+                                                                                      validation_affinities, items,
+                                                                                      algo=hyperparameters_surprise[
+                                                                                          "algos"],
+                                                                                      algo_params=hyperparameters_surprise,
+                                                                                      rating_scale=rating_scale,
+                                                                                      min_positive_rating=min_positive_rating,
+                                                                                      ignore_below_rating=ignore_below_rating)
+        results.extend(surprise_results)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, surprise_user_rating_count_metrics))
+
+    if content_only:
+        hyperparameters = hyperparamters_dict["content_only"]
+        content_rec, res, content_user_rating_count_metrics, _, _ = test_content_only(train_affinities, validation_affinities, users,
+                                                                                      items, hyperparameters, get_data_mappers, rating_scale,
+                                                                                      min_positive_rating, ignore_below_rating,
+                                                                                      enable_error_analysis=enable_error_analysis)
+        results.extend(res)
+        recs.append(content_rec)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, content_user_rating_count_metrics))
+
+    if svdpp_hybrid:
+        hyperparameters = hyperparamters_dict["svdpp_hybrid"]
+        svd_rec, res, svdpp_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+                                                                              items, hyperparameters, get_data_mappers, rating_scale,
+                                                                          min_positive_rating, ignore_below_rating,
+                                                                          algo="svdpp_hybrid",
+                                                                                enable_error_analysis=enable_error_analysis)
+        results.extend(res)
+        recs.append(svd_rec)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, svdpp_user_rating_count_metrics))
+
+    if gcn_hybrid:
+        hyperparameters = hyperparamters_dict["gcn_hybrid"]
+        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+                                                                          items, hyperparameters, get_data_mappers, rating_scale,
+                                                                            min_positive_rating, ignore_below_rating,
+                                                                            algo="gcn_hybrid",
+                                                                            enable_error_analysis=enable_error_analysis)
+        results.extend(res)
+        recs.append(gcn_rec)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
+    user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
+    return recs, results, user_rating_count_metrics
+
 
 
 def metrics_by_num_interactions_user(train_affinities: List[Tuple[str, str, float]], validation_affinities: List[Tuple[str, str, float]],

@@ -72,16 +72,6 @@ verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
 cores = 10
 # Diff init, low lr, high lr
-hyperparameters = dict(combining_factor=0.2,
-                       collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.03, epochs=10, batch_size=128,
-                                                          network_width=96, padding_length=50,
-                                                          network_depth=4, verbose=verbose,
-                                                          kernel_l2=0.001,
-                                                          bias_regularizer=0.01, dropout=0.05),
-                           user_item_params=dict(lr=0.5, epochs=20, batch_size=64,
-                                                 gcn_lr=0.005, gcn_epochs=20, gcn_layers=3,
-                                                 verbose=verbose, margin=1.0)))
 
 if check_working:
     G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= 0])
@@ -102,9 +92,8 @@ if check_working:
 ratings = ratings[["user", "item", "rating"]]
 user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
 users_for_each_rating = [row[0] for row in ratings.values]
-item_list = list(set([i for u, i, r in user_item_affinities if r > 1e-4]))
-user_list = list(set([u for u, i, r in user_item_affinities]))
-
+user_list = list(df_user.user.values)
+item_list = list(df_item.item.values)
 
 min_rating = np.min([r for u, i, r in user_item_affinities])
 max_rating = np.max([r for u, i, r in user_item_affinities])
@@ -112,6 +101,45 @@ rating_scale = (min_rating, max_rating)
 
 print("Total Samples Taken = %s, |Users| = %s |Items| = %s" % (ratings.shape[0], len(user_list), len(item_list)))
 
+hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
+                             knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }))
+
+hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
+                             knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+                       collaborative_params=dict(
+                           prediction_network_params=dict(lr=0.02, epochs=50, batch_size=128,
+                                                          network_width=96, padding_length=50,
+                                                          network_depth=4, verbose=verbose,
+                                                          kernel_l2=0.002,
+                                                          bias_regularizer=0.01, dropout=0.05,
+                                                          use_resnet=True, use_content=True),
+                           user_item_params=dict(lr=0.5, epochs=40, batch_size=64,
+                                                 verbose=verbose, margin=1.0)))
+
+hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
+                           knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+                       collaborative_params=dict(
+                           prediction_network_params=dict(lr=0.02, epochs=50, batch_size=128,
+                                                          network_width=96, padding_length=50,
+                                                          network_depth=4, verbose=verbose,
+                                                          kernel_l2=0.002,
+                                                          bias_regularizer=0.01, dropout=0.05),
+                           user_item_params=dict(lr=0.5, epochs=40, batch_size=64,
+                                                 gcn_lr=0.005, gcn_epochs=20, gcn_layers=3, gcn_batch_size=int(2**np.floor(np.log2(len(user_item_affinities)/20))),
+                                                 verbose=verbose, margin=1.0)))
+
+hyperparameters_surprise = {"svdpp": {"n_factors": 10}, "algos":["svdpp"]}
+
+hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperparameter_content,
+                           svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise,)
+
+svdpp_hybrid = False
+gcn_hybrid = True
+surprise = False
+content_only = False,
+
+min_positive_rating=0.0
+ignore_below_rating=0.0
 
 def prepare_data_mappers():
     i1 = Feature(feature_name="item_numeric", feature_type=FeatureType.NUMERIC,
@@ -147,73 +175,6 @@ def prepare_data_mappers():
     return embedding_mapper, user_data, item_data
 
 
-def test_once(train_affinities, validation_affinities, items, capabilities=["resnet", "content"]):
-    embedding_mapper, user_data, item_data = prepare_data_mappers()
-    kwargs = {}
-    kwargs['user_data'] = user_data
-    kwargs['item_data'] = item_data
-    kwargs["hyperparameters"] = copy.deepcopy(hyperparameters)
-    kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = False
-    if "resnet" in capabilities:
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = True
-    if "content" in capabilities:
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
-            "use_content"] = True
-    recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
-                         knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
-                         rating_scale=rating_scale,
-                         n_content_dims=40,
-                         n_collaborative_dims=40,
-                         fast_inference=False, content_only_inference=False)
-
-    start = time.time()
-    _, _ = recsys.fit(df_user.user.values, df_item.item.values,
-                                            train_affinities, **kwargs)
-    end = time.time()
-    total_time = end - start
-
-    embedding_mapper, user_data, item_data = prepare_data_mappers()
-    kwargs['user_data'] = user_data
-    kwargs['item_data'] = item_data
-    content_recsys = ContentRecommendation(embedding_mapper=embedding_mapper,
-                                           knn_params=dict(n_neighbors=200,
-                                                           index_time_params={'M': 15, 'ef_construction': 200, }),
-                                           rating_scale=rating_scale, n_output_dims=32)
-    _, _ = content_recsys.fit(df_user.user.values, df_item.item.values,
-                              train_affinities, **kwargs)
-
-    assert np.sum(np.isnan(recsys.predict([(user_list[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
-
-    recsys.fast_inference = True
-    recsys.content_only_inference = False
-    res2 = {"algo": "Fast-SVDPP", "time": total_time}
-    predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                                         model_get_topk, items, min_positive_rating=0.0, ignore_below_rating=0.0)
-    res2.update(stats)
-    user_rating_count_metrics["algo"] = res2["algo"]
-
-    res4 = {"algo": "Content-Only", "time": total_time}
-    _, _, stats, urcm = get_prediction_details(content_recsys, train_affinities, validation_affinities,
-                                         model_get_topk, items, min_positive_rating=0.0, ignore_below_rating=0.0)
-    res4.update(stats)
-    urcm["algo"] = res4["algo"]
-    user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
-
-    recsys.fast_inference = False
-    recsys.content_only_inference = False
-    res = {"algo":"Hybrid", "time": total_time}
-    predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items, min_positive_rating=0.1, ignore_below_rating=0.0)
-    res.update(stats)
-    urcm["algo"] = res["algo"]
-    user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
-
-    if enable_error_analysis:
-        error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
-        error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
-    results = [res, res2, res4]
-    return recsys, results, user_rating_count_metrics, predictions, actuals
-
-
 def stratified_split(user_item_affinities):
     positive_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r >= 0]
     negative_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r < 0]
@@ -238,31 +199,19 @@ def stratified_split(user_item_affinities):
 
 if not enable_kfold:
     train_affinities, validation_affinities, val_pos = stratified_split(user_item_affinities)
-    surprise_results = test_surprise(train_affinities, validation_affinities, item_list,
-                                     algo=["svdpp"], algo_params={"svdpp": {"n_factors": 10}},
-                                     rating_scale=rating_scale, min_positive_rating=0.0, ignore_below_rating=0.0)
-    results = []
-
-    capabilities = ["resnet", "content"]
-    recsys, res, user_rating_count_metrics, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
-                                                  capabilities=capabilities)
-    results.extend(res)
-    display_results(results)
-
-    ucrms = [s["user_rating_count_metrics"] for s in surprise_results]
-    ucrms = pd.concat(ucrms)
-    user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
-    for s in surprise_results:
-        del s["user_rating_count_metrics"]
-    results.extend(surprise_results)
+    recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities, user_list, item_list, hyperparamters_dict,
+                                                         prepare_data_mappers, rating_scale, min_positive_rating=min_positive_rating,
+                                                         ignore_below_rating=ignore_below_rating,
+                                                         svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid, surprise=surprise, content_only=content_only,
+                                                         enable_error_analysis=enable_error_analysis)
     results = display_results(results)
     user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
     print(user_rating_count_metrics)
     user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % cores, index=False)
     results.reset_index().to_csv("overall_results_%s.csv" % cores, index=False)
     visualize_results(results, user_rating_count_metrics, len(user_item_affinities))
-    print(list(zip(actuals[:50], predictions[:50])))
     if test_retrieval:
+        recsys = recs[-1]
         user_id = df_user.user.values[0]
         recommendations = recsys.find_items_for_user(user=user_id, positive=[], negative=[])
         res, dist = zip(*recommendations)
@@ -279,29 +228,27 @@ else:
     y = np.array(users_for_each_rating)
     skf = StratifiedKFold(n_splits=5)
     results = []
+    user_rating_count_metrics = pd.DataFrame([],
+                                             columns=["algo", "user_rating_count", "rmse", "mae", "map", "train_rmse",
+                                                      "train_mae"])
     for train_index, test_index in skf.split(X, y):
         train_affinities, validation_affinities = X[train_index], X[test_index]
         train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
         validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
         #
-        capabilities = ["content", "resnet"]
-        recsys, res, user_rating_count_metrics, predictions, actuals = test_once(train_affinities,
-                                                                                 validation_affinities, item_list,
-                                                                                 capabilities=capabilities)
-        results.extend(res)
-        surprise_results = test_surprise(train_affinities, validation_affinities, item_list,
-                                         algo=["svdpp"], algo_params={"svdpp": {"n_factors": 10}},
-                                         rating_scale=rating_scale, min_positive_rating=0.0, ignore_below_rating=0.0)
-        ucrms = [s["user_rating_count_metrics"] for s in surprise_results]
-        ucrms = pd.concat(ucrms)
+        recs, res, ucrms = test_once(train_affinities, validation_affinities, user_list, item_list,
+                                                             hyperparamters_dict, prepare_data_mappers, rating_scale, min_positive_rating=min_positive_rating,
+                                                         ignore_below_rating=ignore_below_rating,
+                                     svdpp_hybrid=True,
+                                                             gcn_hybrid=True, surprise=True, content_only=True,
+                                     enable_error_analysis=False)
+
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
-        for s in surprise_results:
-            del s["user_rating_count_metrics"]
-        results.extend(surprise_results)
-        user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
-        display_results(results)
+        res = display_results(res)
+        results.append(res)
         print("#" * 80)
 
+    results = pd.concat(results)
     results = results.groupby(["algo"]).mean().reset_index()
     user_rating_count_metrics = user_rating_count_metrics.groupby(["algo", "user_rating_count"]).mean().reset_index()
     display_results(results)

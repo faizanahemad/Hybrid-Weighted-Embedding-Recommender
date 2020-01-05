@@ -114,10 +114,10 @@ class GCN(layers.Layer):
 class HybridGCNRec(SVDppHybrid):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False,
-                 content_only_inference: bool = False):
+                 super_fast_inference: bool = False):
         super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims, fast_inference)
         self.log = getLogger(type(self).__name__)
-        self.content_only_inference = content_only_inference
+        self.super_fast_inference = super_fast_inference
 
     def __user_item_affinities_triplet_trainer__(self,
                                          user_ids: List[str], item_ids: List[str],
@@ -144,6 +144,7 @@ class HybridGCNRec(SVDppHybrid):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         gcn_epochs = hyperparams["gcn_epochs"] if "gcn_epochs" in hyperparams else 5
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 5
+        gcn_batch_size = hyperparams["gcn_batch_size"] if "gcn_batch_size" in hyperparams else 5
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.5
@@ -189,7 +190,6 @@ class HybridGCNRec(SVDppHybrid):
         g.ndata['norm'] = tf.expand_dims(norm, -1)
         ratings = [r for u, i, r in user_item_affinities]
         g.edata['weight'] = tf.expand_dims(np.array(ratings + ratings + list(np.ones(total_users + total_items))).astype(np.float32), -1)
-
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             user_close_dict = defaultdict(list)
@@ -330,25 +330,23 @@ class HybridGCNRec(SVDppHybrid):
                     gcn_layers,
                     tf.nn.leaky_relu,
                     0.0)
-        learning_rate = LRSchedule(lr=gcn_lr, epochs=epochs, batch_size=len(user_item_affinities), n_examples=len(user_item_affinities))
+        learning_rate = LRSchedule(lr=gcn_lr, epochs=epochs, batch_size=gcn_batch_size, n_examples=len(user_item_affinities))
         # optimizer = tf.keras.optimizers.Adam(learning_rate=gcn_lr, decay=5e-4)
         optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
         loss = tf.keras.losses.MeanSquaredError()
         train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
-
-        train = train.shuffle(batch_size * 10).batch(batch_size).prefetch(32)
+        train = train.shuffle(gcn_batch_size * 10).batch(gcn_batch_size).prefetch(8)
         for epoch in range(gcn_epochs):
             start = time.time()
-            with tf.GradientTape() as tape:
-                vectors = model(features)
-                vectors = K.l2_normalize(vectors, axis=1)
-                for x, y in train:
+            for x, y in train:
+                with tf.GradientTape() as tape:
+                    vectors = model(features)
+                    vectors = K.l2_normalize(vectors, axis=1)
 
                     item_1 = tf.gather(vectors, x[0])
                     item_2 = tf.gather(vectors, x[1])
                     item_3 = tf.gather(vectors, x[2])
-
 
                     close_weight = x[3]
                     far_weight = x[4]
@@ -364,10 +362,10 @@ class HybridGCNRec(SVDppHybrid):
                     error = K.relu(i1_i2_dist - i1_i3_dist + margin)
                     loss_value = loss(y, error)
 
-            grads = tape.gradient(loss_value, model.trainable_weights)
-            optimizer.apply_gradients(zip(grads, model.trainable_weights))
+                grads = tape.gradient(loss_value, model.trainable_weights)
+                optimizer.apply_gradients(zip(grads, model.trainable_weights))
             total_time = time.time() - start
-            print("Epoch = %s/%s, Loss = %.4f, LR = %.6f, Time = %.1fs"%(epoch+1, gcn_epochs, loss_value, K.get_value(optimizer.learning_rate.lr), total_time))
+            print("Epoch = %s/%s, Loss = %.4f, LR = %.6f, Time = %.1fs" % (epoch+1, gcn_epochs, loss_value, K.get_value(optimizer.learning_rate.lr), total_time))
 
         vectors = model(features)
         user_vectors, item_vectors = vectors[:total_users], vectors[total_users:]
