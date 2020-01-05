@@ -87,10 +87,11 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
             "actuals": validation_actuals, "predictions": predictions}
 
 
-def test_surprise(train, test, items, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5),
+def test_surprise(train, test, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5),
                   ignore_below_rating=None, min_positive_rating=None):
     train_affinities = train
     validation_affinities = test
+    items = list(set([i for u, i, r in train]))
     train = pd.DataFrame(train)
     test = pd.DataFrame([(u, i, r) for u, i, r in test if r >= ignore_below_rating])
     reader = Reader(rating_scale=rating_scale)
@@ -182,27 +183,19 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
     recsys.fast_inference = False
     recsys.super_fast_inference = True
     res4 = {"algo": "Super-Fast-%s" % algo, "time": total_time}
-    predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities,
+    predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities,
                                                                                     validation_affinities,
                                                                                     model_get_topk, items,
                                                                                     min_positive_rating=min_positive_rating,
                                                                                     ignore_below_rating=ignore_below_rating)
     res4.update(stats)
-    user_rating_count_metrics["algo"] = res4["algo"]
+    urcm["algo"] = res4["algo"]
+    user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
 
+    #
     recsys.fast_inference = False
     recsys.super_fast_inference = False
     res = {"algo": algo, "time": total_time}
-    predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                                               model_get_topk, items, min_positive_rating=min_positive_rating,
-                                                               ignore_below_rating=ignore_below_rating)
-    res.update(stats)
-    urcm["algo"] = res["algo"]
-    user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
-
-    recsys.fast_inference = False
-    recsys.super_fast_inference = False
-    res = {"algo": "Hybrid", "time": total_time}
     predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities,
                                                                model_get_topk, items, min_positive_rating=min_positive_rating,
                                                                ignore_below_rating=ignore_below_rating)
@@ -257,7 +250,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
     if surprise:
         hyperparameters_surprise = hyperparamters_dict["surprise"]
         _, surprise_results, surprise_user_rating_count_metrics, _, _ = test_surprise(train_affinities,
-                                                                                      validation_affinities, items,
+                                                                                      validation_affinities,
                                                                                       algo=hyperparameters_surprise[
                                                                                           "algos"],
                                                                                       algo_params=hyperparameters_surprise,
@@ -300,7 +293,6 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
     user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
     return recs, results, user_rating_count_metrics
-
 
 
 def metrics_by_num_interactions_user(train_affinities: List[Tuple[str, str, float]], validation_affinities: List[Tuple[str, str, float]],
@@ -354,9 +346,10 @@ def display_results(results: List[Dict[str, Any]]):
     return df
 
 
-def visualize_results(results, user_rating_count_metrics, num_samples):
+def visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities):
     # TODO: combining factor as X-axis, y-axis as map, hue as user_rating_count
-    results['retrieval_time'] = results['retrieval_time'] / num_samples
+    validation_users_count = len(set([u for u, i, r in validation_affinities]))
+    results['retrieval_time'] = results['retrieval_time'] / validation_users_count
     results['retrieval_time'] = results['retrieval_time'] * 1000
     plt.figure(figsize=(12, 8))
     plt.title("Retrieval Time vs Algorithm")
@@ -364,9 +357,7 @@ def visualize_results(results, user_rating_count_metrics, num_samples):
     plt.xlabel("Algorithm")
     plt.ylabel("Retrieval Time in milli-seconds")
     plt.xticks(rotation=45, ha='right')
-    plt.legend()
     plt.show()
-
 
     plt.figure(figsize=(12, 8))
     plt.title("Mean Absolute Error vs Algorithm")
@@ -374,7 +365,6 @@ def visualize_results(results, user_rating_count_metrics, num_samples):
     plt.xlabel("Algorithm")
     plt.ylabel("Mean Absolute Error")
     plt.xticks(rotation=45, ha='right')
-    plt.legend()
     plt.show()
 
     plt.figure(figsize=(12, 8))
@@ -383,7 +373,6 @@ def visualize_results(results, user_rating_count_metrics, num_samples):
     plt.xlabel("Algorithm")
     plt.ylabel("Mean Average Precision")
     plt.xticks(rotation=45, ha='right')
-    plt.legend()
     plt.show()
 
     plt.figure(figsize=(12, 8))

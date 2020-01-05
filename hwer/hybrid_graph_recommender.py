@@ -27,7 +27,8 @@ from .logging import getLogger
 from .recommendation_base import EntityType
 from .utils import RatingPredRegularization, get_rng, \
     LRSchedule, resnet_layer_with_content, ScaledGlorotNormal, root_mean_squared_error, mean_absolute_error, \
-    normalize_affinity_scores_by_user_item_bs, get_clipped_rmse, unit_length_violations, UnitLengthRegularization
+    normalize_affinity_scores_by_user_item_bs, get_clipped_rmse, unit_length_violations, UnitLengthRegularization, \
+    unit_length
 
 
 class GCNLayer(layers.Layer):
@@ -46,10 +47,10 @@ class GCNLayer(layers.Layer):
         self.gcn_reduce = gcn_reduce
 
         # w_init = tf.random_normal_initializer()
-        w_init = tf.initializers.glorot_uniform()
-        # w_init = tf.initializers.TruncatedNormal()
+        # w_init = tf.initializers.glorot_uniform()
+        w_init = tf.initializers.TruncatedNormal()
         self.weight = tf.Variable(initial_value=w_init(shape=(in_feats, out_feats),
-                                                       dtype='float32'),
+                                                       dtype='float32'), dtype=tf.float32,
                                   trainable=True)
         if dropout:
             self.dropout = layers.Dropout(rate=dropout)
@@ -58,7 +59,7 @@ class GCNLayer(layers.Layer):
         if bias:
             b_init = tf.zeros_initializer()
             self.bias = tf.Variable(initial_value=b_init(shape=(out_feats,),
-                                                         dtype='float32'),
+                                                         dtype='float32'), dtype=tf.float32,
                                     trainable=True)
         else:
             self.bias = None
@@ -145,6 +146,8 @@ class HybridGCNRec(SVDppHybrid):
         gcn_epochs = hyperparams["gcn_epochs"] if "gcn_epochs" in hyperparams else 5
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 5
         gcn_batch_size = hyperparams["gcn_batch_size"] if "gcn_batch_size" in hyperparams else 5
+        gcn_dropout = hyperparams["gcn_dropout"] if "gcn_dropout" in hyperparams else 0.0
+        gcn_hidden_dims = hyperparams["gcn_hidden_dims"] if "gcn_hidden_dims" in hyperparams else self.n_collaborative_dims * 4
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.5
@@ -320,17 +323,18 @@ class HybridGCNRec(SVDppHybrid):
             "End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s, margin = %.4f",
             unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
 
-        features = np.concatenate((user_vectors, item_vectors))
+        features = unit_length(np.concatenate((user_vectors, item_vectors)), axis=1)
+        # embedding = tf.Variable(initial_value=features, dtype=tf.float32, trainable=True)
         model = GCN(g,
                     gcn_msg,
                     gcn_reduce,
                     features.shape[1],
-                    self.n_collaborative_dims * 2,
+                    gcn_hidden_dims,
                     self.n_collaborative_dims,
                     gcn_layers,
                     tf.nn.leaky_relu,
-                    0.0)
-        learning_rate = LRSchedule(lr=gcn_lr, epochs=epochs, batch_size=gcn_batch_size, n_examples=len(user_item_affinities))
+                    gcn_dropout)
+        learning_rate = LRSchedule(lr=gcn_lr, epochs=gcn_epochs, batch_size=gcn_batch_size, n_examples=len(user_item_affinities))
         # optimizer = tf.keras.optimizers.Adam(learning_rate=gcn_lr, decay=5e-4)
         optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
         loss = tf.keras.losses.MeanSquaredError()
@@ -364,10 +368,13 @@ class HybridGCNRec(SVDppHybrid):
 
                 grads = tape.gradient(loss_value, model.trainable_weights)
                 optimizer.apply_gradients(zip(grads, model.trainable_weights))
+                del tape
+
             total_time = time.time() - start
             print("Epoch = %s/%s, Loss = %.4f, LR = %.6f, Time = %.1fs" % (epoch+1, gcn_epochs, loss_value, K.get_value(optimizer.learning_rate.lr), total_time))
 
         vectors = model(features)
+        # K.l2_normalize(embedding, axis=1)
         user_vectors, item_vectors = vectors[:total_users], vectors[total_users:]
         return user_vectors, item_vectors
 

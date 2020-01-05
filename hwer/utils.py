@@ -86,24 +86,7 @@ def shuffle_copy(*args):
     return results[0] if len(args) == 1 else results
 
 
-def average_precision_v1(y_true, y_pred):
-    len_y_true = max(1, len(y_true))
-    y_pred = np.array(y_pred)
-    if len(y_pred.shape) == 2:
-        y_pred = y_pred[:, 0]
-    y_pred = np.array(y_pred).reshape((1, -1))[0]
-    y_true = np.array(y_true).reshape((1, -1))[0]
-    y_true = set(y_true)
-
-    detections = [1 if y in y_true else 0 for y in y_pred]
-    score = np.multiply(np.cumsum(detections), detections)
-    divisors = np.arange(1, len(y_pred) + 1)
-    score = np.divide(score, divisors)
-    score = np.sum(score)
-    return score / len_y_true
-
-
-def average_precision_v2(y_true, y_pred):
+def average_precision(y_true, y_pred):
     len_y_true = max(1, len(y_true))
     y_pred = np.array(y_pred)
     if len(y_pred.shape) == 2:
@@ -118,6 +101,7 @@ def average_precision_v2(y_true, y_pred):
         if y_pred[i] in y_true:
             matches_till_now = matches_till_now + 1
             score = score + matches_till_now / (i + 1)
+            y_true.discard(y_pred[i])
 
     return score / len_y_true
 
@@ -404,7 +388,6 @@ def is_2d_array(x):
 
 unit_length = repeat_args_wrapper(unit_length)
 unit_length_violations = repeat_args_wrapper(unit_length_violations)
-average_precision = average_precision_v2
 
 
 class UnitLengthRegularizer(keras.regularizers.Regularizer):

@@ -70,7 +70,7 @@ enable_kfold = False
 enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
-cores = 10
+cores = 20
 # Diff init, low lr, high lr
 
 if check_working:
@@ -119,27 +119,29 @@ hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
 hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.02, epochs=50, batch_size=128,
+                           prediction_network_params=dict(lr=0.05, epochs=10, batch_size=128,
                                                           network_width=96, padding_length=50,
                                                           network_depth=4, verbose=verbose,
                                                           kernel_l2=0.002,
                                                           bias_regularizer=0.01, dropout=0.05),
-                           user_item_params=dict(lr=0.5, epochs=40, batch_size=64,
-                                                 gcn_lr=0.005, gcn_epochs=20, gcn_layers=3, gcn_batch_size=int(2**np.floor(np.log2(len(user_item_affinities)/20))),
+                           user_item_params=dict(lr=0.1, epochs=10, batch_size=64,
+                                                 gcn_lr=0.005, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0, gcn_hidden_dims=128,
+                                                 gcn_batch_size=int(2**np.floor(np.log2(len(user_item_affinities)/20))),
                                                  verbose=verbose, margin=1.0)))
 
-hyperparameters_surprise = {"svdpp": {"n_factors": 10}, "algos":["svdpp"]}
+hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10}, "algos":["svdpp"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperparameter_content,
                            svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise,)
 
 svdpp_hybrid = False
 gcn_hybrid = True
-surprise = False
-content_only = False,
+surprise = True
+content_only = False
 
 min_positive_rating=0.0
 ignore_below_rating=0.0
+
 
 def prepare_data_mappers():
     i1 = Feature(feature_name="item_numeric", feature_type=FeatureType.NUMERIC,
@@ -209,7 +211,7 @@ if not enable_kfold:
     print(user_rating_count_metrics)
     user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % cores, index=False)
     results.reset_index().to_csv("overall_results_%s.csv" % cores, index=False)
-    visualize_results(results, user_rating_count_metrics, len(user_item_affinities))
+    visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
     if test_retrieval:
         recsys = recs[-1]
         user_id = df_user.user.values[0]
@@ -252,4 +254,4 @@ else:
     results = results.groupby(["algo"]).mean().reset_index()
     user_rating_count_metrics = user_rating_count_metrics.groupby(["algo", "user_rating_count"]).mean().reset_index()
     display_results(results)
-    visualize_results(results, user_rating_count_metrics, len(user_item_affinities))
+    visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
