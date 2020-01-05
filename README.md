@@ -47,8 +47,6 @@ pip install tensorflow
 
 Install DGL from source [Docs](https://docs.dgl.ai/install/index.html#install-from-source)
 ```bash
-pip install -e git+https://github.com/dmlc/dgl.git#egg=dgl\&#subdirectory=python
-
 git clone --progress --recursive https://github.com/dmlc/dgl.git
 cd dgl
 mkdir build && cd build
@@ -88,10 +86,11 @@ pip install -r requirements.txt
 - Add Filter Function support for search functions
 - Weighted node combination in GCN
 - Try Huber Loss
-- SVDpp DNN combine multiple user vectors and multiple item vectors
 - Ability to Test with multiple recsys with different hyper-params
 - Hyper param optimisation via bayesian opt
-- Image Auto-Encoder File based, Image Auto-Encoder DVAE.
+- Add Embedding layer to GCN Triplet training, see if time increases from 50s [Done]
+- Try Normal triplet + GCN
+- Image Auto-Encoder (De-noising) File based, Image Auto-Encoder DVAE. Use Average Rating for that item as a target too. 
 
 # Innovation
 - Heterogenous Features via Deep Networks

@@ -71,7 +71,6 @@ enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
 cores = 20
-# Diff init, low lr, high lr
 
 if check_working:
     G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= 0])

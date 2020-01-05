@@ -78,10 +78,10 @@ class SVDppHybrid(HybridRecommender):
             user = i
             item = j
             items = user_item_list[i]
-            items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0))
+            items = np.pad(items, (padding_length - len(items), 0), constant_values=(0, 0)).astype(int)
 
             users = item_user_list[j]
-            users = np.pad(users, (padding_length - len(users), 0), constant_values=(0, 0))
+            users = np.pad(users, (padding_length - len(users), 0), constant_values=(0, 0)).astype(int)
 
             if use_content:
                 ucv = user_content_vectors[user]
@@ -168,10 +168,10 @@ class SVDppHybrid(HybridRecommender):
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
 
-        input_user = keras.Input(shape=(1,))
-        input_item = keras.Input(shape=(1,))
-        input_items = keras.Input(shape=(padding_length,))
-        input_users = keras.Input(shape=(padding_length,))
+        input_user = keras.Input(shape=(1,), dtype=tf.int64)
+        input_item = keras.Input(shape=(1,), dtype=tf.int64)
+        input_items = keras.Input(shape=(padding_length,), dtype=tf.int64)
+        input_users = keras.Input(shape=(padding_length,), dtype=tf.int64)
         input_nu = keras.Input(shape=(1,))
         input_ni = keras.Input(shape=(1,))
 
@@ -194,25 +194,24 @@ class SVDppHybrid(HybridRecommender):
         item_bias = tf.keras.layers.Flatten()(item_bias)
 
         def main_network():
-            user_initializer = tf.keras.initializers.Constant(user_vectors)
-            user_vec = keras.layers.Embedding(len(user_ids) + 1, n_collaborative_dims, input_length=1)(input_user)
-
-            item_initializer = tf.keras.initializers.Constant(item_vectors)
-            item_vec = keras.layers.Embedding(len(item_ids) + 1, n_collaborative_dims, input_length=1,
-                                              embeddings_initializer=item_initializer)(input_item)
-
-            user_initializer = tf.keras.initializers.Constant(user_vectors)
+            iu = K.concatenate([input_user, input_users])
             user_vecs = keras.layers.Embedding(len(user_ids) + 1, n_collaborative_dims,
-                                               input_length=padding_length, mask_zero=True)(input_users)
+                                               input_length=padding_length+1, mask_zero=True)(iu)
             user_vecs = keras.layers.ActivityRegularization(l2=bias_regularizer)(user_vecs)
+            user_vec = tf.keras.layers.Lambda(lambda x: x[:, 0])(user_vecs)
+            user_vecs = tf.keras.layers.Lambda(lambda x: x[:, 1:])(user_vecs)
             user_vecs = tf.keras.layers.GlobalAveragePooling1D()(user_vecs)
             user_vecs = user_vecs * input_ni
 
+            ii = K.concatenate([input_item, input_items])
             item_initializer = tf.keras.initializers.Constant(item_vectors)
             item_vecs = keras.layers.Embedding(len(item_ids) + 1, n_collaborative_dims,
-                                               input_length=padding_length, mask_zero=True,
-                                               embeddings_initializer=item_initializer)(input_items)
+                                               input_length=padding_length+1, mask_zero=True,
+                                               embeddings_initializer=item_initializer)(ii)
             item_vecs = keras.layers.ActivityRegularization(l2=bias_regularizer)(item_vecs)
+            item_vec = tf.keras.layers.Lambda(lambda x: x[:, 0])(item_vecs)
+            item_vecs = tf.keras.layers.Lambda(lambda x: x[:, 1:])(item_vecs)
+
             item_vecs = tf.keras.layers.GlobalAveragePooling1D()(item_vecs)
             item_vecs = item_vecs * input_nu
 
