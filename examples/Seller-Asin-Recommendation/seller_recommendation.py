@@ -69,6 +69,7 @@ def prepare_data_mappers():
 
     return embedding_mapper, user_data, item_data
 
+
 def read_data():
     df_item = pd.read_csv("small_items.csv")
     df_item["item"] = df_item["item"].astype(str)
