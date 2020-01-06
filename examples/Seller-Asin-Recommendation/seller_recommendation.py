@@ -65,28 +65,18 @@ def read_data():
 
 df_user, df_item, ratings = read_data()
 #
-check_working = True
+test_data_subset = True
 enable_kfold = False
 enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
 cores = 20
+min_positive_rating = 0.0
+ignore_below_rating = 0.0
 
-if check_working:
-    G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= 0])
-    k_core_edges = list(nx.k_core(G, k=cores).edges())
-    users = set([u for u, i in k_core_edges])
-    items = set([i for u, i in k_core_edges])
-    df_user = df_user[df_user.user.isin(set(users))]
-    negatives = ratings[(ratings.user.isin(users))]
-    ratings = ratings[(ratings.user.isin(users)) & (ratings.item.isin(items))]
-    negatives = negatives[negatives.rating < 0]
-    if len(negatives) > 0:
-        negatives = negatives.sort_values(["item"])
-        negatives = negatives.groupby('user', group_keys=False).apply(lambda x: x.head(min(5, len(x))))
-        ratings = pd.concat((negatives, ratings)).sample(frac=1.0)
-    df_item = df_item[df_item["item"].isin(set(ratings.item))]
-    print("Total Samples Present = %s" % (ratings.shape[0]))
+if test_data_subset:
+    df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings,
+                                                 cores, min_positive_rating, ignore_below_rating)
 
 ratings = ratings[["user", "item", "rating"]]
 user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
@@ -101,45 +91,44 @@ rating_scale = (min_rating, max_rating)
 print("Total Samples Taken = %s, |Users| = %s |Items| = %s" % (ratings.shape[0], len(user_list), len(item_list)))
 
 hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
-                             knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }))
+                              knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }))
 
 hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
                              knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
-                       collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.02, epochs=50, batch_size=128,
-                                                          network_width=96, padding_length=50,
-                                                          network_depth=4, verbose=verbose,
-                                                          kernel_l2=0.002,
-                                                          bias_regularizer=0.01, dropout=0.05,
-                                                          use_resnet=True, use_content=True),
-                           user_item_params=dict(lr=0.5, epochs=40, batch_size=64,
-                                                 verbose=verbose, margin=1.0)))
+                             collaborative_params=dict(
+                                 prediction_network_params=dict(lr=0.02, epochs=50, batch_size=128,
+                                                                network_width=96, padding_length=50,
+                                                                network_depth=4, verbose=verbose,
+                                                                kernel_l2=0.002,
+                                                                bias_regularizer=0.01, dropout=0.05,
+                                                                use_resnet=True, use_content=True),
+                                 user_item_params=dict(lr=0.5, epochs=40, batch_size=64,
+                                                       verbose=verbose, margin=1.0)))
 
 hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
-                       collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.03, epochs=20, batch_size=512,
-                                                          network_width=96, padding_length=50,
-                                                          network_depth=3, verbose=verbose,
-                                                          kernel_l2=0.002,
-                                                          bias_regularizer=0.01, dropout=0.0, use_content=False),
-                           user_item_params=dict(lr=0.1, epochs=10, batch_size=64,
-                                                 gcn_lr=0.005, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0, gcn_hidden_dims=96,
-                                                 gcn_batch_size=int(2**np.floor(np.log2(len(user_item_affinities)/20))),
-                                                 verbose=verbose, margin=1.0)))
+                           collaborative_params=dict(
+                               prediction_network_params=dict(lr=0.01, epochs=20, batch_size=512,
+                                                              network_width=96, padding_length=50,
+                                                              network_depth=3, verbose=verbose,
+                                                              kernel_l2=0.002,
+                                                              bias_regularizer=0.01, dropout=0.0, use_content=False),
+                               user_item_params=dict(lr=0.1, epochs=10, batch_size=64,
+                                                     gcn_lr=0.005, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0,
+                                                     gcn_hidden_dims=96,
+                                                     gcn_batch_size=int(
+                                                         2 ** np.floor(np.log2(len(user_item_affinities) / 20))),
+                                                     verbose=verbose, margin=1.0)))
 
-hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10}, "algos":["svdpp"]}
+hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10}, "algos": ["svdpp"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperparameter_content,
-                           svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise,)
+                           svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
 
 svdpp_hybrid = False
 gcn_hybrid = True
 surprise = True
 content_only = False
-
-min_positive_rating=0.0
-ignore_below_rating=0.0
 
 
 def prepare_data_mappers():
@@ -176,34 +165,15 @@ def prepare_data_mappers():
     return embedding_mapper, user_data, item_data
 
 
-def stratified_split(user_item_affinities):
-    positive_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r >= 0]
-    negative_samples = [[u, i, float(r)] for u, i, r in user_item_affinities if r < 0]
-    train_pos, val_pos = train_test_split(positive_samples, test_size=0.2, stratify=[u for u, i, r in positive_samples])
-    print(len(negative_samples))
-    if len(negative_samples) > 0:
-        train_neg, val_neg = train_test_split(negative_samples, test_size=0.2, stratify=[u for u, i, r in negative_samples])
-        train_affinities = np.concatenate((train_pos, train_neg))
-        validation_affinities = np.concatenate((val_pos, val_neg))
-    else:
-        train_affinities = train_pos
-        validation_affinities = val_pos
-    print("Total Train Set = %s, Test Set = %s, Positive Test Set = %s" % (len(train_affinities), len(validation_affinities), len(val_pos)))
-    train_affinities = shuffle(train_affinities)
-    validation_affinities = shuffle(validation_affinities)
-    val_pos = shuffle(val_pos)
-    train_affinities = [[u, i, float(r)] for u, i, r in train_affinities]
-    validation_affinities = [[u, i, float(r)] for u, i, r in validation_affinities]
-    val_pos = [[u, i, float(r)] for u, i, r in val_pos]
-    return train_affinities, validation_affinities, val_pos
-
-
 if not enable_kfold:
-    train_affinities, validation_affinities, val_pos = stratified_split(user_item_affinities)
-    recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities, user_list, item_list, hyperparamters_dict,
-                                                         prepare_data_mappers, rating_scale, min_positive_rating=min_positive_rating,
+    train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2, stratify=[u for u, i, r in user_item_affinities])
+    recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities, user_list, item_list,
+                                                         hyperparamters_dict,
+                                                         prepare_data_mappers, rating_scale,
+                                                         min_positive_rating=min_positive_rating,
                                                          ignore_below_rating=ignore_below_rating,
-                                                         svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid, surprise=surprise, content_only=content_only,
+                                                         svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
+                                                         surprise=surprise, content_only=content_only,
                                                          enable_error_analysis=enable_error_analysis)
     results = display_results(results)
     user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
@@ -218,7 +188,8 @@ if not enable_kfold:
         res, dist = zip(*recommendations)
         print(recommendations[:10])
         recommended_items = res[:10]
-        recommended_items = df_item[df_item['item'].isin(recommended_items)][["gl", "category_code", "sentence", "price"]]
+        recommended_items = df_item[df_item['item'].isin(recommended_items)][
+            ["gl", "category_code", "sentence", "price"]]
         actual_items = ratings[ratings.user == user_id]["item"].sample(10).values
         actual_items = df_item[df_item['item'].isin(actual_items)][["gl", "category_code", "sentence", "price"]]
         print(recommended_items)
@@ -238,10 +209,11 @@ else:
         validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
         #
         recs, res, ucrms = test_once(train_affinities, validation_affinities, user_list, item_list,
-                                                             hyperparamters_dict, prepare_data_mappers, rating_scale, min_positive_rating=min_positive_rating,
-                                                         ignore_below_rating=ignore_below_rating,
+                                     hyperparamters_dict, prepare_data_mappers, rating_scale,
+                                     min_positive_rating=min_positive_rating,
+                                     ignore_below_rating=ignore_below_rating,
                                      svdpp_hybrid=True,
-                                                             gcn_hybrid=True, surprise=True, content_only=True,
+                                     gcn_hybrid=True, surprise=True, content_only=True,
                                      enable_error_analysis=False)
 
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))

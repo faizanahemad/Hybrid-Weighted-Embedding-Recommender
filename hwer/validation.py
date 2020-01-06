@@ -28,6 +28,7 @@ from surprise import BaselineOnly
 from surprise import Dataset
 from surprise import Reader
 from ast import literal_eval
+import networkx as nx
 
 from .utils import normalize_affinity_scores_by_user, average_precision
 from . import SVDppHybrid, ContentRecommendation, HybridGCNRec
@@ -445,3 +446,20 @@ def error_analysis(train_affinities, validation_affinities, error_df, title):
     sns.distplot(error_df["errors"], bins=100)
     plt.title("Error Histogram")
     plt.show()
+
+def get_small_subset(df_user, df_item, ratings,
+                     cores, min_positive_rating, ignore_below_rating):
+    G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= ignore_below_rating])
+    k_core_edges = list(nx.k_core(G, k=cores).edges())
+    users = set([u for u, i in k_core_edges])
+    items = set([i for u, i in k_core_edges])
+    df_user = df_user[df_user.user.isin(set(users))]
+    negatives = ratings[(ratings.user.isin(users))]
+    ratings = ratings[(ratings.user.isin(users)) & (ratings.item.isin(items))]
+    negatives = negatives[negatives.rating < min_positive_rating]
+    if len(negatives) > 0:
+        negatives = negatives.sort_values(["item"])
+        negatives = negatives.groupby('user', group_keys=False).apply(lambda x: x.head(min(5, len(x))))
+        ratings = pd.concat((negatives, ratings)).sample(frac=1.0)
+    df_item = df_item[df_item["item"].isin(set(ratings.item))]
+    return df_user, df_item, ratings
