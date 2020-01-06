@@ -503,12 +503,12 @@ class LRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
 
 def get_rng(noise_augmentation):
     if noise_augmentation:
-        def rng(dims, weight):
+        def rng(dims):
             r = np.random.rand(dims) if dims > 1 else np.random.rand() - 0.5
-            return weight * r
+            return noise_augmentation * r
 
         return rng
-    return lambda dims, weight: np.zeros(dims) if dims > 1 else 0
+    return lambda dims: np.zeros(dims) if dims > 1 else 0
 
 
 def resnet_layer_with_content(n_dims, n_out_dims, dropout, kernel_l2, depth=2):

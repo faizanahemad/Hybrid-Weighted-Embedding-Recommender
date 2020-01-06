@@ -94,10 +94,11 @@ class GCN(layers.Layer):
                  dropout):
         super(GCN, self).__init__()
         self.layers = []
+        self.g = g
 
         # input layer
         self.layers.append(
-            GCNLayer(g, in_features, n_hidden, activation, dropout, gcn_msg, gcn_reduce))
+            GCNLayer(g, in_features+1, n_hidden, activation, dropout, gcn_msg, gcn_reduce))
         # hidden layers
         for i in range(n_layers - 1):
             self.layers.append(
@@ -106,7 +107,7 @@ class GCN(layers.Layer):
         self.layers.append(GCNLayer(g, n_hidden, out_features, None, dropout, gcn_msg, gcn_reduce))
 
     def call(self, features):
-        h = features
+        h = tf.concat((features, tf.reshape(self.g.ndata['degree'], (-1, 1))), axis=1)
         for layer in self.layers:
             h = layer(h)
         return h
@@ -120,15 +121,26 @@ class HybridGCNRec(SVDppHybrid):
         self.log = getLogger(type(self).__name__)
         self.super_fast_inference = super_fast_inference
 
-    def __user_item_affinities_triplet_trainer__(self,
-                                         user_ids: List[str], item_ids: List[str],
-                                         user_item_affinities: List[Tuple[str, str, float]],
-                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                         n_output_dims: int,
-                                         hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
-        self.log.debug("Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
-                       len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
+    def __build_user_item_graph__(self, user_item_affinities: List[Tuple[str, str, float]], total_users: int, total_items: int,
+                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int]):
+        edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i]) for u, i, r in user_item_affinities]
+        src, dst = tuple(zip(*edge_list))
+        g = DGLGraph()
+        g.add_nodes(total_users + total_items)
+        g.add_edges(src, dst)
+        g.add_edges(dst, src)
+        g.add_edges(g.nodes(), g.nodes())
+        n_edges = g.number_of_edges()
+        # # normalization
+        degs = g.in_degrees()
+        degs = tf.cast(tf.identity(degs), dtype=tf.float32)
+        norm = tf.math.pow(degs, -0.5)
+        norm = tf.where(tf.math.is_inf(norm), tf.zeros_like(norm), norm)
+        g.ndata['norm'] = tf.expand_dims(norm, -1)
+        g.ndata['degree'] = tf.math.tanh(tf.math.log1p(tf.math.log1p(tf.math.log1p(degs))))
+        ratings = [r for u, i, r in user_item_affinities]
+        g.edata['weight'] = tf.expand_dims(
+            np.array(ratings + ratings + list(np.ones(total_users + total_items))).astype(np.float32), -1)
 
         def gcn_msg(edge):
             msg = edge.src['h'] * edge.src['norm']
@@ -139,6 +151,18 @@ class HybridGCNRec(SVDppHybrid):
             accum = tf.reduce_sum(node.mailbox['m'], 1) * node.data['norm']
             accum = tf.math.l2_normalize(accum, axis=-1)
             return {'h': accum}
+
+        return g, gcn_msg, gcn_reduce
+
+    def __user_item_affinities_triplet_trainer__(self,
+                                         user_ids: List[str], item_ids: List[str],
+                                         user_item_affinities: List[Tuple[str, str, float]],
+                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                         n_output_dims: int,
+                                         hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
+        self.log.debug("Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+                       len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
 
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         gcn_lr = hyperparams["gcn_lr"] if "gcn_lr" in hyperparams else 0.1
@@ -176,23 +200,6 @@ class HybridGCNRec(SVDppHybrid):
             [r for u1, u2, r in user_item_affinities])
         random_positive_weight = random_positive_weight * aff_range
         random_negative_weight = random_negative_weight * aff_range
-
-        edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i]) for u, i, r in user_item_affinities]
-        src, dst = tuple(zip(*edge_list))
-        g = DGLGraph()
-        g.add_nodes(total_users + total_items)
-        g.add_edges(src, dst)
-        g.add_edges(dst, src)
-        g.add_edges(g.nodes(), g.nodes())
-        n_edges = g.number_of_edges()
-        # # normalization
-        degs = g.in_degrees()
-        degs = tf.cast(tf.identity(degs), dtype=tf.float32)
-        norm = tf.math.pow(degs, -0.5)
-        norm = tf.where(tf.math.is_inf(norm), tf.zeros_like(norm), norm)
-        g.ndata['norm'] = tf.expand_dims(norm, -1)
-        ratings = [r for u, i, r in user_item_affinities]
-        g.edata['weight'] = tf.expand_dims(np.array(ratings + ratings + list(np.ones(total_users + total_items))).astype(np.float32), -1)
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             user_close_dict = defaultdict(list)
@@ -312,17 +319,18 @@ class HybridGCNRec(SVDppHybrid):
         model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-        # model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
+        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
 
-        # user_vectors = encoder.predict(
-        #     tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
-        # item_vectors = encoder.predict(
-        #     tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(
-        #         batch_size).prefetch(16))
-        self.log.debug(
-            "End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s, margin = %.4f",
-            unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
+        user_triplet_vectors = encoder.predict(
+            tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
+        item_triplet_vectors = encoder.predict(
+            tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(
+                batch_size).prefetch(16))
+        user_vectors = np.concatenate((user_vectors, user_triplet_vectors), axis=1)
+        item_vectors = np.concatenate((item_vectors, item_triplet_vectors), axis=1)
 
+        g, gcn_msg, gcn_reduce = self.__build_user_item_graph__(user_item_affinities, total_users, total_items,
+                                  user_id_to_index, item_id_to_index)
         features = unit_length(np.concatenate((user_vectors, item_vectors)), axis=1)
         # embedding = tf.Variable(initial_value=features, dtype=tf.float32, trainable=True)
         model = GCN(g,
@@ -343,6 +351,7 @@ class HybridGCNRec(SVDppHybrid):
         train = train.shuffle(gcn_batch_size * 10).batch(gcn_batch_size).prefetch(8)
         for epoch in range(gcn_epochs):
             start = time.time()
+            total_loss = 0.0
             for x, y in train:
                 with tf.GradientTape() as tape:
                     vectors = model(features)
@@ -365,16 +374,19 @@ class HybridGCNRec(SVDppHybrid):
 
                     error = K.relu(i1_i2_dist - i1_i3_dist + margin)
                     loss_value = loss(y, error)
+                    total_loss = total_loss + loss_value
 
                 grads = tape.gradient(loss_value, model.trainable_weights)
                 optimizer.apply_gradients(zip(grads, model.trainable_weights))
                 del tape
 
             total_time = time.time() - start
-            print("Epoch = %s/%s, Loss = %.4f, LR = %.6f, Time = %.1fs" % (epoch+1, gcn_epochs, loss_value, K.get_value(optimizer.learning_rate.lr), total_time))
+            print("Epoch = %s/%s, Loss = %.4f, LR = %.6f, Time = %.1fs" % (epoch+1, gcn_epochs, total_loss, K.get_value(optimizer.learning_rate.lr), total_time))
 
         vectors = model(features)
         # K.l2_normalize(embedding, axis=1)
         user_vectors, item_vectors = vectors[:total_users], vectors[total_users:]
         return user_vectors, item_vectors
+
+
 

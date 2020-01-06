@@ -38,7 +38,7 @@ class SVDppHybrid(HybridRecommender):
                           rating_scale: Tuple[float, float], hyperparams: Dict):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
-        noise_augmentation = hyperparams["noise_augmentation"] if "noise_augmentation" in hyperparams else False
+        noise_augmentation = hyperparams["noise_augmentation"] if "noise_augmentation" in hyperparams else 0
         use_content = hyperparams["use_content"] if "use_content" in hyperparams else True
         rng = get_rng(noise_augmentation)
         ###
@@ -96,7 +96,7 @@ class SVDppHybrid(HybridRecommender):
                 for i in range(0, len(affinities), batch_size*4):
                     start = i
                     end = min(i + batch_size*4, len(affinities))
-                    generated = [(gen_fn(u, v, nu, ni), r + rng(1, 0.01 * affinity_range)) for u, v, nu, ni, r in affinities[start:end]]
+                    generated = [(gen_fn(u, v, nu, ni), r + rng(1)) for u, v, nu, ni, r in affinities[start:end]]
                     for g in generated:
                         yield g
             return generator
