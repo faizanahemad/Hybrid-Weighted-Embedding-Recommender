@@ -121,12 +121,12 @@ class HybridGCNRec(SVDppHybrid):
         self.log = getLogger(type(self).__name__)
         self.super_fast_inference = super_fast_inference
 
-    def __build_user_item_graph__(self, user_item_affinities: List[Tuple[str, str, float]], total_users: int, total_items: int,
-                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int]):
-        edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i]) for u, i, r in user_item_affinities]
+    def __build_user_item_graph__(self, edge_list: List[Tuple[int, int]], edge_weights: List[float], total_users: int, total_items: int):
+
         src, dst = tuple(zip(*edge_list))
         g = DGLGraph()
         g.add_nodes(total_users + total_items)
+
         g.add_edges(src, dst)
         g.add_edges(dst, src)
         g.add_edges(g.nodes(), g.nodes())
@@ -137,10 +137,10 @@ class HybridGCNRec(SVDppHybrid):
         norm = tf.math.pow(degs, -0.5)
         norm = tf.where(tf.math.is_inf(norm), tf.zeros_like(norm), norm)
         g.ndata['norm'] = tf.expand_dims(norm, -1)
-        g.ndata['degree'] = tf.math.tanh(tf.math.log1p(tf.math.log1p(tf.math.log1p(degs))))
-        ratings = [r for u, i, r in user_item_affinities]
+        g.ndata['degree'] = tf.math.tanh(tf.math.log1p(tf.math.log1p(tf.math.log1p(degs/100.0))))
+        edge_weights_mean = float(np.mean(edge_weights))
         g.edata['weight'] = tf.expand_dims(
-            np.array(ratings + ratings + list(np.ones(total_users + total_items))).astype(np.float32), -1)
+            np.array(edge_weights + edge_weights + list(np.full(total_users + total_items, edge_weights_mean))).astype(np.float32), -1)
 
         def gcn_msg(edge):
             msg = edge.src['h'] * edge.src['norm']
@@ -182,7 +182,6 @@ class HybridGCNRec(SVDppHybrid):
         random_negative_weight = hyperparams[
             "random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
-
 
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
@@ -329,8 +328,9 @@ class HybridGCNRec(SVDppHybrid):
         user_vectors = np.concatenate((user_vectors, user_triplet_vectors), axis=1)
         item_vectors = np.concatenate((item_vectors, item_triplet_vectors), axis=1)
 
-        g, gcn_msg, gcn_reduce = self.__build_user_item_graph__(user_item_affinities, total_users, total_items,
-                                  user_id_to_index, item_id_to_index)
+        edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i]) for u, i, r in user_item_affinities]
+        ratings = [r for u, i, r in user_item_affinities]
+        g, gcn_msg, gcn_reduce = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items,)
         features = unit_length(np.concatenate((user_vectors, item_vectors)), axis=1)
         # embedding = tf.Variable(initial_value=features, dtype=tf.float32, trainable=True)
         model = GCN(g,
@@ -388,5 +388,209 @@ class HybridGCNRec(SVDppHybrid):
         user_vectors, item_vectors = vectors[:total_users], vectors[total_users:]
         return user_vectors, item_vectors
 
+    def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
+                                     user_item_affinities: List[Tuple[str, str, float]],
+                                     user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
+                                     user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                     user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                     rating_scale: Tuple[float, float], hyperparams: Dict):
+        self.log.debug(
+            "Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
+            (user_vectors.shape, item_vectors.shape), (user_content_vectors.shape, item_content_vectors.shape))
+
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
+        bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.0
+        padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
+        use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
+        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
+        n_collaborative_dims = user_vectors.shape[1]
+        network_width = hyperparams["network_width"] if "network_width" in hyperparams else 128
+        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
+        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
+        use_resnet = hyperparams["use_resnet"] if "use_resnet" in hyperparams else False
+
+        assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
+        assert user_vectors.shape[1] == item_vectors.shape[1]
+        # For unseen users and items creating 2 mock nodes
+        user_content_vectors = np.concatenate((np.zeros((1,user_content_vectors.shape[1])), user_content_vectors))
+        item_content_vectors = np.concatenate((np.zeros((1,item_content_vectors.shape[1])), item_content_vectors))
+        user_vectors = np.concatenate((np.zeros((1,user_vectors.shape[1])), user_vectors))
+        item_vectors = np.concatenate((np.zeros((1,item_vectors.shape[1])), item_vectors))
+
+        mu, user_bias, item_bias, train, \
+        ratings_count_by_user, ratings_count_by_item, \
+        min_affinity, \
+        max_affinity, user_item_list, item_user_list, \
+        gen_fn, prediction_output_shape, prediction_output_types = self.__build_dataset__(user_ids, item_ids,
+                                                                              user_item_affinities,
+                                                                              user_content_vectors,
+                                                                              item_content_vectors,
+                                                                              user_vectors, item_vectors,
+                                                                              user_id_to_index,
+                                                                              item_id_to_index,
+                                                                              rating_scale, hyperparams)
+        assert np.sum(np.isnan(user_bias)) == 0
+        assert np.sum(np.isnan(item_bias)) == 0
+        assert np.sum(np.isnan(user_content_vectors)) == 0
+        assert np.sum(np.isnan(item_content_vectors)) == 0
+        assert np.sum(np.isnan(user_vectors)) == 0
+        assert np.sum(np.isnan(item_vectors)) == 0
 
 
+        #
+        lr = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
+        loss = root_mean_squared_error
+        total_users = len(user_ids) + 1
+        total_items = len(item_ids) + 1
+        edge_list = [(user_id_to_index[u]+1, total_users + item_id_to_index[i]+1) for u, i, r in user_item_affinities]
+        ratings = [r for u, i, r in user_item_affinities]
+        g, gcn_msg, gcn_reduce = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items)
+        user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
+        item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
+
+        features = np.concatenate((user_vectors, item_vectors))
+        user_bias = tf.Variable(initial_value=user_bias, dtype=tf.float32, trainable=True)
+        item_bias = tf.Variable(initial_value=item_bias, dtype=tf.float32, trainable=True)
+        model = GCN(g,
+                    gcn_msg,
+                    gcn_reduce,
+                    features.shape[1],
+                    network_width,
+                    self.n_collaborative_dims,
+                    network_depth,
+                    tf.nn.leaky_relu,
+                    dropout)
+
+        for epoch in range(epochs):
+            start = time.time()
+            total_loss = 0.0
+            for x, y in train:
+                with tf.GradientTape() as tape:
+                    vectors = model(features)
+                    user_input = x[0]
+                    item_input = x[1] + total_users
+                    users_input = x[2]
+                    items_input = x[3] + total_users
+                    nu_input = tf.expand_dims(tf.dtypes.cast(x[4], dtype=tf.float32), -1)
+                    ni_input = tf.expand_dims(tf.dtypes.cast(x[5], dtype=tf.float32), -1)
+
+                    user_vec = tf.gather(vectors, user_input)
+                    item_vec = tf.gather(vectors, item_input)
+
+                    users_vecs = tf.gather(vectors, users_input)
+                    items_vecs = tf.gather(vectors, items_input)
+                    users_vecs = tf.reduce_sum(users_vecs, axis=1)
+                    items_vecs = tf.reduce_sum(items_vecs, axis=1)
+                    users_vecs = tf.multiply(users_vecs, ni_input)
+                    items_vecs = tf.multiply(items_vecs, nu_input)
+
+                    user_item_vec_dot = tf.reduce_sum(tf.multiply(user_vec, item_vec), axis=1)
+                    item_items_vec_dot = tf.reduce_sum(tf.multiply(item_vec, items_vecs), axis=1)
+                    user_user_vec_dot = tf.reduce_sum(tf.multiply(user_vec, users_vecs), axis=1)
+                    implicit_term = user_item_vec_dot + item_items_vec_dot + user_user_vec_dot
+                    bu = tf.gather(user_bias, user_input)
+                    bi = tf.gather(item_bias, x[1])
+                    base_estimates = mu + bu + bi
+                    rating = base_estimates + implicit_term
+                    y = tf.dtypes.cast(y, tf.float32)
+                    loss_value = loss(y, rating)
+                    total_loss = total_loss + loss_value
+                grads = tape.gradient(loss_value, model.trainable_weights)
+                optimizer.apply_gradients(zip(grads, model.trainable_weights))
+                del tape
+
+            total_time = time.time() - start
+            print("Epoch = %s/%s, Loss = %.4f, LR = %.6f, Time = %.1fs" % (
+            epoch + 1, epochs, total_loss, K.get_value(optimizer.learning_rate.lr), total_time))
+
+        #
+        prediction_artifacts = {"vectors": model(features), "user_item_list": user_item_list,
+                                "item_user_list": item_user_list, "mu": mu, "user_bias": user_bias.numpy(), "item_bias": item_bias.numpy(),
+                                "total_users": total_users,
+                                "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
+                                "ratings_count_by_item": ratings_count_by_item,
+                                "batch_size": batch_size, "gen_fn": gen_fn}
+        self.log.info("Built Prediction Network, model params = %s", model.count_params())
+        return prediction_artifacts
+
+    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+        start = time.time()
+        vectors = self.prediction_artifacts["vectors"]
+        mu = self.prediction_artifacts["mu"]
+        user_bias = self.prediction_artifacts["user_bias"]
+        item_bias = self.prediction_artifacts["item_bias"]
+        total_users = self.prediction_artifacts["total_users"]
+
+
+        ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
+        ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
+        batch_size = self.prediction_artifacts["batch_size"]
+        gen_fn = self.prediction_artifacts["gen_fn"]
+        batch_size = max(512, batch_size)
+
+        def generate_prediction_samples(affinities):
+            def generator():
+                for i in range(0, len(affinities), batch_size):
+                    start = i
+                    end = min(i + batch_size, len(affinities))
+                    generated = np.array([gen_fn(u, v, nu, ni) for u, v, nu, ni in affinities[start:end]])
+                    yield generated
+            return generator
+
+        if self.fast_inference:
+            return self.fast_predict(user_item_pairs)
+
+        if self.super_fast_inference:
+            assert self.mu is not None
+            return [self.mu + self.bu[u] + self.bi[i] for u, i, in user_item_pairs]
+
+        uip = [(self.user_id_to_index[u] + 1 if u in self.user_id_to_index else 0,
+                self.item_id_to_index[i] + 1 if i in self.item_id_to_index else 0,
+                ratings_count_by_user[self.user_id_to_index[u] + 1 if u in self.user_id_to_index else 0],
+                ratings_count_by_item[self.item_id_to_index[i] + 1 if i in self.item_id_to_index else 0]) for u, i in user_item_pairs]
+
+        assert np.sum(np.isnan(uip)) == 0
+
+        predictions = []
+        for x in generate_prediction_samples(uip)():
+            user_input = x[:, 0].astype(int)
+            item_input = x[:, 1].astype(int) + total_users
+            users_input = np.array([np.array(a, dtype=int) for a in x[:, 2]])
+            items_input = np.array([np.array(a, dtype=int) for a in x[:, 3]]) + total_users
+            nu_input = np.expand_dims(x[:, 4].astype(float), -1)
+            ni_input = np.expand_dims(x[:, 5].astype(float), -1)
+
+            user_vec = np.take(vectors, user_input, axis=0)
+            item_vec = np.take(vectors, item_input, axis=0)
+
+            users_vecs = np.take(vectors, users_input, axis=0)
+            items_vecs = np.take(vectors, items_input, axis=0)
+
+            users_vecs = np.sum(users_vecs, axis=1)
+            items_vecs = np.sum(items_vecs, axis=1)
+            users_vecs = np.multiply(users_vecs, ni_input)
+            items_vecs = np.multiply(items_vecs, nu_input)
+
+            user_item_vec_dot = np.sum(np.multiply(user_vec, item_vec), axis=1)
+            item_items_vec_dot = np.sum(np.multiply(item_vec, items_vecs), axis=1)
+            user_user_vec_dot = np.sum(np.multiply(user_vec, users_vecs), axis=1)
+            implicit_term = user_item_vec_dot + item_items_vec_dot + user_user_vec_dot
+            bu = np.take(user_bias, user_input, axis=0)
+            bi = np.take(item_bias, x[:, 1].astype(int), axis=0)
+            rating = mu + bu + bi + implicit_term
+            predictions.extend(rating)
+
+        predictions = np.array(predictions)
+        assert np.sum(np.isnan(predictions)) == 0
+        predictions[np.isnan(predictions)] = [self.mu + self.bu[u] + self.bi[i] for u, i in np.array(user_item_pairs)[np.isnan(predictions)]]
+        assert len(predictions) == len(user_item_pairs)
+        if clip:
+            predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
+        self.log.info("Finished Predicting for n_samples = %s, time taken = %.2f",
+                      len(user_item_pairs),
+                      time.time() - start)
+        return predictions

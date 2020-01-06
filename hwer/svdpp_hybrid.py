@@ -297,9 +297,9 @@ class SVDppHybrid(HybridRecommender):
 
         def generate_prediction_samples(affinities):
             def generator():
-                for i in range(0, len(affinities), batch_size*4):
+                for i in range(0, len(affinities), batch_size):
                     start = i
-                    end = min(i + batch_size*4, len(affinities))
+                    end = min(i + batch_size, len(affinities))
                     generated = [gen_fn(u, v, nu, ni) for u, v, nu, ni in affinities[start:end]]
                     for g in generated:
                         yield g
@@ -320,7 +320,7 @@ class SVDppHybrid(HybridRecommender):
         assert np.sum(np.isnan(uip)) == 0
         predict = tf.data.Dataset.from_generator(generate_prediction_samples(uip),
                                                  output_types=prediction_output_types, output_shapes=prediction_output_shape, )
-        predict = predict.batch(batch_size).prefetch(16)
+        predict = predict.batch(batch_size).prefetch(1)
         predictions = np.array(list(flatten([model.predict(x).reshape((-1)) for x in predict])))
         predictions[np.isnan(predictions)] = [self.mu + self.bu[u] + self.bi[i] for u, i in np.array(user_item_pairs)[np.isnan(predictions)]]
         assert len(predictions) == len(user_item_pairs)

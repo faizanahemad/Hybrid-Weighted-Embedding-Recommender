@@ -118,13 +118,13 @@ hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
 hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                        collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.05, epochs=10, batch_size=128,
+                           prediction_network_params=dict(lr=0.03, epochs=20, batch_size=512,
                                                           network_width=96, padding_length=50,
-                                                          network_depth=4, verbose=verbose,
+                                                          network_depth=3, verbose=verbose,
                                                           kernel_l2=0.002,
-                                                          bias_regularizer=0.01, dropout=0.05),
+                                                          bias_regularizer=0.01, dropout=0.0, use_content=False),
                            user_item_params=dict(lr=0.1, epochs=10, batch_size=64,
-                                                 gcn_lr=0.005, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0, gcn_hidden_dims=128,
+                                                 gcn_lr=0.005, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0, gcn_hidden_dims=96,
                                                  gcn_batch_size=int(2**np.floor(np.log2(len(user_item_affinities)/20))),
                                                  verbose=verbose, margin=1.0)))
 
