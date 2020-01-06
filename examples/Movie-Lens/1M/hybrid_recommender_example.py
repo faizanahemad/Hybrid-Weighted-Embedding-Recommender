@@ -28,74 +28,6 @@ from hwer import FasttextEmbedding
 
 # tf.compat.v1.disable_eager_execution()
 
-users = pd.read_csv("users.csv", sep="\t", engine="python")
-movies = pd.read_csv("movies.csv", sep="\t", engine="python")
-ratings = pd.read_csv("ratings.csv", sep="\t", engine="python")
-
-users['user_id'] = users['user_id'].astype(str)
-movies['movie_id'] = movies['movie_id'].astype(str)
-ratings['movie_id'] = ratings['movie_id'].astype(str)
-ratings['user_id'] = ratings['user_id'].astype(str)
-
-movies.genres = movies.genres.fillna("[]").apply(literal_eval)
-movies['year'] = movies['year'].fillna(-1).astype(int)
-movies.keywords = movies.keywords.fillna("[]").apply(literal_eval)
-movies.keywords = movies.keywords.apply(lambda x: " ".join(x))
-movies.tagline = movies.tagline.fillna("")
-text_columns = ["title", "keywords", "overview", "tagline", "original_title"]
-movies[text_columns] = movies[text_columns].fillna("")
-movies['text'] = movies["title"] + " " + movies["keywords"] + " " + movies["overview"] + " " + movies["tagline"] + " " + \
-                 movies["original_title"]
-movies["title_length"] = movies["title"].apply(len)
-movies["overview_length"] = movies["overview"].apply(len)
-movies["runtime"] = movies["runtime"].fillna(0.0)
-
-# print(ratings[ratings["user_id"]=="1051"])
-
-check_working = True  # Setting to False uses all the data
-enable_kfold = False
-enable_error_analysis = False
-verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
-test_retrieval = False
-
-hyperparameters = dict(combining_factor=0.1,
-                       collaborative_params=dict(
-                           prediction_network_params=dict(lr=0.6, epochs=15, batch_size=64,
-                                                          network_width=128, padding_length=50,
-                                                          network_depth=4, verbose=verbose,
-                                                          kernel_l2=0.0,
-                                                          bias_regularizer=0.02, dropout=0.2),
-                           item_item_params=dict(lr=0.05, epochs=10, batch_size=512,
-                                                 verbose=verbose),
-                           user_user_params=dict(lr=0.05, epochs=10, batch_size=512,
-                                                 verbose=verbose),
-                           user_item_params=dict(lr=0.05, epochs=10, batch_size=128,
-                                                 verbose=verbose, margin=0.5)))
-
-if check_working:
-    movie_counts = ratings.groupby(["movie_id"])[["user_id"]].count().reset_index()
-    movie_counts = movie_counts.sort_values(by="user_id", ascending=False).head(2000)
-    movies = movies[movies["movie_id"].isin(movie_counts.movie_id)]
-
-    ratings = ratings[(ratings.movie_id.isin(movie_counts.movie_id))]
-
-    user_counts = ratings.groupby(["user_id"])[["movie_id"]].count().reset_index()
-    user_counts = user_counts.sort_values(by="movie_id", ascending=False).head(500)
-    ratings = ratings.merge(user_counts[["user_id"]], on="user_id")
-    users = users[users["user_id"].isin(user_counts.user_id)]
-    ratings = ratings[(ratings.movie_id.isin(movies.movie_id)) & (ratings.user_id.isin(users.user_id))]
-    print("Total Samples Present = %s" % (ratings.shape[0]))
-    samples = min(100000, ratings.shape[0])
-    ratings = ratings.sample(samples)
-
-
-user_item_affinities = [(row[0], row[1], row[2]) for row in ratings.values]
-users_for_each_rating = [row[0] for row in ratings.values]
-item_list = list(set([i for u, i, r in user_item_affinities]))
-user_list = list(set([u for u, i, r in user_item_affinities]))
-
-print("Total Samples Taken = %s, |Users| = %s |Items| = %s" % (ratings.shape[0], len(user_list), len(item_list)))
-
 
 def prepare_data_mappers():
     embedding_mapper = {}
@@ -105,159 +37,175 @@ def prepare_data_mappers():
     embedding_mapper['numeric'] = NumericEmbedding(4)
     embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
 
-    u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL, values=users[["gender", "age", "occupation", "zip"]].values)
+    u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL, values=df_user[["gender", "age", "occupation", "zip"]].values)
     user_data = FeatureSet([u1])
 
-    print("Numeric Nans = \n", np.sum(movies[["title_length", "overview_length", "runtime"]].isna()))
-    print("Numeric Zeros = \n", np.sum(movies[["title_length", "overview_length", "runtime"]] <= 0))
+    print("Numeric Nans = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]].isna()))
+    print("Numeric Zeros = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]] <= 0))
 
-    i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=movies.text.values)
-    i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=movies.genres.values)
+    i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=df_item.text.values)
+    i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=df_item.genres.values)
     i3 = Feature(feature_name="numeric", feature_type=FeatureType.NUMERIC,
-                 values=np.abs(movies[["title_length", "overview_length", "runtime"]].values) + 1)
+                 values=np.abs(df_item[["title_length", "overview_length", "runtime"]].values) + 1)
     item_data = FeatureSet([i1, i2, i3])
     return embedding_mapper, user_data, item_data
 
 
-def check_users_items_train_test(train_affinities, validation_affinities,):
-    users = set([u for u, i, r in train_affinities])
-    items = set([i for u, i, r in train_affinities])
-    val_exluded_users = [u for u, i, r in validation_affinities if u not in users]
-    val_exluded_items = [i for u, i, r in validation_affinities if i not in items]
-    print(len(val_exluded_users), len(val_exluded_items), len(val_exluded_users) + len(val_exluded_items))
+def read_data():
+    users = pd.read_csv("users.csv", sep="\t", engine="python")
+    movies = pd.read_csv("movies.csv", sep="\t", engine="python")
+    ratings = pd.read_csv("ratings.csv", sep="\t", engine="python")
+
+    users['user_id'] = users['user_id'].astype(str)
+    movies['movie_id'] = movies['movie_id'].astype(str)
+    ratings['movie_id'] = ratings['movie_id'].astype(str)
+    ratings['user_id'] = ratings['user_id'].astype(str)
+
+    movies.genres = movies.genres.fillna("[]").apply(literal_eval)
+    movies['year'] = movies['year'].fillna(-1).astype(int)
+    movies.keywords = movies.keywords.fillna("[]").apply(literal_eval)
+    movies.keywords = movies.keywords.apply(lambda x: " ".join(x))
+    movies.tagline = movies.tagline.fillna("")
+    text_columns = ["title", "keywords", "overview", "tagline", "original_title"]
+    movies[text_columns] = movies[text_columns].fillna("")
+    movies['text'] = movies["title"] + " " + movies["keywords"] + " " + movies["overview"] + " " + movies["tagline"] + " " + \
+                     movies["original_title"]
+    movies["title_length"] = movies["title"].apply(len)
+    movies["overview_length"] = movies["overview"].apply(len)
+    movies["runtime"] = movies["runtime"].fillna(0.0)
+    ratings = ratings[["user_id", "movie_id", "rating"]]
+    ratings.rename(columns={"user_id": "user", "movie_id": "item"}, inplace=True)
+    movies.rename(columns={"movie_id": "item"}, inplace=True)
+    users.rename(columns={"user_id": "user"}, inplace=True)
+    return users, movies, ratings
 
 
-def test_once(train_affinities, validation_affinities, items, capabilities=["resnet", "content"]):
-    check_users_items_train_test(train_affinities, validation_affinities, )
-    embedding_mapper, user_data, item_data = prepare_data_mappers()
-    kwargs = {}
-    kwargs['user_data'] = user_data
-    kwargs['item_data'] = item_data
-    kwargs["hyperparameters"] = copy.deepcopy(hyperparameters)
-    kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = False
-    if "resnet" in capabilities:
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"]["use_resnet"] = True
-    if "content" in capabilities:
-        kwargs["hyperparameters"]['collaborative_params']["prediction_network_params"][
-            "use_content"] = True
-    recsys = SVDppHybrid(embedding_mapper=embedding_mapper,
-                         knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
-                         rating_scale=(1, 5),
-                         n_content_dims=32,
-                         n_collaborative_dims=32, fast_inference=False)
+df_user, df_item, ratings = read_data()
+#
+test_data_subset = True
+enable_kfold = False
+enable_error_analysis = False
+verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
+test_retrieval = False
+cores = 40
+min_positive_rating = 0.0
+ignore_below_rating = 0.0
 
-    start = time.time()
-    user_vectors, item_vectors = recsys.fit(users.user_id.values, movies.movie_id.values,
-                                            train_affinities, **kwargs)
-    # cos_sims = []
-    # for i in range(len(item_vectors)):
-    #     cos_sims.append([])
-    #     for j in range(len(item_vectors)):
-    #         sim = cos_sim(item_vectors[i], item_vectors[j])
-    #         cos_sims[i].append(sim)
-    # cos_sims = np.array(cos_sims)
-    # print("Cos Sim Min and Max = ",cos_sims.min(), cos_sims.max(), cos_sims.mean())
+if test_data_subset:
+    df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings,
+                                                 cores, min_positive_rating, ignore_below_rating)
 
-    end = time.time()
-    total_time = end - start
+ratings = ratings[["user", "item", "rating"]]
+user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
+users_for_each_rating = [row[0] for row in ratings.values]
+user_list = list(df_user.user.values)
+item_list = list(df_item.item.values)
 
-    embedding_mapper, user_data, item_data = prepare_data_mappers()
-    kwargs['user_data'] = user_data
-    kwargs['item_data'] = item_data
-    content_recsys = ContentRecommendation(embedding_mapper=embedding_mapper,
-                                           knn_params=dict(n_neighbors=200,
-                                                           index_time_params={'M': 15, 'ef_construction': 200,}),
-                                           rating_scale=(1, 5), n_output_dims=32)
-    _, _ = content_recsys.fit(users.user_id.values, movies.movie_id.values,
-                              train_affinities, **kwargs)
+min_rating = np.min([r for u, i, r in user_item_affinities])
+max_rating = np.max([r for u, i, r in user_item_affinities])
+rating_scale = (min_rating, max_rating)
 
-    assert np.sum(np.isnan(recsys.predict([(user_list[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
+print("Total Samples Taken = %s, |Users| = %s |Items| = %s" % (ratings.shape[0], len(user_list), len(item_list)))
 
-    res = {"algo":"hybrid-" + "_".join(capabilities), "time": total_time}
-    predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items)
-    res.update(stats)
+hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
+                              knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }))
 
-    recsys.fast_inference = True
-    res2 = {"algo": "fast-hybrid-" + "_".join(capabilities), "time": total_time}
-    _, _, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                                         model_get_topk, items)
-    res2.update(stats)
+hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
+                             knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+                             collaborative_params=dict(
+                                 prediction_network_params=dict(lr=0.02, epochs=50, batch_size=128,
+                                                                network_width=96, padding_length=50,
+                                                                network_depth=4, verbose=verbose,
+                                                                kernel_l2=0.002,
+                                                                bias_regularizer=0.01, dropout=0.05,
+                                                                use_resnet=True, use_content=True),
+                                 user_item_params=dict(lr=0.5, epochs=40, batch_size=64,
+                                                       verbose=verbose, margin=1.0)))
 
-    res4 = {"algo": "pure-content", "time": total_time}
-    _, _, stats = get_prediction_details(content_recsys, train_affinities, validation_affinities,
-                                         model_get_topk, items, base_rating=0.1)
-    res4.update(stats)
+hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
+                           knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+                           collaborative_params=dict(
+                               prediction_network_params=dict(lr=0.01, epochs=20, batch_size=512,
+                                                              network_width=96, padding_length=50,
+                                                              network_depth=3, verbose=verbose,
+                                                              kernel_l2=0.002,
+                                                              bias_regularizer=0.01, dropout=0.0, use_content=False),
+                               user_item_params=dict(lr=0.1, epochs=10, batch_size=64,
+                                                     gcn_lr=0.005, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0,
+                                                     gcn_hidden_dims=96,
+                                                     gcn_batch_size=int(
+                                                         2 ** np.floor(np.log2(len(user_item_affinities) / 20))),
+                                                     verbose=verbose, margin=1.0)))
 
-    if enable_error_analysis:
-        error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
-        error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
-    results = [res, res2]
-    return recsys, results, predictions, actuals
+hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10}, "algos": ["svdpp"]}
+
+hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperparameter_content,
+                           svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
+
+svdpp_hybrid = False
+gcn_hybrid = True
+surprise = True
+content_only = False
 
 
 if not enable_kfold:
-    train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.25, stratify=users_for_each_rating)
-    results = []
-
-    # capabilities = []
-    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
-    #                                               capabilities=capabilities)
-    # results.extend(res)
-    # display_results(results)
-    #
-    # capabilities = ["content"]
-    # recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list, capabilities=capabilities)
-    # results.extend(res)
-    # display_results(results)
-
-    capabilities = ["content", "resnet"]
-    recsys, res, predictions, actuals = test_once(train_affinities, validation_affinities, item_list,
-                                                  capabilities=capabilities)
-    results.extend(res)
-    display_results(results)
-
-    results.extend(test_surprise(train_affinities, validation_affinities, item_list, algo=["baseline", "svdpp"]))
-    display_results(results)
-    print(list(zip(actuals[:50], predictions[:50])))
+    train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2, stratify=[u for u, i, r in user_item_affinities])
+    recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities, user_list, item_list,
+                                                         hyperparamters_dict,
+                                                         prepare_data_mappers, rating_scale,
+                                                         min_positive_rating=min_positive_rating,
+                                                         ignore_below_rating=ignore_below_rating,
+                                                         svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
+                                                         surprise=surprise, content_only=content_only,
+                                                         enable_error_analysis=enable_error_analysis)
+    results = display_results(results)
+    user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
+    print(user_rating_count_metrics)
+    user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % cores, index=False)
+    results.reset_index().to_csv("overall_results_%s.csv" % cores, index=False)
+    visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
     if test_retrieval:
-        user_id = users.user_id.values[0]
+        recsys = recs[-1]
+        user_id = df_user.user.values[0]
         recommendations = recsys.find_items_for_user(user=user_id, positive=[], negative=[])
         res, dist = zip(*recommendations)
         print(recommendations[:10])
-        recommended_movies = res[:10]
-        recommended_movies = movies[movies['movie_id'].isin(recommended_movies)][
-            ["title", "genres", "year", "keywords", "overview"]]
-        actual_movies = ratings[ratings.user_id == user_id]["movie_id"].values
-        actual_movies = movies[movies['movie_id'].isin(actual_movies)][["title", "genres", "year", "keywords", "overview"]]
-        print(recommended_movies)
-        print(actual_movies)
+        recommended_items = res[:10]
+        recommended_items = df_item[df_item['item'].isin(recommended_items)][
+            ["gl", "category_code", "sentence", "price"]]
+        actual_items = ratings[ratings.user == user_id]["item"].sample(10).values
+        actual_items = df_item[df_item['item'].isin(actual_items)][["gl", "category_code", "sentence", "price"]]
+        print(recommended_items)
+        print("=" * 100)
+        print(actual_items)
 else:
     X = np.array(user_item_affinities)
     y = np.array(users_for_each_rating)
     skf = StratifiedKFold(n_splits=5)
     results = []
+    user_rating_count_metrics = pd.DataFrame([],
+                                             columns=["algo", "user_rating_count", "rmse", "mae", "map", "train_rmse",
+                                                      "train_mae"])
     for train_index, test_index in skf.split(X, y):
         train_affinities, validation_affinities = X[train_index], X[test_index]
         train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
         validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
         #
-        capabilities = []
-        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
-                                                      capabilities=capabilities)
-        results.extend(res)
-        #
-        capabilities = ["content"]
-        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
-                                      capabilities=capabilities)
-        results.extend(res)
-        #
-        capabilities = ["content", "resnet"]
-        recsys, res, _, _ = test_once(train_affinities, validation_affinities, item_list,
-                                      capabilities=capabilities)
-        results.extend(res)
+        recs, res, ucrms = test_once(train_affinities, validation_affinities, user_list, item_list,
+                                     hyperparamters_dict, prepare_data_mappers, rating_scale,
+                                     min_positive_rating=min_positive_rating,
+                                     ignore_below_rating=ignore_below_rating,
+                                     svdpp_hybrid=True,
+                                     gcn_hybrid=True, surprise=True, content_only=True,
+                                     enable_error_analysis=False)
 
-        results.extend(test_surprise(train_affinities, validation_affinities, item_list, algo=["baseline", "svdpp"]))
-        display_results(results)
-
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
+        res = display_results(res)
+        results.append(res)
         print("#" * 80)
+
+    results = pd.concat(results)
+    results = results.groupby(["algo"]).mean().reset_index()
+    user_rating_count_metrics = user_rating_count_metrics.groupby(["algo", "user_rating_count"]).mean().reset_index()
     display_results(results)
+    visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)

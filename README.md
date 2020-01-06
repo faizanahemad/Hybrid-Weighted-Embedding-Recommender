@@ -90,7 +90,8 @@ pip install -r requirements.txt
 - Hyper param optimisation via bayesian opt
 - Add Embedding layer to GCN Triplet training, see if time increases from 50s [Done]
 - Try Normal triplet + GCN
-- Image Auto-Encoder (De-noising) File based, Image Auto-Encoder DVAE. Use Average Rating for that item as a target too. 
+- Image Auto-Encoder (De-noising) File based, Image Auto-Encoder DVAE. Use Average Rating for that item as a target too.
+- In predict method, model.predict_generator instead of tfds for speed 
 
 # Innovation
 - Heterogenous Features via Deep Networks

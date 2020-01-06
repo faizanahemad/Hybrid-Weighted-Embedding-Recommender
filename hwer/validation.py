@@ -1,5 +1,6 @@
 
 import pandas as pd
+from bidict import bidict
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
 from surprise.prediction_algorithms.co_clustering import CoClustering
@@ -447,12 +448,17 @@ def error_analysis(train_affinities, validation_affinities, error_df, title):
     plt.title("Error Histogram")
     plt.show()
 
+
 def get_small_subset(df_user, df_item, ratings,
                      cores, min_positive_rating, ignore_below_rating):
-    G = nx.Graph([(u, i) for u, i, r in ratings.values if r >= ignore_below_rating])
+    users = list(set([u for u, i, r in ratings.values]))
+    items = list(set([i for u, i, r in ratings.values]))
+    user_id_to_index = bidict(zip(users, list(range(len(users)))))
+    item_id_to_index = bidict(zip(items, list(range(len(users), len(users)+len(items)))))
+    G = nx.Graph([(user_id_to_index[u], item_id_to_index[i]) for u, i, r in ratings.values if r >= ignore_below_rating])
     k_core_edges = list(nx.k_core(G, k=cores).edges())
-    users = set([u for u, i in k_core_edges])
-    items = set([i for u, i in k_core_edges])
+    users = set([user_id_to_index.inverse[u] for u, i in k_core_edges if u in user_id_to_index.inverse])
+    items = set([item_id_to_index.inverse[i] for u, i in k_core_edges if i in item_id_to_index.inverse])
     df_user = df_user[df_user.user.isin(set(users))]
     negatives = ratings[(ratings.user.isin(users))]
     ratings = ratings[(ratings.user.isin(users)) & (ratings.item.isin(items))]
