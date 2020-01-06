@@ -38,6 +38,37 @@ from hwer import SVDppHybrid, ContentRecommendation, HybridGCNRec
 from hwer import FasttextEmbedding
 
 
+def prepare_data_mappers():
+    i1 = Feature(feature_name="item_numeric", feature_type=FeatureType.NUMERIC,
+                 values=df_item[["price", "customer_average_review_rating", "customer_review_count"]].fillna(0).values)
+    i2 = Feature(feature_name="sentence", feature_type=FeatureType.STR, values=df_item["sentence"].fillna("").values)
+    i3 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL,
+                 values=df_item[["gl", "browse_root_name", "category_code"]].fillna("__NULL__").values)
+    i4 = Feature(feature_name="browse_node_l2", feature_type=FeatureType.MULTI_CATEGORICAL,
+                 values=df_item.browse_node_l2.values)
+    i5 = Feature(feature_name="subcategory_code", feature_type=FeatureType.MULTI_CATEGORICAL,
+                 values=df_item.subcategory_code.values)
+    item_data = FeatureSet([i1, i2, i3, i4, i5])
+
+    u1 = Feature(feature_name="user_numeric", feature_type=FeatureType.NUMERIC,
+                 values=df_user[["min_item_price", "avg_item_price", "num_asins"]].fillna(0).values)
+    u2 = Feature(feature_name="sentence", feature_type=FeatureType.STR, values=df_user["sentence"].fillna("").values)
+    u3 = Feature(feature_name="browse_node_l2", feature_type=FeatureType.MULTI_CATEGORICAL,
+                 values=df_user.browse_node_l2.values)
+    u4 = Feature(feature_name="subcategory_code", feature_type=FeatureType.MULTI_CATEGORICAL,
+                 values=df_user.subcategory_code.values)
+
+    user_data = FeatureSet([u1, u2, u3, u4])
+    embedding_mapper = {}
+    embedding_mapper['item_numeric'] = NumericEmbedding(2, log=False, n_iters=20)
+    embedding_mapper['user_numeric'] = NumericEmbedding(2, log=False, n_iters=20)
+    embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=4, n_iters=20)
+    embedding_mapper['browse_node_l2'] = MultiCategoricalEmbedding(n_dims=4, n_iters=20)
+    embedding_mapper['subcategory_code'] = MultiCategoricalEmbedding(n_dims=4, n_iters=20)
+    embedding_mapper['sentence'] = FasttextEmbedding(n_dims=24, fasttext_file="fasttext_new.bin")
+
+    return embedding_mapper, user_data, item_data
+
 def read_data():
     df_item = pd.read_csv("small_items.csv")
     df_item["item"] = df_item["item"].astype(str)
@@ -129,40 +160,6 @@ svdpp_hybrid = False
 gcn_hybrid = True
 surprise = True
 content_only = False
-
-
-def prepare_data_mappers():
-    i1 = Feature(feature_name="item_numeric", feature_type=FeatureType.NUMERIC,
-                 values=df_item[["price", "customer_average_review_rating", "customer_review_count"]].fillna(0).values)
-    i2 = Feature(feature_name="sentence", feature_type=FeatureType.STR, values=df_item["sentence"].fillna("").values)
-    i3 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL,
-                 values=df_item[["gl", "browse_root_name", "category_code"]].fillna("__NULL__").values)
-    i4 = Feature(feature_name="browse_node_l2", feature_type=FeatureType.MULTI_CATEGORICAL,
-                 values=df_item.browse_node_l2.values)
-    i5 = Feature(feature_name="subcategory_code", feature_type=FeatureType.MULTI_CATEGORICAL,
-                 values=df_item.subcategory_code.values)
-    item_data = FeatureSet([i1, i2, i3, i4, i5])
-
-    u1 = Feature(feature_name="user_numeric", feature_type=FeatureType.NUMERIC,
-                 values=df_user[["min_item_price", "avg_item_price", "num_asins"]].fillna(0).values)
-    u2 = Feature(feature_name="sentence", feature_type=FeatureType.STR, values=df_user["sentence"].fillna("").values)
-    u3 = Feature(feature_name="browse_node_l2", feature_type=FeatureType.MULTI_CATEGORICAL,
-                 values=df_user.browse_node_l2.values)
-    u4 = Feature(feature_name="subcategory_code", feature_type=FeatureType.MULTI_CATEGORICAL,
-                 values=df_user.subcategory_code.values)
-
-    user_data = FeatureSet([u1, u2, u3, u4])
-
-    embedding_mapper = {}
-
-    embedding_mapper['item_numeric'] = NumericEmbedding(2, log=False, n_iters=20)
-    embedding_mapper['user_numeric'] = NumericEmbedding(2, log=False, n_iters=20)
-    embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=4, n_iters=20)
-    embedding_mapper['browse_node_l2'] = MultiCategoricalEmbedding(n_dims=4, n_iters=20)
-    embedding_mapper['subcategory_code'] = MultiCategoricalEmbedding(n_dims=4, n_iters=20)
-    embedding_mapper['sentence'] = FasttextEmbedding(n_dims=24, fasttext_file="fasttext_new.bin")
-
-    return embedding_mapper, user_data, item_data
 
 
 if not enable_kfold:
