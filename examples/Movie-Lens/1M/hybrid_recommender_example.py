@@ -33,7 +33,7 @@ def prepare_data_mappers():
     embedding_mapper = {}
     embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=4)
 
-    embedding_mapper['text'] = FasttextEmbedding(n_dims=24)
+    embedding_mapper['text'] = FasttextEmbedding(n_dims=32)
     embedding_mapper['numeric'] = NumericEmbedding(4)
     embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
 
@@ -88,12 +88,9 @@ enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
 cores = 40
-min_positive_rating = 0.0
-ignore_below_rating = 0.0
 
 if test_data_subset:
-    df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings,
-                                                 cores, min_positive_rating, ignore_below_rating)
+    df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings, cores)
 
 ratings = ratings[["user", "item", "rating"]]
 user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
@@ -113,28 +110,28 @@ hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
 hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
                              knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                              collaborative_params=dict(
-                                 prediction_network_params=dict(lr=0.02, epochs=50, batch_size=128,
+                                 prediction_network_params=dict(lr=0.01, epochs=10, batch_size=128,
                                                                 network_width=96, padding_length=50,
                                                                 network_depth=4, verbose=verbose,
                                                                 kernel_l2=0.002,
                                                                 bias_regularizer=0.01, dropout=0.05,
                                                                 use_resnet=True, use_content=True),
-                                 user_item_params=dict(lr=0.5, epochs=40, batch_size=64,
+                                 user_item_params=dict(lr=0.5, epochs=15, batch_size=64,
                                                        verbose=verbose, margin=1.0)))
 
 hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.01, epochs=20, batch_size=512,
-                                                              network_width=96, padding_length=50,
+                               prediction_network_params=dict(lr=0.01, epochs=10, batch_size=256,
+                                                              network_width=128, padding_length=50,
                                                               network_depth=3, verbose=verbose,
                                                               kernel_l2=0.002,
                                                               bias_regularizer=0.01, dropout=0.0, use_content=False),
-                               user_item_params=dict(lr=0.1, epochs=10, batch_size=64,
-                                                     gcn_lr=0.005, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0,
+                               user_item_params=dict(lr=0.1, epochs=20, batch_size=64,
+                                                     gcn_lr=0.001, gcn_epochs=15, gcn_layers=3, gcn_dropout=0.0,
                                                      gcn_hidden_dims=96,
                                                      gcn_batch_size=int(
-                                                         2 ** np.floor(np.log2(len(user_item_affinities) / 20))),
+                                                         2 ** np.floor(np.log2(len(user_item_affinities) / 10))),
                                                      verbose=verbose, margin=1.0)))
 
 hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10}, "algos": ["svdpp"]}
@@ -153,8 +150,6 @@ if not enable_kfold:
     recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities, user_list, item_list,
                                                          hyperparamters_dict,
                                                          prepare_data_mappers, rating_scale,
-                                                         min_positive_rating=min_positive_rating,
-                                                         ignore_below_rating=ignore_below_rating,
                                                          svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
                                                          surprise=surprise, content_only=content_only,
                                                          enable_error_analysis=enable_error_analysis)
@@ -193,8 +188,6 @@ else:
         #
         recs, res, ucrms = test_once(train_affinities, validation_affinities, user_list, item_list,
                                      hyperparamters_dict, prepare_data_mappers, rating_scale,
-                                     min_positive_rating=min_positive_rating,
-                                     ignore_below_rating=ignore_below_rating,
                                      svdpp_hybrid=True,
                                      gcn_hybrid=True, surprise=True, content_only=True,
                                      enable_error_analysis=False)

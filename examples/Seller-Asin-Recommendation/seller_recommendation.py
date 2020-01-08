@@ -102,13 +102,11 @@ enable_kfold = False
 enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
-cores = 20
-min_positive_rating = 0.0
-ignore_below_rating = 0.0
+cores = 10
 
 if test_data_subset:
     df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings,
-                                                 cores, min_positive_rating, ignore_below_rating)
+                                                 cores)
 
 ratings = ratings[["user", "item", "rating"]]
 user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
@@ -140,26 +138,26 @@ hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
 hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.01, epochs=20, batch_size=512,
-                                                              network_width=96, padding_length=50,
+                               prediction_network_params=dict(lr=0.005, epochs=20, batch_size=1024,
+                                                              network_width=128, padding_length=50,
                                                               network_depth=3, verbose=verbose,
                                                               kernel_l2=0.002,
                                                               bias_regularizer=0.01, dropout=0.0, use_content=False),
-                               user_item_params=dict(lr=0.1, epochs=10, batch_size=64,
-                                                     gcn_lr=0.005, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0,
+                               user_item_params=dict(lr=0.1, epochs=2, batch_size=64,
+                                                     gcn_lr=0.01, gcn_epochs=2, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_hidden_dims=96,
                                                      gcn_batch_size=int(
                                                          2 ** np.floor(np.log2(len(user_item_affinities) / 20))),
                                                      verbose=verbose, margin=1.0)))
 
-hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10}, "algos": ["svdpp"]}
+hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 20}, "algos": ["svdpp"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperparameter_content,
                            svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
 
 svdpp_hybrid = False
 gcn_hybrid = True
-surprise = True
+surprise = False
 content_only = False
 
 
@@ -168,8 +166,6 @@ if not enable_kfold:
     recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities, user_list, item_list,
                                                          hyperparamters_dict,
                                                          prepare_data_mappers, rating_scale,
-                                                         min_positive_rating=min_positive_rating,
-                                                         ignore_below_rating=ignore_below_rating,
                                                          svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
                                                          surprise=surprise, content_only=content_only,
                                                          enable_error_analysis=enable_error_analysis)
@@ -208,8 +204,6 @@ else:
         #
         recs, res, ucrms = test_once(train_affinities, validation_affinities, user_list, item_list,
                                      hyperparamters_dict, prepare_data_mappers, rating_scale,
-                                     min_positive_rating=min_positive_rating,
-                                     ignore_below_rating=ignore_below_rating,
                                      svdpp_hybrid=True,
                                      gcn_hybrid=True, surprise=True, content_only=True,
                                      enable_error_analysis=False)
