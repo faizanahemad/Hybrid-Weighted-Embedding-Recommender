@@ -52,7 +52,7 @@ def model_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, floa
     return predictions
 
 
-def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list, min_positive_rating=None):
+def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):
     validation_users = list(set([u for u, i, r in validation_affinities]))
     train_uid = defaultdict(set)
     items_extracted_length = []
@@ -75,9 +75,7 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         validation_actuals[u].append((i, r))
 
     for u, i in validation_actuals.items():
-        br = (mean + bu[u]) if min_positive_rating is None else min_positive_rating
-        remaining_items = list(
-            sorted(filter(lambda x: x[1] >= br, i), key=operator.itemgetter(1), reverse=True))
+        remaining_items = list(sorted(i, key=operator.itemgetter(1), reverse=True))
         remaining_items = list(filter(lambda x: x[0] not in train_uid[u], remaining_items))
         remaining_items = [i for i, r in remaining_items]
         items_extracted_length.append(len(remaining_items))
@@ -89,17 +87,16 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
             "actuals": validation_actuals, "predictions": predictions}
 
 
-def test_surprise(train, test, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5),
-                  ignore_below_rating=None, min_positive_rating=None):
+def test_surprise(train, test, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5)):
     train_affinities = train
     validation_affinities = test
     items = list(set([i for u, i, r in train]))
     train = pd.DataFrame(train)
-    test = pd.DataFrame([(u, i, r) for u, i, r in test if r >= ignore_below_rating])
+    test = pd.DataFrame(test)
     reader = Reader(rating_scale=rating_scale)
     trainset = Dataset.load_from_df(train, reader).build_full_trainset()
     testset = Dataset.load_from_df(test, reader).build_full_trainset().build_testset()
-    trainset_for_testing = Dataset.load_from_df(pd.DataFrame([(u, i, r) for u, i, r in train_affinities if r >= ignore_below_rating]), reader).build_full_trainset().build_testset()
+    trainset_for_testing = Dataset.load_from_df(pd.DataFrame(train_affinities), reader).build_full_trainset().build_testset()
 
     def use_algo(algo, name):
         start = time.time()
@@ -109,18 +106,15 @@ def test_surprise(train, test, algo=["baseline", "svd", "svdpp"], algo_params={}
         total_time = end - start
         rmse = accuracy.rmse(predictions, verbose=False)
         mae = accuracy.mae(predictions, verbose=False)
-        if ignore_below_rating is not None:
-            train_aff = [(u, i, r) for u, i, r in train_affinities if r >= ignore_below_rating]
-            validation_aff = [(u, i, r) for u, i, r in validation_affinities if r >= ignore_below_rating]
 
-        ex_ee = extraction_efficiency(algo, train_aff, validation_aff, surprise_get_topk, items, min_positive_rating=min_positive_rating)
+        ex_ee = extraction_efficiency(algo, train_affinities, validation_affinities, surprise_get_topk, items)
 
         train_predictions = algo.test(trainset_for_testing)
         train_rmse = accuracy.rmse(train_predictions, verbose=False)
         train_mae = accuracy.mae(train_predictions, verbose=False)
         train_predictions = [p.est for p in train_predictions]
         predictions = [p.est for p in predictions]
-        user_rating_count_metrics = metrics_by_num_interactions_user(train_aff, validation_aff,
+        user_rating_count_metrics = metrics_by_num_interactions_user(train_affinities, validation_affinities,
                                                                      train_predictions, predictions,
                                                                      ex_ee["actuals"], ex_ee["predictions"])
         user_rating_count_metrics["algo"] = name
@@ -142,8 +136,7 @@ def test_surprise(train, test, algo=["baseline", "svd", "svdpp"], algo_params={}
 
 
 def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
-                      get_data_mappers, rating_scale,
-                min_positive_rating, ignore_below_rating, algo,
+                      get_data_mappers, rating_scale, algo,
                       enable_error_analysis=False):
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
@@ -178,9 +171,7 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
     res2 = {"algo": "Fast-%s" % algo, "time": total_time}
     predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities,
                                                                                     validation_affinities,
-                                                                                    model_get_topk, items,
-                                                                                    min_positive_rating=min_positive_rating,
-                                                                                    ignore_below_rating=ignore_below_rating)
+                                                                                    model_get_topk, items)
     res2.update(stats)
     user_rating_count_metrics["algo"] = res2["algo"]
 
@@ -190,9 +181,7 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
     res4 = {"algo": "Super-Fast-%s" % algo, "time": total_time}
     predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities,
                                                                                     validation_affinities,
-                                                                                    model_get_topk, items,
-                                                                                    min_positive_rating=min_positive_rating,
-                                                                                    ignore_below_rating=ignore_below_rating)
+                                                                                    model_get_topk, items)
     res4.update(stats)
     urcm["algo"] = res4["algo"]
     user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
@@ -202,8 +191,7 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
     recsys.super_fast_inference = False
     res = {"algo": algo, "time": total_time}
     predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                                               model_get_topk, items, min_positive_rating=min_positive_rating,
-                                                               ignore_below_rating=ignore_below_rating)
+                                                               model_get_topk, items)
     res.update(stats)
     urcm["algo"] = res["algo"]
     user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
@@ -216,8 +204,7 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
 
 
 def test_content_only(train_affinities, validation_affinities, users, items, hyperparameters,
-                      get_data_mappers, rating_scale, min_positive_rating, ignore_below_rating,
-                      enable_error_analysis=False):
+                      get_data_mappers, rating_scale, enable_error_analysis=False):
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
     recsys = ContentRecommendation(embedding_mapper=embedding_mapper,
@@ -233,9 +220,7 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
     res = {"algo": "Content-Only", "time": total_time}
     predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities,
                                                                                     validation_affinities,
-                                                                                    model_get_topk, items,
-                                                                                    min_positive_rating=min_positive_rating,
-                                                                                    ignore_below_rating=ignore_below_rating)
+                                                                                    model_get_topk, items)
     res.update(stats)
     user_rating_count_metrics["algo"] = res["algo"]
 
@@ -247,7 +232,7 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
 
 
 def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
-              get_data_mappers, rating_scale, min_positive_rating, ignore_below_rating,
+              get_data_mappers, rating_scale,
               svdpp_hybrid=True, gcn_hybrid=True, surprise=True, content_only=True, enable_error_analysis=False):
     results = []
     recs = []
@@ -259,9 +244,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
                                                                                       algo=hyperparameters_surprise[
                                                                                           "algos"],
                                                                                       algo_params=hyperparameters_surprise,
-                                                                                      rating_scale=rating_scale,
-                                                                                      min_positive_rating=min_positive_rating,
-                                                                                      ignore_below_rating=ignore_below_rating)
+                                                                                      rating_scale=rating_scale,)
         results.extend(surprise_results)
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, surprise_user_rating_count_metrics))
 
@@ -269,7 +252,6 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         hyperparameters = hyperparamters_dict["content_only"]
         content_rec, res, content_user_rating_count_metrics, _, _ = test_content_only(train_affinities, validation_affinities, users,
                                                                                       items, hyperparameters, get_data_mappers, rating_scale,
-                                                                                      min_positive_rating, ignore_below_rating,
                                                                                       enable_error_analysis=enable_error_analysis)
         results.extend(res)
         recs.append(content_rec)
@@ -279,7 +261,6 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         hyperparameters = hyperparamters_dict["svdpp_hybrid"]
         svd_rec, res, svdpp_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                               items, hyperparameters, get_data_mappers, rating_scale,
-                                                                          min_positive_rating, ignore_below_rating,
                                                                           algo="svdpp_hybrid",
                                                                                 enable_error_analysis=enable_error_analysis)
         results.extend(res)
@@ -290,7 +271,6 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         hyperparameters = hyperparamters_dict["gcn_hybrid"]
         gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                           items, hyperparameters, get_data_mappers, rating_scale,
-                                                                            min_positive_rating, ignore_below_rating,
                                                                             algo="gcn_hybrid",
                                                                             enable_error_analysis=enable_error_analysis)
         results.extend(res)
@@ -393,11 +373,7 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.show()
 
 
-def get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items,
-                           ignore_below_rating=None, min_positive_rating=None):
-    if ignore_below_rating is not None:
-        train_affinities = [(u, i, r) for u, i, r in train_affinities if r >= ignore_below_rating]
-        validation_affinities = [(u, i, r) for u, i, r in validation_affinities if r >= ignore_below_rating]
+def get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items):
 
     def get_details(recsys, affinities):
         predictions = np.array(recsys.predict([(u, i) for u, i, r in affinities]))
@@ -409,7 +385,7 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
         return predictions, actuals, rmse, mae
     predictions, actuals, rmse, mae = get_details(recsys, validation_affinities)
     train_predictions, _, train_rmse, train_mae = get_details(recsys, train_affinities)
-    ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items, min_positive_rating=min_positive_rating)
+    ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
     user_rating_count_metrics = metrics_by_num_interactions_user(train_affinities, validation_affinities, train_predictions, predictions,
                                                                  ex_ee["actuals"], ex_ee["predictions"])
     stats = {"rmse": rmse, "mae": mae,
@@ -450,22 +426,16 @@ def error_analysis(train_affinities, validation_affinities, error_df, title):
 
 
 def get_small_subset(df_user, df_item, ratings,
-                     cores, min_positive_rating, ignore_below_rating):
+                     cores):
     users = list(set([u for u, i, r in ratings.values]))
     items = list(set([i for u, i, r in ratings.values]))
     user_id_to_index = bidict(zip(users, list(range(len(users)))))
     item_id_to_index = bidict(zip(items, list(range(len(users), len(users)+len(items)))))
-    G = nx.Graph([(user_id_to_index[u], item_id_to_index[i]) for u, i, r in ratings.values if r >= ignore_below_rating])
+    G = nx.Graph([(user_id_to_index[u], item_id_to_index[i]) for u, i, r in ratings.values])
     k_core_edges = list(nx.k_core(G, k=cores).edges())
     users = set([user_id_to_index.inverse[u] for u, i in k_core_edges if u in user_id_to_index.inverse])
     items = set([item_id_to_index.inverse[i] for u, i in k_core_edges if i in item_id_to_index.inverse])
     df_user = df_user[df_user.user.isin(set(users))]
-    negatives = ratings[(ratings.user.isin(users))]
     ratings = ratings[(ratings.user.isin(users)) & (ratings.item.isin(items))]
-    negatives = negatives[negatives.rating < min_positive_rating]
-    if len(negatives) > 0:
-        negatives = negatives.sort_values(["item"])
-        negatives = negatives.groupby('user', group_keys=False).apply(lambda x: x.head(min(5, len(x))))
-        ratings = pd.concat((negatives, ratings)).sample(frac=1.0)
     df_item = df_item[df_item["item"].isin(set(ratings.item))]
     return df_user, df_item, ratings

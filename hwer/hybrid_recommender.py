@@ -221,100 +221,40 @@ class HybridRecommender(RecommendationBase):
         assert np.sum(np.isnan(item_vectors)) == 0
         return user_vectors, item_vectors
 
-    def __user_item_affinities_triplet_trainer__(self,
-                                         user_ids: List[str], item_ids: List[str],
-                                         user_item_affinities: List[Tuple[str, str, float]],
-                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                         n_output_dims: int,
-                                         hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
-        self.log.debug("Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
-                       len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
+
+
+    def __user_item_affinities_triplet_trainer_data_gen__(self,
+                                                 user_ids: List[str], item_ids: List[str],
+                                                 user_item_affinities: List[Tuple[str, str, float]],
+                                                 user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                                 hyperparams: Dict):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-        random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.5
         random_pair_user_item_proba = hyperparams[
-            "random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.4
-        random_positive_weight = hyperparams[
-            "random_positive_weight"] if "random_positive_weight" in hyperparams else 0.05
-        random_negative_weight = hyperparams[
-            "random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
-        margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
-
-        assert np.sum(np.isnan(user_vectors)) == 0
-        assert np.sum(np.isnan(item_vectors)) == 0
-
-        max_affinity = np.max([r for u, i, r in user_item_affinities])
-        min_affinity = np.min([r for u, i, r in user_item_affinities])
-        user_item_affinities = [(u, i, (2 * (r - min_affinity) / (max_affinity - min_affinity)) - 1) for u, i, r in
-                                user_item_affinities]
-
-        n_input_dims = user_vectors.shape[1]
-        assert user_vectors.shape[1] == item_vectors.shape[1]
+            "random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.2
         total_users = len(user_ids)
         total_items = len(item_ids)
-        aff_range = np.max([r for u1, u2, r in user_item_affinities]) - np.min(
-            [r for u1, u2, r in user_item_affinities])
-        random_positive_weight = random_positive_weight * aff_range
-        random_negative_weight = random_negative_weight * aff_range
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            user_close_dict = defaultdict(list)
-            user_far_dict = defaultdict(list)
-            item_close_dict = defaultdict(list)
-            item_far_dict = defaultdict(list)
-            affinities = [(user_id_to_index[i], item_id_to_index[j], r)for i, j, r in affinities]
-            for i, j, r in affinities:
-                if r > 0:
-                    user_close_dict[i].append((total_users + j, r))
-                    item_close_dict[j].append((i, r))
-                if r <= 0:
-                    user_far_dict[i].append((total_users + j, r))
-                    item_far_dict[j].append((i, r))
-
-            def triplet_wt_fn(x): return 1 + 0.1 * np.log1p(np.abs(x / aff_range))
+            affinities = [(user_id_to_index[i], item_id_to_index[j], r) for i, j, r in affinities]
 
             def get_one_example(i, j, r):
                 user = i
                 second_item = total_users + j
                 random_item = total_users + np.random.randint(0, total_items)
                 random_user = np.random.randint(0, total_users)
-                choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba / 100)
                 choose_user_pair = np.random.rand() < random_pair_user_item_proba
-                if r < 0:
-                    distant_item = second_item
-                    distant_item_weight = r
-
-                    if choose_random_pair or (i not in user_close_dict and j not in item_close_dict):
-                        second_item, close_item_weight = random_user if choose_user_pair else random_item, random_positive_weight
-                    else:
-                        if (choose_user_pair and j in item_close_dict) or i not in user_close_dict:
-                            second_item, close_item_weight = item_close_dict[j][np.random.randint(0, len(item_close_dict[j]))]
-                        else:
-                            second_item, close_item_weight = user_close_dict[i][np.random.randint(0, len(user_close_dict[i]))]
-                else:
-                    close_item_weight = r
-                    if choose_random_pair or (i not in user_far_dict and j not in item_far_dict):
-                        distant_item, distant_item_weight = random_user if choose_user_pair else random_item, random_negative_weight
-                    else:
-                        if (choose_user_pair and j in item_far_dict) or i not in user_far_dict:
-                            distant_item, distant_item_weight = item_far_dict[j][np.random.randint(0, len(item_far_dict[j]))]
-                        else:
-                            distant_item, distant_item_weight = user_far_dict[i][np.random.randint(0, len(user_far_dict[i]))]
-
-                close_item_weight = triplet_wt_fn(close_item_weight)
-                distant_item_weight = triplet_wt_fn(distant_item_weight)
+                close_item_weight = 1
+                distant_item, distant_item_weight = random_user if choose_user_pair else random_item, 1
                 return (user, second_item, distant_item, close_item_weight, distant_item_weight), 0
 
             def generator():
-                for i in range(0, len(affinities), batch_size*10):
+                for i in range(0, len(affinities), batch_size * 10):
                     start = i
-                    end = min(i + batch_size*10, len(affinities))
+                    end = min(i + batch_size * 10, len(affinities))
                     generated = [get_one_example(u, v, w) for u, v, w in affinities[start:end]]
                     for g in generated:
                         yield g
+
             return generator
 
         output_shapes = (((), (), (), (), ()), ())
@@ -323,7 +263,36 @@ class HybridRecommender(RecommendationBase):
         train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
 
-        train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
+        return train
+
+    def __user_item_affinities_triplet_trainer__(self,
+                                         user_ids: List[str], item_ids: List[str],
+                                         user_item_affinities: List[Tuple[str, str, float]],
+                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                         n_output_dims: int,
+                                         hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
+
+        self.log.debug("Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+                       len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
+        margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
+
+        assert np.sum(np.isnan(user_vectors)) == 0
+        assert np.sum(np.isnan(item_vectors)) == 0
+
+        n_input_dims = user_vectors.shape[1]
+        assert user_vectors.shape[1] == item_vectors.shape[1]
+        train = self.__user_item_affinities_triplet_trainer_data_gen__(user_ids, item_ids,
+                                                 user_item_affinities,
+                                                 user_id_to_index, item_id_to_index,
+                                                 hyperparams)
+        train = train.shuffle(batch_size * 10).batch(batch_size).prefetch(32)
+
+        total_users = len(user_ids)
 
         def build_base_network(embedding_size, n_output_dims, vectors):
             i1 = keras.Input(shape=(1,))
@@ -355,11 +324,11 @@ class HybridRecommender(RecommendationBase):
 
         i1_i2_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
         i1_i2_dist = 1 - i1_i2_dist
-        i1_i2_dist = close_weight * i1_i2_dist
+        i1_i2_dist = i1_i2_dist
 
         i1_i3_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_3])
         i1_i3_dist = 1 - i1_i3_dist
-        i1_i3_dist = i1_i3_dist / K.abs(far_weight)
+        i1_i3_dist = i1_i3_dist
 
         loss = K.relu(i1_i2_dist - i1_i3_dist + margin)
         model = keras.Model(inputs=[input_1, input_2, input_3, close_weight, far_weight],
@@ -440,7 +409,7 @@ class HybridRecommender(RecommendationBase):
             super(type(self.cb), self.cb).fit(user_ids, item_ids, user_item_affinities, **kwargs)
             user_vectors, item_vectors = self.cb.__build_content_embeddings__(user_ids, item_ids,
                                                                               user_data, item_data,
-                                                                              user_normalized_affinities,
+                                                                              user_item_affinities,
                                                                               self.n_content_dims)
         else:
             user_vectors, item_vectors = np.random.rand(len(user_ids), self.n_content_dims), np.random.rand(len(item_ids), self.n_content_dims)
@@ -450,7 +419,7 @@ class HybridRecommender(RecommendationBase):
         user_content_vectors, item_content_vectors = user_vectors.copy(), item_vectors.copy()
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1] == self.n_content_dims
 
-        user_vectors, item_vectors = self.__build_collaborative_embeddings__(user_normalized_affinities,
+        user_vectors, item_vectors = self.__build_collaborative_embeddings__(user_item_affinities,
                                                                              item_item_affinities,
                                                                              user_user_affinities, user_ids, item_ids,
                                                                              user_vectors, item_vectors,

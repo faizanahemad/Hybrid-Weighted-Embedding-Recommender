@@ -66,11 +66,13 @@ class GCNLayer(layers.Layer):
         self.activation = activation
 
     def call(self, h):
+        h = tf.math.l2_normalize(h, axis=1)
         if self.dropout:
             h = self.dropout(h)
         self.g.ndata['h'] = tf.matmul(h, self.weight)
+        self.g.ndata['norm_h'] = self.g.ndata['h'] * self.g.ndata['norm']
         self.g.update_all(self.gcn_msg, self.gcn_reduce)
-        h = self.g.ndata['h']
+        h = self.g.ndata['h'] * self.g.ndata['norm']
         if self.bias is not None:
             h = h + self.bias
         if self.activation:
@@ -139,8 +141,12 @@ class HybridGCNRec(SVDppHybrid):
         g.ndata['norm'] = tf.expand_dims(norm, -1)
         g.ndata['degree'] = tf.math.tanh(tf.math.log1p(tf.math.log1p(tf.math.log1p(degs/100.0))))
         edge_weights_mean = float(np.mean(edge_weights))
-        g.edata['weight'] = tf.expand_dims(
-            np.array(edge_weights + edge_weights + list(np.full(total_users + total_items, edge_weights_mean))).astype(np.float32), -1)
+        edge_weights = np.array(edge_weights + edge_weights + list(np.full(total_users + total_items, edge_weights_mean))).astype(
+            np.float32)
+        ew_min = np.min(edge_weights)
+        ew_max = np.max(edge_weights)
+        edge_weights = (edge_weights - ew_min)/(ew_max - ew_min)
+        g.edata['weight'] = tf.expand_dims(edge_weights, -1)
 
         def gcn_msg(edge):
             msg = edge.src['h'] * edge.src['norm']
@@ -149,7 +155,6 @@ class HybridGCNRec(SVDppHybrid):
 
         def gcn_reduce(node):
             accum = tf.reduce_sum(node.mailbox['m'], 1) * node.data['norm']
-            accum = tf.math.l2_normalize(accum, axis=-1)
             return {'h': accum}
 
         return g, gcn_msg, gcn_reduce
@@ -174,163 +179,32 @@ class HybridGCNRec(SVDppHybrid):
         gcn_hidden_dims = hyperparams["gcn_hidden_dims"] if "gcn_hidden_dims" in hyperparams else self.n_collaborative_dims * 4
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-        random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.5
-        random_pair_user_item_proba = hyperparams[
-            "random_pair_user_item_proba"] if "random_pair_user_item_proba" in hyperparams else 0.4
-        random_positive_weight = hyperparams[
-            "random_positive_weight"] if "random_positive_weight" in hyperparams else 0.05
-        random_negative_weight = hyperparams[
-            "random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
 
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
 
-        max_affinity = np.max([r for u, i, r in user_item_affinities])
-        min_affinity = np.min([r for u, i, r in user_item_affinities])
-        user_item_affinities = [(u, i, (2 * (r - min_affinity) / (max_affinity - min_affinity)) - 1) for u, i, r in
-                                user_item_affinities]
-
-        n_input_dims = user_vectors.shape[1]
-        assert user_vectors.shape[1] == item_vectors.shape[1]
+        user_triplet_vectors, item_triplet_vectors = super().__user_item_affinities_triplet_trainer__(user_ids, item_ids, user_item_affinities,
+                              user_vectors, item_vectors,
+                              user_id_to_index,
+                              item_id_to_index,
+                              n_output_dims,
+                              hyperparams)
         total_users = len(user_ids)
         total_items = len(item_ids)
-        aff_range = np.max([r for u1, u2, r in user_item_affinities]) - np.min(
-            [r for u1, u2, r in user_item_affinities])
-        random_positive_weight = random_positive_weight * aff_range
-        random_negative_weight = random_negative_weight * aff_range
 
-        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            user_close_dict = defaultdict(list)
-            user_far_dict = defaultdict(list)
-            item_close_dict = defaultdict(list)
-            item_far_dict = defaultdict(list)
-            affinities = [(user_id_to_index[i], item_id_to_index[j], r) for i, j, r in affinities]
-            for i, j, r in affinities:
-                if r > 0:
-                    user_close_dict[i].append((total_users + j, r))
-                    item_close_dict[j].append((i, r))
-                if r <= 0:
-                    user_far_dict[i].append((total_users + j, r))
-                    item_far_dict[j].append((i, r))
-
-            def triplet_wt_fn(x):
-                return 1 + 0.1 * np.log1p(np.abs(x / aff_range))
-
-            def get_one_example(i, j, r):
-                user = i
-                second_item = total_users + j
-                random_item = total_users + np.random.randint(0, total_items)
-                random_user = np.random.randint(0, total_users)
-                choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba / 100)
-                choose_user_pair = np.random.rand() < random_pair_user_item_proba
-                if r < 0:
-                    distant_item = second_item
-                    distant_item_weight = r
-
-                    if choose_random_pair or (i not in user_close_dict and j not in item_close_dict):
-                        second_item, close_item_weight = random_user if choose_user_pair else random_item, random_positive_weight
-                    else:
-                        if (choose_user_pair and j in item_close_dict) or i not in user_close_dict:
-                            second_item, close_item_weight = item_close_dict[j][
-                                np.random.randint(0, len(item_close_dict[j]))]
-                        else:
-                            second_item, close_item_weight = user_close_dict[i][
-                                np.random.randint(0, len(user_close_dict[i]))]
-                else:
-                    close_item_weight = r
-                    if choose_random_pair or (i not in user_far_dict and j not in item_far_dict):
-                        distant_item, distant_item_weight = random_user if choose_user_pair else random_item, random_negative_weight
-                    else:
-                        if (choose_user_pair and j in item_far_dict) or i not in user_far_dict:
-                            distant_item, distant_item_weight = item_far_dict[j][
-                                np.random.randint(0, len(item_far_dict[j]))]
-                        else:
-                            distant_item, distant_item_weight = user_far_dict[i][
-                                np.random.randint(0, len(user_far_dict[i]))]
-
-                close_item_weight = triplet_wt_fn(close_item_weight)
-                distant_item_weight = triplet_wt_fn(distant_item_weight)
-                return (user, second_item, distant_item, close_item_weight, distant_item_weight), 0
-
-            def generator():
-                for i in range(0, len(affinities), batch_size * 10):
-                    start = i
-                    end = min(i + batch_size * 10, len(affinities))
-                    generated = [get_one_example(u, v, w) for u, v, w in affinities[start:end]]
-                    for g in generated:
-                        yield g
-
-            return generator
-
-        output_shapes = (((), (), (), (), ()), ())
-        output_types = ((tf.int64, tf.int64, tf.int64, tf.float32, tf.float32), tf.float32)
-
-        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
-                                               output_types=output_types, output_shapes=output_shapes, )
-
-        train = train.shuffle(batch_size * 10).batch(batch_size).prefetch(32)
-
-        def build_base_network(embedding_size, n_output_dims, vectors):
-            i1 = keras.Input(shape=(1,))
-
-            embeddings_initializer = tf.keras.initializers.Constant(vectors)
-            embeddings = keras.layers.Embedding(len(user_ids) + len(item_ids), embedding_size, input_length=1,
-                                                embeddings_initializer=embeddings_initializer)
-            item = embeddings(i1)
-            item = tf.keras.layers.Flatten()(item)
-            dense = keras.layers.Dense(n_output_dims, activation="tanh", use_bias=False,
-                                       kernel_initializer="glorot_uniform")
-            item = dense(item)
-            item = UnitLengthRegularization(l1=0.1)(item)
-            # item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
-            item = K.l2_normalize(item, axis=-1)
-            base_network = keras.Model(inputs=i1, outputs=item)
-            return base_network
-
-        bn = build_base_network(n_input_dims, n_output_dims, np.concatenate((user_vectors, item_vectors)))
-        input_1 = keras.Input(shape=(1,))
-        input_2 = keras.Input(shape=(1,))
-        input_3 = keras.Input(shape=(1,))
-
-        close_weight = keras.Input(shape=(1,))
-        far_weight = keras.Input(shape=(1,))
-
-        item_1 = bn(input_1)
-        item_2 = bn(input_2)
-        item_3 = bn(input_3)
-
-        i1_i2_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
-        i1_i2_dist = 1 - i1_i2_dist
-        i1_i2_dist = close_weight * i1_i2_dist
-
-        i1_i3_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_3])
-        i1_i3_dist = 1 - i1_i3_dist
-        i1_i3_dist = i1_i3_dist / K.abs(far_weight)
-
-        loss = K.relu(i1_i2_dist - i1_i3_dist + margin)
-        model = keras.Model(inputs=[input_1, input_2, input_3, close_weight, far_weight],
-                            outputs=[loss])
-
-        encoder = bn
-        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
-        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
-        model.compile(optimizer=sgd,
-                      loss=['mean_squared_error'], metrics=["mean_squared_error"])
-
-        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
-
-        user_triplet_vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([user_id_to_index[i] for i in user_ids]).batch(batch_size).prefetch(16))
-        item_triplet_vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([total_users + item_id_to_index[i] for i in item_ids]).batch(
-                batch_size).prefetch(16))
-        user_vectors = np.concatenate((user_vectors, user_triplet_vectors), axis=1)
-        item_vectors = np.concatenate((item_vectors, item_triplet_vectors), axis=1)
+        # user_vectors = np.concatenate((user_vectors, user_triplet_vectors), axis=1)
+        # item_vectors = np.concatenate((item_vectors, item_triplet_vectors), axis=1)
+        user_vectors = user_triplet_vectors
+        item_vectors = item_triplet_vectors
 
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i]) for u, i, r in user_item_affinities]
         ratings = [r for u, i, r in user_item_affinities]
         g, gcn_msg, gcn_reduce = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items,)
+
+        gcn_msg = fn.copy_src('norm_h', 'm')
+        gcn_reduce = fn.sum('m', 'h')
+
         features = unit_length(np.concatenate((user_vectors, item_vectors)), axis=1)
         # embedding = tf.Variable(initial_value=features, dtype=tf.float32, trainable=True)
         model = GCN(g,
@@ -346,8 +220,10 @@ class HybridGCNRec(SVDppHybrid):
         # optimizer = tf.keras.optimizers.Adam(learning_rate=gcn_lr, decay=5e-4)
         optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
         loss = tf.keras.losses.MeanSquaredError()
-        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
-                                               output_types=output_types, output_shapes=output_shapes, )
+        train = self.__user_item_affinities_triplet_trainer_data_gen__(user_ids, item_ids,
+                                                                       user_item_affinities,
+                                                                       user_id_to_index, item_id_to_index,
+                                                                       hyperparams)
         train = train.shuffle(gcn_batch_size * 10).batch(gcn_batch_size).prefetch(8)
         for epoch in range(gcn_epochs):
             start = time.time()
@@ -449,12 +325,30 @@ class HybridGCNRec(SVDppHybrid):
         edge_list = [(user_id_to_index[u]+1, total_users + item_id_to_index[i]+1) for u, i, r in user_item_affinities]
         ratings = [r for u, i, r in user_item_affinities]
         g, gcn_msg, gcn_reduce = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items)
-        user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
-        item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
+        # gcn_msg = fn.src_mul_edge('norm_h', "weight", 'm')
+        gcn_msg = fn.copy_src('norm_h', 'm')
+        gcn_reduce = fn.sum('m', 'h')
+
+        # user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
+        # item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
 
         features = np.concatenate((user_vectors, item_vectors))
+        features = unit_length(features, axis=1)
+        features[np.isnan(features)] = 0.0
+        features[np.isinf(features)] = 0.0
         user_bias = tf.Variable(initial_value=user_bias, dtype=tf.float32, trainable=True)
         item_bias = tf.Variable(initial_value=item_bias, dtype=tf.float32, trainable=True)
+        w_init = tf.initializers.TruncatedNormal(stddev=0.01,)
+        # features = tf.Variable(initial_value=features, dtype=tf.float32, trainable=True)
+        user_item_dot_scaler = tf.Variable(initial_value=w_init(shape=(self.n_collaborative_dims, self.n_collaborative_dims),
+                                                       dtype='float32'), dtype=tf.float32, trainable=True)
+        item_items_dot_scaler = tf.Variable(
+            initial_value=w_init(shape=(self.n_collaborative_dims, self.n_collaborative_dims),
+                                 dtype='float32'), dtype=tf.float32, trainable=True)
+        user_users_dot_scaler = tf.Variable(
+            initial_value=w_init(shape=(self.n_collaborative_dims, self.n_collaborative_dims),
+                                 dtype='float32'), dtype=tf.float32, trainable=True)
+
         model = GCN(g,
                     gcn_msg,
                     gcn_reduce,
@@ -488,10 +382,10 @@ class HybridGCNRec(SVDppHybrid):
                     users_vecs = tf.multiply(users_vecs, ni_input)
                     items_vecs = tf.multiply(items_vecs, nu_input)
 
-                    user_item_vec_dot = tf.reduce_sum(tf.multiply(user_vec, item_vec), axis=1)
-                    item_items_vec_dot = tf.reduce_sum(tf.multiply(item_vec, items_vecs), axis=1)
-                    user_user_vec_dot = tf.reduce_sum(tf.multiply(user_vec, users_vecs), axis=1)
-                    implicit_term = user_item_vec_dot + item_items_vec_dot + user_user_vec_dot
+                    user_item_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(user_vec, user_item_dot_scaler), item_vec), axis=1)
+                    item_items_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(item_vec, item_items_dot_scaler), items_vecs), axis=1)
+                    user_users_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(user_vec, user_users_dot_scaler), users_vecs), axis=1)
+                    implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
                     bu = tf.gather(user_bias, user_input)
                     bi = tf.gather(item_bias, x[1])
                     base_estimates = mu + bu + bi
@@ -499,8 +393,8 @@ class HybridGCNRec(SVDppHybrid):
                     y = tf.dtypes.cast(y, tf.float32)
                     loss_value = loss(y, rating)
                     total_loss = total_loss + loss_value
-                grads = tape.gradient(loss_value, model.trainable_weights)
-                optimizer.apply_gradients(zip(grads, model.trainable_weights))
+                grads = tape.gradient(loss_value, list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler, user_users_dot_scaler])
+                optimizer.apply_gradients(zip(grads, list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler, user_users_dot_scaler]))
                 del tape
 
             total_time = time.time() - start
@@ -510,7 +404,8 @@ class HybridGCNRec(SVDppHybrid):
         #
         prediction_artifacts = {"vectors": model(features), "user_item_list": user_item_list,
                                 "item_user_list": item_user_list, "mu": mu, "user_bias": user_bias.numpy(), "item_bias": item_bias.numpy(),
-                                "total_users": total_users,
+                                "total_users": total_users, "user_item_dot_scaler": user_item_dot_scaler.numpy(),
+                                "user_users_dot_scaler": user_users_dot_scaler.numpy(), "item_items_dot_scaler": item_items_dot_scaler.numpy(),
                                 "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
                                 "ratings_count_by_item": ratings_count_by_item,
                                 "batch_size": batch_size, "gen_fn": gen_fn}
@@ -524,6 +419,9 @@ class HybridGCNRec(SVDppHybrid):
         user_bias = self.prediction_artifacts["user_bias"]
         item_bias = self.prediction_artifacts["item_bias"]
         total_users = self.prediction_artifacts["total_users"]
+        user_item_dot_scaler = self.prediction_artifacts["user_item_dot_scaler"]
+        user_users_dot_scaler = self.prediction_artifacts["user_users_dot_scaler"]
+        item_items_dot_scaler = self.prediction_artifacts["item_items_dot_scaler"]
 
 
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
@@ -575,10 +473,10 @@ class HybridGCNRec(SVDppHybrid):
             users_vecs = np.multiply(users_vecs, ni_input)
             items_vecs = np.multiply(items_vecs, nu_input)
 
-            user_item_vec_dot = np.sum(np.multiply(user_vec, item_vec), axis=1)
-            item_items_vec_dot = np.sum(np.multiply(item_vec, items_vecs), axis=1)
-            user_user_vec_dot = np.sum(np.multiply(user_vec, users_vecs), axis=1)
-            implicit_term = user_item_vec_dot + item_items_vec_dot + user_user_vec_dot
+            user_item_vec_dot = np.sum(np.multiply(np.matmul(user_vec, user_item_dot_scaler), item_vec), axis=1)
+            item_items_vec_dot = np.sum(np.multiply(np.matmul(item_vec, item_items_dot_scaler), items_vecs), axis=1)
+            user_users_vec_dot = np.sum(np.multiply(np.matmul(user_vec, user_users_dot_scaler), users_vecs), axis=1)
+            implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
             bu = np.take(user_bias, user_input, axis=0)
             bi = np.take(item_bias, x[:, 1].astype(int), axis=0)
             rating = mu + bu + bi + implicit_term
