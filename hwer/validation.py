@@ -54,6 +54,7 @@ def model_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, floa
 
 def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):
     validation_users = list(set([u for u, i, r in validation_affinities]))
+    train_users = list(set([u for u, i, r in train_affinities]))
     train_uid = defaultdict(set)
     items_extracted_length = []
     s = time.time()
@@ -62,11 +63,28 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
     pred_time = e - s
     for u, i, r in train_affinities:
         train_uid[u].add(i)
-    mean, bu, bi, _, _ = normalize_affinity_scores_by_user(train_affinities)
+
+    train_actuals = defaultdict(list)
+    for u, i, r in train_affinities:
+        train_actuals[u].append((i, r))
+
+    for u, i in train_actuals.items():
+        remaining_items = list(sorted(i, key=operator.itemgetter(1), reverse=True))
+        remaining_items = [i for i, r in remaining_items]
+        train_actuals[u] = remaining_items
+
+    train_predictions = dict()
     for u, i in predictions.items():
         remaining_items = list(sorted(i, key=operator.itemgetter(1), reverse=True))
-        remaining_items = list(filter(lambda x: x[0] not in train_uid[u], remaining_items))
         remaining_items = [i for i, r in remaining_items]
+        predictions[u] = remaining_items
+        train_predictions[u] = list(remaining_items)
+
+    train_mean_ap = np.mean([average_precision(train_actuals[u], train_predictions[u]) for u in train_users])
+
+    #
+    for u, i in predictions.items():
+        remaining_items = list(filter(lambda x: x not in train_uid[u], i))
         items_extracted_length.append(len(remaining_items))
         predictions[u] = remaining_items
 
@@ -83,8 +101,9 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
 
     mean_ap = np.mean([average_precision(validation_actuals[u], predictions[u]) for u in validation_users])
 
-    return {"map": mean_ap, "retrieval_time": pred_time, "ndcg": 0.0,
-            "actuals": validation_actuals, "predictions": predictions}
+    return {"train_map": train_mean_ap, "map": mean_ap, "retrieval_time": pred_time, "ndcg": 0.0,
+            "actuals": validation_actuals, "predictions": predictions,
+            "train_actuals": train_actuals, "train_predictions": train_predictions,}
 
 
 def test_surprise(train, test, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5)):
@@ -116,9 +135,11 @@ def test_surprise(train, test, algo=["baseline", "svd", "svdpp"], algo_params={}
         predictions = [p.est for p in predictions]
         user_rating_count_metrics = metrics_by_num_interactions_user(train_affinities, validation_affinities,
                                                                      train_predictions, predictions,
-                                                                     ex_ee["actuals"], ex_ee["predictions"])
+                                                                     ex_ee["actuals"], ex_ee["predictions"],
+                                                                     ex_ee["train_actuals"], ex_ee["train_predictions"])
         user_rating_count_metrics["algo"] = name
-        stats = {"algo": name, "rmse": rmse, "mae": mae, "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
+        stats = {"algo": name, "rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
+                 "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
                 "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time,
                  "user_rating_count_metrics": user_rating_count_metrics}
         return stats
@@ -236,7 +257,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
               svdpp_hybrid=True, gcn_hybrid=True, surprise=True, content_only=True, enable_error_analysis=False):
     results = []
     recs = []
-    user_rating_count_metrics = pd.DataFrame([], columns=["algo", "user_rating_count", "rmse", "mae", "map", "train_rmse", "train_mae"])
+    user_rating_count_metrics = pd.DataFrame([], columns=["algo", "user_rating_count", "rmse", "mae", "train_map", "map", "train_rmse", "train_mae"])
     if surprise:
         hyperparameters_surprise = hyperparamters_dict["surprise"]
         _, surprise_results, surprise_user_rating_count_metrics, _, _ = test_surprise(train_affinities,
@@ -283,6 +304,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
 def metrics_by_num_interactions_user(train_affinities: List[Tuple[str, str, float]], validation_affinities: List[Tuple[str, str, float]],
                                      train_predictions: np.ndarray, val_predictions: np.ndarray,
                                      val_user_topk_actuals: Dict[str, List[str]], val_user_topk_predictions: Dict[str, List[str]],
+                                     train_user_topk_actuals: Dict[str, List[str]], train_user_topk_predictions: Dict[str, List[str]],
                                      mode="le",
                                      increments=2):
     columns = ["user", "item", "rating"]
@@ -313,10 +335,11 @@ def metrics_by_num_interactions_user(train_affinities: List[Tuple[str, str, floa
             raise ValueError("`mode` should be one of {'exact', 'le', 'ge'}")
         train_rmse, train_mae = rmse_mae_calc(train_affinities[train_affinities.user.isin(users)])
         val_rmse, val_mae = rmse_mae_calc(validation_affinities[validation_affinities.user.isin(users)])
+        train_map = np.mean([average_precision(train_user_topk_actuals[u], train_user_topk_predictions[u]) for u in users])
         mean_ap = np.mean([average_precision(val_user_topk_actuals[u], val_user_topk_predictions[u]) for u in users])
 
-        results.append(["", uc, val_rmse, val_mae, mean_ap, train_rmse, train_mae])
-    results = pd.DataFrame(results, columns=["algo", "user_rating_count", "rmse", "mae", "map", "train_rmse", "train_mae"])
+        results.append(["", uc, val_rmse, val_mae, train_map, mean_ap, train_rmse, train_mae])
+    results = pd.DataFrame(results, columns=["algo", "user_rating_count", "rmse", "mae", "train_map", "map", "train_rmse", "train_mae"])
     return results
 
 
@@ -387,8 +410,9 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
     train_predictions, _, train_rmse, train_mae = get_details(recsys, train_affinities)
     ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
     user_rating_count_metrics = metrics_by_num_interactions_user(train_affinities, validation_affinities, train_predictions, predictions,
-                                                                 ex_ee["actuals"], ex_ee["predictions"])
-    stats = {"rmse": rmse, "mae": mae,
+                                                                 ex_ee["actuals"], ex_ee["predictions"],
+                                                                 ex_ee["train_actuals"], ex_ee["train_predictions"])
+    stats = {"rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
             "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
             "train_rmse": train_rmse, "train_mae": train_mae}
     return predictions, actuals, stats, user_rating_count_metrics

@@ -233,8 +233,10 @@ class SVDppHybrid(HybridRecommender):
                             user_bias, item_bias]
                 vectors = K.concatenate(vectors)
                 meta_data = K.concatenate(meta_data)
-                meta_data = keras.layers.Dense(64, activation="tanh", kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(meta_data)
-                vectors = keras.layers.Dense(2 * self.n_collaborative_dims + 2 * self.n_content_dims, activation="tanh", kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(vectors)
+                meta_data = keras.layers.Dense(network_width, activation="linear", kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(meta_data)
+                meta_data = tf.keras.activations.relu(meta_data, alpha=0.1)
+                vectors = keras.layers.Dense(4 * self.n_collaborative_dims + 4 * self.n_content_dims, activation="linear", kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(vectors)
+                vectors = tf.keras.activations.relu(vectors, alpha=0.1)
                 dense_rep = K.concatenate([vectors, meta_data])
                 for i in range(network_depth):
                     dense_rep = tf.keras.layers.Dropout(dropout)(dense_rep)
@@ -242,12 +244,13 @@ class SVDppHybrid(HybridRecommender):
                         dense_rep = resnet_layer_with_content(network_width, network_width, dropout, kernel_l2)(
                             dense_rep)
                     else:
-                        dense_rep = keras.layers.Dense(network_width, activation="tanh",
+                        dense_rep = keras.layers.Dense(network_width, activation="linear",
                                                        kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(dense_rep)
+                        dense_rep = tf.keras.activations.relu(dense_rep, alpha=0.1)
                     dense_rep = tf.keras.layers.BatchNormalization()(dense_rep)
-                rating = keras.layers.Dense(1, activation="tanh",
+                rating = keras.layers.Dense(1, activation="linear",
                                             kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(dense_rep)
-                rating = keras.layers.ActivityRegularization(l2=bias_regularizer)(rating)
+                rating = tf.keras.activations.relu(rating, alpha=0.1)
                 implicit_term = implicit_term + rating
 
             return implicit_term

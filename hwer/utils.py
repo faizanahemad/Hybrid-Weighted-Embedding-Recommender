@@ -66,7 +66,7 @@ def get_nan_rows(a, axis=1):
     return np.sum(np.sum(np.isnan(a), axis=axis) > 0)
 
 
-def unit_length_violations(a, axis=0, epsilon=1e-2):
+def unit_length_violations(a, axis=0, epsilon=1e-1):
     vector_lengths = np.expand_dims(norm(a, axis=axis), axis=axis)
     positive_violations = np.sum(vector_lengths > 1 + epsilon)
     negative_violations = np.sum(vector_lengths < 1 - epsilon)
@@ -405,8 +405,8 @@ class UnitLengthRegularizer(keras.regularizers.Regularizer):
         if not self.l1 and not self.l2:
             return K.constant(0.)
         regularization = 0.
-        vl = K.sqrt(K.sum(K.square(x)))
-        x = K.exp(K.abs(K.log(vl)))
+        vl = K.sqrt(K.sum(K.square(x), axis=1))
+        x = K.sum(K.exp(K.abs(K.log(vl))))
         if self.l1:
             regularization += self.l1 * x
         if self.l2:
@@ -476,7 +476,7 @@ class RatingPredRegularization(keras.layers.Layer):
 
 
 class LRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, lr, epochs, batch_size, n_examples):
+    def __init__(self, lr, epochs, batch_size, n_examples, divisor=10):
         super(LRSchedule, self).__init__()
         self.start_lr = lr
         self.lrs = []
@@ -487,14 +487,16 @@ class LRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
         self.batch_size = batch_size
         self.n_examples = n_examples
         self.lr = lr
+        self.divisor = divisor
 
     def __call__(self, step):
         steps_per_epoch = int(np.ceil(self.n_examples / self.batch_size))
         total_steps = steps_per_epoch * self.epochs
         lr = self.start_lr
         step = self.step
-        new_lr = np.interp(float(K.eval(step)), [0, total_steps / 4, total_steps - steps_per_epoch, total_steps],
-                           [lr / 20, lr, lr / 10, lr / 100])
+        div = self.divisor
+        new_lr = np.interp(float(K.eval(step)), [0, total_steps / 3, 0.8 * total_steps, total_steps],
+                           [lr / div, lr, lr / div, lr / np.square(div)])
         self.lrs.append(new_lr)
         self.step += 1
         self.lr = new_lr
@@ -521,9 +523,10 @@ def resnet_layer_with_content(n_dims, n_out_dims, dropout, kernel_l2, depth=2):
             h = x
         for i in range(1, depth + 1):
             dims = n_dims if i < depth else n_out_dims
-            h = keras.layers.Dense(dims, activation="tanh", kernel_initializer=ScaledGlorotNormal(),
+            h = keras.layers.Dense(dims, activation="linear", kernel_initializer=ScaledGlorotNormal(),
                                    use_bias=False,
                                    kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(h)
+            h = tf.keras.activations.relu(h, alpha=0.1)
             # h = tf.keras.layers.BatchNormalization()(h)
         if x.shape[1] != n_out_dims:
             x = keras.layers.Dense(n_out_dims, activation="linear", kernel_initializer=ScaledGlorotNormal(),

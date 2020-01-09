@@ -31,8 +31,7 @@ from surprise import Reader
 from ast import literal_eval
 from sklearn.utils import shuffle
 
-from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding, \
-    normalize_affinity_scores_by_user
+from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding
 from hwer import Feature, FeatureSet, FeatureType
 from hwer import SVDppHybrid, ContentRecommendation, HybridGCNRec
 from hwer import FasttextEmbedding
