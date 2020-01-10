@@ -112,7 +112,7 @@ class SVDppHybrid(HybridRecommender):
         train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
 
-        train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
+        train = train.shuffle(batch_size*4).batch(batch_size).prefetch(8)
         return mu, user_bias, item_bias, train, \
                ratings_count_by_user, ratings_count_by_item, \
                min_affinity, max_affinity, user_item_list, item_user_list, \

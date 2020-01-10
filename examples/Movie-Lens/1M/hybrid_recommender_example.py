@@ -122,7 +122,7 @@ hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
                                prediction_network_params=dict(lr=0.1, epochs=10, batch_size=128,
-                                                              network_width=128, padding_length=50,
+                                                              network_width=256, padding_length=50,
                                                               network_depth=2, verbose=verbose,
                                                               kernel_l2=0.0,
                                                               bias_regularizer=0.0, dropout=0.0, use_content=False),

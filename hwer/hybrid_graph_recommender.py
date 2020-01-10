@@ -39,17 +39,20 @@ class GCNLayer(layers.Layer):
                  activation,
                  dropout,
                  gcn_msg,
-                 gcn_reduce,
-                 bias=False):
+                 gcn_reduce):
         super(GCNLayer, self).__init__()
         self.g = g
         self.gcn_msg = gcn_msg
         self.gcn_reduce = gcn_reduce
+        self.gut = 0.0
+        self.mmt1 = 0.0
+        self.mmt2 = 0.0
+        self.norm_time = 0.0
 
         # w_init = tf.random_normal_initializer()
         w_init = tf.initializers.glorot_uniform()
         # w_init = tf.initializers.TruncatedNormal(stddev=0.1)
-        self.weight = tf.Variable(initial_value=w_init(shape=(in_feats * 2, out_feats),
+        self.weight = tf.Variable(initial_value=w_init(shape=(in_feats * 4, out_feats),
                                                        dtype='float32'), dtype=tf.float32,
                                   trainable=True)
         self.weight2 = tf.Variable(initial_value=w_init(shape=(out_feats, out_feats),
@@ -59,32 +62,36 @@ class GCNLayer(layers.Layer):
             self.dropout = layers.Dropout(rate=dropout)
         else:
             self.dropout = 0.0
-        if bias:
-            b_init = tf.zeros_initializer()
-            self.bias = tf.Variable(initial_value=b_init(shape=(out_feats,),
-                                                         dtype='float32'), dtype=tf.float32,
-                                    trainable=True)
-        else:
-            self.bias = None
         self.activation = activation
 
     def call(self, h):
         self.g.ndata['h'] = h
 
         self.g.ndata['norm_h'] = self.g.ndata['h'] * self.g.ndata['norm']
+        start = time.time()
         self.g.update_all(fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h'))  # consider fn.mean here
+        end = time.time()
+        self.gut += (end - start)
         self.g.ndata['agg_h'] = self.g.ndata['agg_h'] * self.g.ndata['norm']  # consider removing 'norm' if fn.mean used above
         h = tf.concat((h, self.g.ndata['agg_h']), axis=1)
+
+        start = time.time()
         h = tf.matmul(h, self.weight)
-        if self.bias is not None:
-            h = h + self.bias
         if self.activation:
             h = self.activation(h)
-        h = tf.math.l2_normalize(h, axis=1)
+        end = time.time()
+        self.mmt1 += (end - start)
+        start = time.time()
+        h = tf.math.l2_normalize(h, axis=-1)
+        end = time.time()
+        self.norm_time += (end - start)
 
+        start = time.time()
         h = tf.matmul(h, self.weight2)
         if self.activation:
             h = self.activation(h)
+        end = time.time()
+        self.mmt2 += (end - start)
 
         if self.dropout:
             h = self.dropout(h)
@@ -370,17 +377,90 @@ class HybridGCNRec(SVDppHybrid):
                     network_depth,
                     tf.nn.leaky_relu,
                     dropout)
-        print("Before = ", len(model.trainable_weights),
-              [tf.reduce_mean(tf.nn.l2_loss(v)).numpy() for v in model.trainable_weights])
+        # print("Before = ", len(model.trainable_weights),[tf.reduce_mean(tf.nn.l2_loss(v)).numpy() for v in model.trainable_weights])
+
+        @tf.function
+        def train_batch(x, y):
+            with tf.GradientTape() as tape:
+                vectors = model(features)
+                user_input = x[0]
+                item_input = x[1] + total_users
+                users_input = x[2]
+                items_input = x[3] + total_users
+                nu_input = tf.expand_dims(tf.dtypes.cast(x[4], dtype=tf.float32), -1)
+                ni_input = tf.expand_dims(tf.dtypes.cast(x[5], dtype=tf.float32), -1)
+
+                user_vec = tf.gather(vectors, user_input)
+                item_vec = tf.gather(vectors, item_input)
+
+                users_vecs = tf.gather(vectors, users_input)
+                items_vecs = tf.gather(vectors, items_input)
+                users_vecs = tf.reduce_sum(users_vecs, axis=1)
+                items_vecs = tf.reduce_sum(items_vecs, axis=1)
+                users_vecs = tf.multiply(users_vecs, ni_input)
+                items_vecs = tf.multiply(items_vecs, nu_input)
+
+                user_item_vec_dot = tf.reduce_sum(
+                    tf.multiply(tf.linalg.matmul(user_vec, user_item_dot_scaler), item_vec), axis=1)
+                item_items_vec_dot = tf.reduce_sum(
+                    tf.multiply(tf.linalg.matmul(item_vec, item_items_dot_scaler), items_vecs), axis=1)
+                user_users_vec_dot = tf.reduce_sum(
+                    tf.multiply(tf.linalg.matmul(user_vec, user_users_dot_scaler), users_vecs), axis=1)
+                implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
+                bu = tf.gather(user_bias, user_input)
+                bi = tf.gather(item_bias, x[1])
+                bias_loss = bias_regularizer * (tf.reduce_mean(tf.nn.l2_loss(bu)) + tf.reduce_mean(tf.nn.l2_loss(bi)))
+                kernel_loss = tf.reduce_mean([tf.reduce_mean(tf.nn.l2_loss(v)) for v in model.trainable_weights])
+                scaler_loss = tf.reduce_mean(tf.nn.l2_loss(user_item_dot_scaler))
+                scaler_loss += tf.reduce_mean(tf.nn.l2_loss(item_items_dot_scaler))
+                scaler_loss += tf.reduce_mean(tf.nn.l2_loss(user_users_dot_scaler))
+                kernel_loss = kernel_l2 * kernel_loss
+                scaler_loss = kernel_l2 * scaler_loss
+                base_estimates = mu + bu + bi
+                rating = base_estimates + implicit_term
+                y = tf.dtypes.cast(y, tf.float32)
+                loss_value = loss(y, rating)
+                rmse = loss_value
+                loss_value = loss_value + bias_loss + kernel_loss + scaler_loss
+
+            grads = tape.gradient(loss_value,
+                                  list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler,
+                                                                   user_users_dot_scaler])
+
+            optimizer.apply_gradients(zip(grads,
+                                          list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler,
+                                                                           user_users_dot_scaler]))
+            del tape
+            return rmse, loss_value
+
+        for epoch in range(0):
+            start = time.time()
+            total_iters = 0
+            total_rmse = 0.0
+            total_loss = 0.0
+            for x, y in train:
+                rmse, loss = train_batch(x, y)
+                total_loss += loss
+                total_rmse += rmse
+                total_iters += 1
+            total_time = time.time() - start
+            total_rmse = total_rmse / total_iters
+            total_loss = total_loss / total_iters
+            print("Epoch = %s/%s, RMSE = %.4f, Loss = %.6f, LR = %.6f, Time = %.1fs" % (
+                epoch + 1, epochs, total_rmse, total_loss, K.get_value(optimizer.learning_rate.lr), total_time))
 
         for epoch in range(epochs):
             start = time.time()
             total_iters = 0
             total_rmse = 0.0
             total_loss = 0.0
+            non_graph_time = 0.0
+            grad_time = 0.0
+            ap_grad_time = 0.0
             for x, y in train:
                 with tf.GradientTape() as tape:
                     vectors = model(features)
+                    start2 = time.time()
                     user_input = x[0]
                     item_input = x[1] + total_users
                     users_input = x[2]
@@ -414,6 +494,7 @@ class HybridGCNRec(SVDppHybrid):
                     base_estimates = mu + bu + bi
                     rating = base_estimates + implicit_term
                     y = tf.dtypes.cast(y, tf.float32)
+                    non_graph_time += (time.time() - start2)
                     loss_value = loss(y, rating)
                     total_rmse = total_rmse + loss_value
                     loss_value = loss_value + bias_loss + kernel_loss + scaler_loss
@@ -431,16 +512,27 @@ class HybridGCNRec(SVDppHybrid):
                     # print("=" * 80)
 
                     total_iters += 1
+                gs = time.time()
                 grads = tape.gradient(loss_value, list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler, user_users_dot_scaler])
+                grad_time += (time.time() - gs)
+                gs = time.time()
                 optimizer.apply_gradients(zip(grads, list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler, user_users_dot_scaler]))
                 del tape
+                ap_grad_time += (time.time() - gs)
 
-            print("After = ", len(model.trainable_weights), [tf.reduce_mean(tf.nn.l2_loss(v)).numpy() for v in model.trainable_weights])
+
+            # print("After = ", len(model.trainable_weights), [tf.reduce_mean(tf.nn.l2_loss(v)).numpy() for v in model.trainable_weights])
             total_time = time.time() - start
             total_rmse = total_rmse / total_iters
             total_loss = total_loss / total_iters
+            graph_update_time = model.layers[0].gut
+            norm_time = model.layers[0].norm_time
+            mmt1 = model.layers[0].mmt1
+            mmt2 = model.layers[0].mmt2
+            print("Time: NGT = %.2f, Graph = %.2f, Mul-1 = %.2f, Mul-2 = %.2f, Norm = %.2f, Grad = %.2f, Apply Grad = %.2f" %
+                  (non_graph_time, graph_update_time, mmt1, mmt2, norm_time, grad_time, ap_grad_time))
             print("Epoch = %s/%s, RMSE = %.4f, Loss = %.6f, LR = %.6f, Time = %.1fs" % (
-            epoch + 1, epochs, total_rmse,total_loss, K.get_value(optimizer.learning_rate.lr), total_time))
+            epoch + 1, epochs, total_rmse, total_loss, K.get_value(optimizer.learning_rate.lr), total_time))
 
         #
         prediction_artifacts = {"vectors": model(features), "user_item_list": user_item_list,

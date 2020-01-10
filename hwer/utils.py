@@ -573,3 +573,6 @@ class UserNotFoundException(Exception):
 
 class ItemNotFoundException(Exception):
     pass
+
+def random_walks_generator(graph, vertices, edges):
+    pass
