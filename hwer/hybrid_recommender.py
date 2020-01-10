@@ -414,6 +414,7 @@ class HybridRecommender(RecommendationBase):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
+        l2 = hyperparams["l2"] if "l2" in hyperparams else 0.0
 
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
@@ -432,8 +433,14 @@ class HybridRecommender(RecommendationBase):
             i1 = keras.Input(shape=(1,))
 
             embeddings_initializer = tf.keras.initializers.Constant(vectors)
+            k = 2
+            if l2:
+                def embeddings_regularizer(x): return l2 * K.sum(K.relu(K.square(x) - k/embedding_size) + K.relu(1/(k*embedding_size) - K.square(x)))
+            else:
+                def embeddings_regularizer(x): return 0
             embeddings = keras.layers.Embedding(len(user_ids) + len(item_ids), embedding_size, input_length=1,
-                                                embeddings_initializer=embeddings_initializer)
+                                                embeddings_initializer=embeddings_initializer, embeddings_regularizer=embeddings_regularizer)
+            # embeddings_regularizer=embeddings_regularizer
             item = embeddings(i1)
             item = tf.keras.layers.Flatten()(item)
             # item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)

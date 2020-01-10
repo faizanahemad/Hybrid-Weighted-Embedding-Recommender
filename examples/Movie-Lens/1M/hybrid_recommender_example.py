@@ -115,20 +115,20 @@ hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
                                                                 kernel_l2=0.002,
                                                                 bias_regularizer=0.002, dropout=0.05,
                                                                 use_resnet=True, use_content=True),
-                                 user_item_params=dict(lr=0.2, epochs=20, batch_size=64,
+                                 user_item_params=dict(lr=0.2, epochs=20, batch_size=64, l2=0.1,
                                                        verbose=verbose, margin=1.0)))
 
 hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.1, epochs=10, batch_size=128,
+                               prediction_network_params=dict(lr=0.1, epochs=1, batch_size=128,
                                                               network_width=256, padding_length=50,
                                                               network_depth=2, verbose=verbose,
-                                                              kernel_l2=0.0,
-                                                              bias_regularizer=0.0, dropout=0.0, use_content=False),
-                               user_item_params=dict(lr=0.2, epochs=10, batch_size=64,
+                                                              kernel_l2=0.001,
+                                                              bias_regularizer=0.001, dropout=0.0, use_content=False),
+                               user_item_params=dict(lr=0.2, epochs=20, batch_size=64, l2=0.1,
                                                      gcn_lr=0.002, gcn_epochs=1, gcn_layers=3, gcn_dropout=0.0,
-                                                     gcn_hidden_dims=128, gcn_kernel_l2=0.001,
+                                                     gcn_hidden_dims=64, gcn_kernel_l2=0.001,
                                                      gcn_batch_size=int(2 ** np.floor(np.log2(len(user_item_affinities) / 20))),
                                                      verbose=verbose, margin=1.0)))
 

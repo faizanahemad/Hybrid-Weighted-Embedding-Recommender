@@ -34,28 +34,24 @@ from .utils import RatingPredRegularization, get_rng, \
 class GCNLayer(layers.Layer):
     def __init__(self,
                  g,
+                 gcn_msg,
+                 gcn_reduce,
                  in_feats,
                  out_feats,
                  activation,
                  dropout,
-                 gcn_msg,
-                 gcn_reduce):
+                 l2=0.0):
         super(GCNLayer, self).__init__()
         self.g = g
         self.gcn_msg = gcn_msg
         self.gcn_reduce = gcn_reduce
-        self.gut = 0.0
-        self.mmt1 = 0.0
-        self.mmt2 = 0.0
-        self.norm_time = 0.0
-
-        # w_init = tf.random_normal_initializer()
+        self.reg = keras.layers.ActivityRegularization(l2=l2)
+        self.l2 = l2
         w_init = tf.initializers.glorot_uniform()
-        # w_init = tf.initializers.TruncatedNormal(stddev=0.1)
-        self.weight = tf.Variable(initial_value=w_init(shape=(in_feats * 4, out_feats),
+        self.weight = tf.Variable(initial_value=w_init(shape=(in_feats * 2, out_feats * 2),
                                                        dtype='float32'), dtype=tf.float32,
                                   trainable=True)
-        self.weight2 = tf.Variable(initial_value=w_init(shape=(out_feats, out_feats),
+        self.weight2 = tf.Variable(initial_value=w_init(shape=(out_feats * 2, out_feats),
                                                        dtype='float32'), dtype=tf.float32,
                                   trainable=True)
         if dropout:
@@ -68,33 +64,24 @@ class GCNLayer(layers.Layer):
         self.g.ndata['h'] = h
 
         self.g.ndata['norm_h'] = self.g.ndata['h'] * self.g.ndata['norm']
-        start = time.time()
-        self.g.update_all(fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h'))  # consider fn.mean here
-        end = time.time()
-        self.gut += (end - start)
+        self.g.update_all(fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h'))  # consider fn.mean here, # try edge weights
         self.g.ndata['agg_h'] = self.g.ndata['agg_h'] * self.g.ndata['norm']  # consider removing 'norm' if fn.mean used above
         h = tf.concat((h, self.g.ndata['agg_h']), axis=1)
 
-        start = time.time()
         h = tf.matmul(h, self.weight)
         if self.activation:
             h = self.activation(h)
-        end = time.time()
-        self.mmt1 += (end - start)
-        start = time.time()
         h = tf.math.l2_normalize(h, axis=-1)
-        end = time.time()
-        self.norm_time += (end - start)
-
-        start = time.time()
         h = tf.matmul(h, self.weight2)
         if self.activation:
             h = self.activation(h)
-        end = time.time()
-        self.mmt2 += (end - start)
 
         if self.dropout:
             h = self.dropout(h)
+
+        if self.l2:
+            _ = self.reg(self.weight)
+            _ = self.reg(self.weight2)
         #
         return h
 
@@ -112,20 +99,21 @@ class GCN(layers.Layer):
                  out_features,
                  n_layers,
                  activation,
-                 dropout):
+                 dropout,
+                 l2=0.0):
         super(GCN, self).__init__()
         self.layers = []
         self.g = g
 
         # input layer
         self.layers.append(
-            GCNLayer(g, in_features+1, n_hidden, activation, dropout, gcn_msg, gcn_reduce))
+            GCNLayer(g, gcn_msg, gcn_reduce, in_features+1, n_hidden, activation, dropout, l2))
         # hidden layers
         for i in range(n_layers - 1):
             self.layers.append(
-                GCNLayer(g, n_hidden, n_hidden, activation, dropout, gcn_msg, gcn_reduce))
+                GCNLayer(g, gcn_msg, gcn_reduce, n_hidden, n_hidden, activation, dropout, l2))
         # output layer
-        self.layers.append(GCNLayer(g, n_hidden, out_features, None, dropout, gcn_msg, gcn_reduce))
+        self.layers.append(GCNLayer(g, gcn_msg, gcn_reduce, n_hidden, out_features, None, dropout, l2))
 
     def call(self, features):
         h = tf.concat((features, tf.reshape(self.g.ndata['degree'], (-1, 1))), axis=1)
@@ -164,17 +152,7 @@ class HybridGCNRec(SVDppHybrid):
         ew_max = np.max(edge_weights)
         edge_weights = (edge_weights - ew_min)/(ew_max - ew_min)
         g.edata['weight'] = tf.expand_dims(edge_weights, -1)
-
-        def gcn_msg(edge):
-            msg = edge.src['h'] * edge.src['norm']
-            msg = msg * edge.data['weight']
-            return {'m': msg}
-
-        def gcn_reduce(node):
-            accum = tf.reduce_sum(node.mailbox['m'], 1) * node.data['norm']
-            return {'h': accum}
-
-        return g, gcn_msg, gcn_reduce
+        return g
 
     def __user_item_affinities_triplet_trainer__(self,
                                          user_ids: List[str], item_ids: List[str],
@@ -211,29 +189,26 @@ class HybridGCNRec(SVDppHybrid):
         total_users = len(user_ids)
         total_items = len(item_ids)
 
-        # user_vectors = np.concatenate((user_vectors, user_triplet_vectors), axis=1)
-        # item_vectors = np.concatenate((item_vectors, item_triplet_vectors), axis=1)
-        user_vectors = user_triplet_vectors
-        item_vectors = item_triplet_vectors
+        user_vectors = np.concatenate((user_vectors, user_triplet_vectors), axis=1)
+        item_vectors = np.concatenate((item_vectors, item_triplet_vectors), axis=1)
+        # user_vectors = user_triplet_vectors
+        # item_vectors = item_triplet_vectors
 
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i]) for u, i, r in user_item_affinities]
         ratings = [r for u, i, r in user_item_affinities]
-        g, gcn_msg, gcn_reduce = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items,)
-
-        gcn_msg = fn.copy_src('norm_h', 'm')
-        gcn_reduce = fn.sum('m', 'h')
-
+        g = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items,)
+        gcn_msg, gcn_reduce = fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h')
         features = unit_length(np.concatenate((user_vectors, item_vectors)), axis=1)
         # embedding = tf.Variable(initial_value=features, dtype=tf.float32, trainable=True)
         model = GCN(g,
-                    gcn_msg,
-                    gcn_reduce,
+                    gcn_msg, gcn_reduce,
                     features.shape[1],
                     gcn_hidden_dims,
                     self.n_collaborative_dims,
                     gcn_layers,
                     tf.nn.leaky_relu,
-                    gcn_dropout)
+                    gcn_dropout,
+                    gcn_kernel_l2)
         learning_rate = LRSchedule(lr=gcn_lr, epochs=gcn_epochs, batch_size=gcn_batch_size, n_examples=len(user_item_affinities))
         # optimizer = tf.keras.optimizers.Adam(learning_rate=gcn_lr, decay=5e-4)
         optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
@@ -279,9 +254,8 @@ class HybridGCNRec(SVDppHybrid):
             print("Epoch = %s/%s, RMSE = %.4f, Loss = %.6f, LR = %.6f, Time = %.1fs" % (epoch+1, gcn_epochs, total_rmse,total_loss , K.get_value(optimizer.learning_rate.lr), total_time))
 
         vectors = model(features)
-        # K.l2_normalize(embedding, axis=1)
         user_vectors, item_vectors = vectors[:total_users], vectors[total_users:]
-        return user_triplet_vectors, item_triplet_vectors
+        return user_vectors, item_vectors
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
                                      user_item_affinities: List[Tuple[str, str, float]],
@@ -343,10 +317,9 @@ class HybridGCNRec(SVDppHybrid):
         total_items = len(item_ids) + 1
         edge_list = [(user_id_to_index[u]+1, total_users + item_id_to_index[i]+1) for u, i, r in user_item_affinities]
         ratings = [r for u, i, r in user_item_affinities]
-        g, gcn_msg, gcn_reduce = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items)
+        g = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items)
         # gcn_msg = fn.src_mul_edge('norm_h', "weight", 'm')
-        gcn_msg = fn.copy_src('norm_h', 'm')
-        gcn_reduce = fn.sum('m', 'h')
+        gcn_msg, gcn_reduce = fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h')
         if use_content:
             user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
             item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
@@ -355,10 +328,7 @@ class HybridGCNRec(SVDppHybrid):
         features = unit_length(features, axis=1)
         features[np.isnan(features)] = 0.0
         features[np.isinf(features)] = 0.0
-        user_bias = tf.Variable(initial_value=user_bias, dtype=tf.float32, trainable=True)
-        item_bias = tf.Variable(initial_value=item_bias, dtype=tf.float32, trainable=True)
         w_init = tf.initializers.TruncatedNormal(stddev=0.01,)
-        # features = tf.Variable(initial_value=features, dtype=tf.float32, trainable=True)
         user_item_dot_scaler = tf.Variable(initial_value=w_init(shape=(self.n_collaborative_dims, self.n_collaborative_dims),
                                                        dtype='float32'), dtype=tf.float32, trainable=True)
         item_items_dot_scaler = tf.Variable(
@@ -369,174 +339,84 @@ class HybridGCNRec(SVDppHybrid):
                                  dtype='float32'), dtype=tf.float32, trainable=True)
 
         model = GCN(g,
-                    gcn_msg,
-                    gcn_reduce,
+                    gcn_msg, gcn_reduce,
                     features.shape[1],
                     network_width,
                     self.n_collaborative_dims,
                     network_depth,
                     tf.nn.leaky_relu,
-                    dropout)
-        # print("Before = ", len(model.trainable_weights),[tf.reduce_mean(tf.nn.l2_loss(v)).numpy() for v in model.trainable_weights])
+                    dropout,
+                    kernel_l2)
 
-        @tf.function
-        def train_batch(x, y):
-            with tf.GradientTape() as tape:
-                vectors = model(features)
-                user_input = x[0]
-                item_input = x[1] + total_users
-                users_input = x[2]
-                items_input = x[3] + total_users
-                nu_input = tf.expand_dims(tf.dtypes.cast(x[4], dtype=tf.float32), -1)
-                ni_input = tf.expand_dims(tf.dtypes.cast(x[5], dtype=tf.float32), -1)
+        features = tf.Variable(features, trainable=False, dtype=tf.float32)
+        input_user = keras.Input(shape=(1,), dtype=tf.int64)
+        input_item = keras.Input(shape=(1,), dtype=tf.int64)
+        input_items = keras.Input(shape=(padding_length,), dtype=tf.int64)
+        input_users = keras.Input(shape=(padding_length,), dtype=tf.int64)
+        input_nu = keras.Input(shape=(1,))
+        input_ni = keras.Input(shape=(1,))
 
-                user_vec = tf.gather(vectors, user_input)
-                item_vec = tf.gather(vectors, item_input)
+        item = input_item + total_users
+        items = input_items + total_users
+        inputs = [input_user, input_item, input_users, input_items, input_nu, input_ni]
+        vectors = model(features)
+        nu_input = input_nu
+        ni_input = input_ni
 
-                users_vecs = tf.gather(vectors, users_input)
-                items_vecs = tf.gather(vectors, items_input)
-                users_vecs = tf.reduce_sum(users_vecs, axis=1)
-                items_vecs = tf.reduce_sum(items_vecs, axis=1)
-                users_vecs = tf.multiply(users_vecs, ni_input)
-                items_vecs = tf.multiply(items_vecs, nu_input)
+        user_vec = tf.gather(vectors, input_user)
+        item_vec = tf.gather(vectors, item)
+        users_vecs = tf.gather(vectors, input_users)
+        items_vecs = tf.gather(vectors, items)
 
-                user_item_vec_dot = tf.reduce_sum(
-                    tf.multiply(tf.linalg.matmul(user_vec, user_item_dot_scaler), item_vec), axis=1)
-                item_items_vec_dot = tf.reduce_sum(
-                    tf.multiply(tf.linalg.matmul(item_vec, item_items_dot_scaler), items_vecs), axis=1)
-                user_users_vec_dot = tf.reduce_sum(
-                    tf.multiply(tf.linalg.matmul(user_vec, user_users_dot_scaler), users_vecs), axis=1)
-                implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
-                bu = tf.gather(user_bias, user_input)
-                bi = tf.gather(item_bias, x[1])
-                bias_loss = bias_regularizer * (tf.reduce_mean(tf.nn.l2_loss(bu)) + tf.reduce_mean(tf.nn.l2_loss(bi)))
-                kernel_loss = tf.reduce_mean([tf.reduce_mean(tf.nn.l2_loss(v)) for v in model.trainable_weights])
-                scaler_loss = tf.reduce_mean(tf.nn.l2_loss(user_item_dot_scaler))
-                scaler_loss += tf.reduce_mean(tf.nn.l2_loss(item_items_dot_scaler))
-                scaler_loss += tf.reduce_mean(tf.nn.l2_loss(user_users_dot_scaler))
-                kernel_loss = kernel_l2 * kernel_loss
-                scaler_loss = kernel_l2 * scaler_loss
-                base_estimates = mu + bu + bi
-                rating = base_estimates + implicit_term
-                y = tf.dtypes.cast(y, tf.float32)
-                loss_value = loss(y, rating)
-                rmse = loss_value
-                loss_value = loss_value + bias_loss + kernel_loss + scaler_loss
+        users_vecs = tf.reduce_sum(users_vecs, axis=1)
+        items_vecs = tf.reduce_sum(items_vecs, axis=1)
+        regularizer = keras.layers.ActivityRegularization(l2=bias_regularizer)
+        users_vecs = regularizer(users_vecs)
+        items_vecs = regularizer(items_vecs)
+        user_vec = regularizer(user_vec)
+        item_vec = regularizer(item_vec)
+        users_vecs = users_vecs * ni_input
+        items_vecs = items_vecs * nu_input
 
-            grads = tape.gradient(loss_value,
-                                  list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler,
-                                                                   user_users_dot_scaler])
+        kernel_regularizer = keras.layers.ActivityRegularization(l2=kernel_l2)
+        user_item_dot_scaler = kernel_regularizer(user_item_dot_scaler)
+        item_items_dot_scaler = kernel_regularizer(item_items_dot_scaler)
+        user_users_dot_scaler = kernel_regularizer(user_users_dot_scaler)
 
-            optimizer.apply_gradients(zip(grads,
-                                          list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler,
-                                                                           user_users_dot_scaler]))
-            del tape
-            return rmse, loss_value
+        user_item_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(user_vec, user_item_dot_scaler), item_vec),
+                                          axis=1)
+        item_items_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(item_vec, item_items_dot_scaler), items_vecs),
+                                           axis=1)
+        user_users_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(user_vec, user_users_dot_scaler), users_vecs),
+                                           axis=1)
 
-        for epoch in range(0):
-            start = time.time()
-            total_iters = 0
-            total_rmse = 0.0
-            total_loss = 0.0
-            for x, y in train:
-                rmse, loss = train_batch(x, y)
-                total_loss += loss
-                total_rmse += rmse
-                total_iters += 1
-            total_time = time.time() - start
-            total_rmse = total_rmse / total_iters
-            total_loss = total_loss / total_iters
-            print("Epoch = %s/%s, RMSE = %.4f, Loss = %.6f, LR = %.6f, Time = %.1fs" % (
-                epoch + 1, epochs, total_rmse, total_loss, K.get_value(optimizer.learning_rate.lr), total_time))
+        implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
 
-        for epoch in range(epochs):
-            start = time.time()
-            total_iters = 0
-            total_rmse = 0.0
-            total_loss = 0.0
-            non_graph_time = 0.0
-            grad_time = 0.0
-            ap_grad_time = 0.0
-            for x, y in train:
-                with tf.GradientTape() as tape:
-                    vectors = model(features)
-                    start2 = time.time()
-                    user_input = x[0]
-                    item_input = x[1] + total_users
-                    users_input = x[2]
-                    items_input = x[3] + total_users
-                    nu_input = tf.expand_dims(tf.dtypes.cast(x[4], dtype=tf.float32), -1)
-                    ni_input = tf.expand_dims(tf.dtypes.cast(x[5], dtype=tf.float32), -1)
+        embeddings_initializer = tf.keras.initializers.Constant(user_bias)
+        user_embedding_layer = keras.layers.Embedding(len(user_ids) + 1, 1, input_length=1,
+                                    embeddings_initializer=embeddings_initializer)
+        bu = user_embedding_layer(input_user)
 
-                    user_vec = tf.gather(vectors, user_input)
-                    item_vec = tf.gather(vectors, item_input)
+        embeddings_initializer = tf.keras.initializers.Constant(item_bias)
+        item_embedding_layer = keras.layers.Embedding(len(item_ids) + 1, 1, input_length=1,
+                                    embeddings_initializer=embeddings_initializer)
+        bi = item_embedding_layer(input_item)
+        bu = keras.layers.ActivityRegularization(l2=bias_regularizer)(bu)
+        bi = keras.layers.ActivityRegularization(l2=bias_regularizer)(bi)
+        base_estimates = mu + bu + bi
+        rating = base_estimates + implicit_term
 
-                    users_vecs = tf.gather(vectors, users_input)
-                    items_vecs = tf.gather(vectors, items_input)
-                    users_vecs = tf.reduce_sum(users_vecs, axis=1)
-                    items_vecs = tf.reduce_sum(items_vecs, axis=1)
-                    users_vecs = tf.multiply(users_vecs, ni_input)
-                    items_vecs = tf.multiply(items_vecs, nu_input)
+        rating_model = keras.Model(inputs=inputs, outputs=[rating])
 
-                    user_item_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(user_vec, user_item_dot_scaler), item_vec), axis=1)
-                    item_items_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(item_vec, item_items_dot_scaler), items_vecs), axis=1)
-                    user_users_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(user_vec, user_users_dot_scaler), users_vecs), axis=1)
-                    implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
-                    bu = tf.gather(user_bias, user_input)
-                    bi = tf.gather(item_bias, x[1])
-                    bias_loss = bias_regularizer * (tf.reduce_mean(tf.nn.l2_loss(bu)) + tf.reduce_mean(tf.nn.l2_loss(bi)))
-                    kernel_loss = tf.reduce_mean([tf.reduce_mean(tf.nn.l2_loss(v)) for v in model.trainable_weights])
-                    scaler_loss = tf.reduce_mean(tf.nn.l2_loss(user_item_dot_scaler))
-                    scaler_loss += tf.reduce_mean(tf.nn.l2_loss(item_items_dot_scaler))
-                    scaler_loss += tf.reduce_mean(tf.nn.l2_loss(user_users_dot_scaler))
-                    kernel_loss = kernel_l2 * kernel_loss
-                    scaler_loss = kernel_l2 * scaler_loss
-                    base_estimates = mu + bu + bi
-                    rating = base_estimates + implicit_term
-                    y = tf.dtypes.cast(y, tf.float32)
-                    non_graph_time += (time.time() - start2)
-                    loss_value = loss(y, rating)
-                    total_rmse = total_rmse + loss_value
-                    loss_value = loss_value + bias_loss + kernel_loss + scaler_loss
-                    total_loss = total_loss + loss_value
-                    # print("Nans = ", np.sum(np.isnan(vectors.numpy())), "Inf = ", np.sum(np.isinf(vectors.numpy())))
-                    # print("Nans = ", np.sum(np.isnan(user_vec.numpy())))
-                    # print("Nans = ", np.sum(np.isnan(item_vec.numpy())))
-                    # print("Nans = ", np.sum(np.isnan(items_vecs.numpy())))
-                    # print("Nans = ", np.sum(np.isnan(users_vecs.numpy())))
-                    # print("Nans = ", np.sum(np.isnan(implicit_term.numpy())))
-                    # print("Nans = ", np.sum(np.isnan(base_estimates.numpy())))
-                    # print("Nans = ", np.sum(np.isnan(rating.numpy())))
-                    # print("Nans = ", np.sum(np.isnan(loss_value.numpy())), " Loss = ", loss_value.numpy())
-                    # print("Bias Loss = ", bias_loss.numpy(), "Scaler Loss = ", scaler_loss.numpy(), "Kernel Loss = ", kernel_loss.numpy(), "Total Loss = ", loss_value.numpy())
-                    # print("=" * 80)
+        rating_model.compile(optimizer=optimizer,
+                      loss=[root_mean_squared_error], metrics=[root_mean_squared_error, mean_absolute_error])
 
-                    total_iters += 1
-                gs = time.time()
-                grads = tape.gradient(loss_value, list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler, user_users_dot_scaler])
-                grad_time += (time.time() - gs)
-                gs = time.time()
-                optimizer.apply_gradients(zip(grads, list(model.trainable_weights) + [user_item_dot_scaler, item_items_dot_scaler, user_users_dot_scaler]))
-                del tape
-                ap_grad_time += (time.time() - gs)
-
-
-            # print("After = ", len(model.trainable_weights), [tf.reduce_mean(tf.nn.l2_loss(v)).numpy() for v in model.trainable_weights])
-            total_time = time.time() - start
-            total_rmse = total_rmse / total_iters
-            total_loss = total_loss / total_iters
-            graph_update_time = model.layers[0].gut
-            norm_time = model.layers[0].norm_time
-            mmt1 = model.layers[0].mmt1
-            mmt2 = model.layers[0].mmt2
-            print("Time: NGT = %.2f, Graph = %.2f, Mul-1 = %.2f, Mul-2 = %.2f, Norm = %.2f, Grad = %.2f, Apply Grad = %.2f" %
-                  (non_graph_time, graph_update_time, mmt1, mmt2, norm_time, grad_time, ap_grad_time))
-            print("Epoch = %s/%s, RMSE = %.4f, Loss = %.6f, LR = %.6f, Time = %.1fs" % (
-            epoch + 1, epochs, total_rmse, total_loss, K.get_value(optimizer.learning_rate.lr), total_time))
-
+        rating_model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
         #
         prediction_artifacts = {"vectors": model(features), "user_item_list": user_item_list,
-                                "item_user_list": item_user_list, "mu": mu, "user_bias": user_bias.numpy(), "item_bias": item_bias.numpy(),
+                                "item_user_list": item_user_list, "mu": mu,
+                                "user_bias": np.array(user_embedding_layer.get_weights()[0]).flatten(),
+                                "item_bias": np.array(item_embedding_layer.get_weights()[0]).flatten(),
                                 "total_users": total_users, "user_item_dot_scaler": user_item_dot_scaler.numpy(),
                                 "user_users_dot_scaler": user_users_dot_scaler.numpy(), "item_items_dot_scaler": item_items_dot_scaler.numpy(),
                                 "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
