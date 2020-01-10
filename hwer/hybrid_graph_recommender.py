@@ -71,10 +71,10 @@ class GCNLayer(layers.Layer):
         h = tf.matmul(h, self.weight)
         if self.activation:
             h = self.activation(h)
-        h = tf.math.l2_normalize(h, axis=-1)
         h = tf.matmul(h, self.weight2)
         if self.activation:
             h = self.activation(h)
+        h = tf.math.l2_normalize(h, axis=-1)
 
         if self.dropout:
             h = self.dropout(h)
@@ -189,10 +189,10 @@ class HybridGCNRec(SVDppHybrid):
         total_users = len(user_ids)
         total_items = len(item_ids)
 
-        user_vectors = np.concatenate((user_vectors, user_triplet_vectors), axis=1)
-        item_vectors = np.concatenate((item_vectors, item_triplet_vectors), axis=1)
-        # user_vectors = user_triplet_vectors
-        # item_vectors = item_triplet_vectors
+        # user_vectors = np.concatenate((user_vectors, user_triplet_vectors), axis=1)
+        # item_vectors = np.concatenate((item_vectors, item_triplet_vectors), axis=1)
+        user_vectors = user_triplet_vectors
+        item_vectors = item_triplet_vectors
 
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i]) for u, i, r in user_item_affinities]
         ratings = [r for u, i, r in user_item_affinities]
@@ -318,7 +318,7 @@ class HybridGCNRec(SVDppHybrid):
         features = unit_length(features, axis=1)
         features[np.isnan(features)] = 0.0
         features[np.isinf(features)] = 0.0
-        w_init = tf.initializers.TruncatedNormal(stddev=0.01,)
+        w_init = tf.initializers.glorot_uniform()
         user_item_dot_scaler = tf.Variable(initial_value=w_init(shape=(self.n_collaborative_dims, self.n_collaborative_dims),
                                                        dtype='float32'), dtype=tf.float32, trainable=True)
         item_items_dot_scaler = tf.Variable(
@@ -358,8 +358,8 @@ class HybridGCNRec(SVDppHybrid):
         users_vecs = tf.gather(vectors, input_users)
         items_vecs = tf.gather(vectors, items)
 
-        users_vecs = tf.reduce_sum(users_vecs, axis=1)
-        items_vecs = tf.reduce_sum(items_vecs, axis=1)
+        users_vecs = tf.reduce_mean(users_vecs, axis=1)
+        items_vecs = tf.reduce_mean(items_vecs, axis=1)
         regularizer = keras.layers.ActivityRegularization(l2=bias_regularizer)
         users_vecs = regularizer(users_vecs)
         items_vecs = regularizer(items_vecs)
@@ -393,6 +393,8 @@ class HybridGCNRec(SVDppHybrid):
         bi = item_embedding_layer(input_item)
         bu = keras.layers.ActivityRegularization(l2=bias_regularizer)(bu)
         bi = keras.layers.ActivityRegularization(l2=bias_regularizer)(bi)
+        bu = tf.keras.layers.Flatten()(bu)
+        bi = tf.keras.layers.Flatten()(bi)
         base_estimates = mu + bu + bi
         rating = base_estimates + implicit_term
 
@@ -471,8 +473,8 @@ class HybridGCNRec(SVDppHybrid):
             users_vecs = np.take(vectors, users_input, axis=0)
             items_vecs = np.take(vectors, items_input, axis=0)
 
-            users_vecs = np.sum(users_vecs, axis=1)
-            items_vecs = np.sum(items_vecs, axis=1)
+            users_vecs = np.mean(users_vecs, axis=1)
+            items_vecs = np.mean(items_vecs, axis=1)
             users_vecs = np.multiply(users_vecs, ni_input)
             items_vecs = np.multiply(items_vecs, nu_input)
 
