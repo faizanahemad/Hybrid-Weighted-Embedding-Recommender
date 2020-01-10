@@ -376,10 +376,9 @@ class HybridRecommender(RecommendationBase):
                 random_items = set(random_items) - user_item_dict[i]
                 random_items = random_items - item_user_dict[j]
                 random_items = np.array(list(random_items))
-                close_item_weight = 1
                 distant_item = np.random.randint(0, total_users + total_items)
-                distant_item, distant_item_weight = random_items[0] if len(random_items) > 0 else distant_item, 1
-                return (user, second_item, distant_item, close_item_weight, distant_item_weight), 0
+                distant_item = random_items[0] if len(random_items) > 0 else distant_item
+                return (user, second_item, distant_item), 0
 
             def generator():
                 for i in range(0, len(affinities), batch_size * 10):
@@ -391,8 +390,8 @@ class HybridRecommender(RecommendationBase):
 
             return generator
 
-        output_shapes = (((), (), (), (), ()), ())
-        output_types = ((tf.int64, tf.int64, tf.int64, tf.float32, tf.float32), tf.float32)
+        output_shapes = (((), (), ()), ())
+        output_types = ((tf.int64, tf.int64, tf.int64), tf.float32)
 
         train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
@@ -453,9 +452,6 @@ class HybridRecommender(RecommendationBase):
         input_2 = keras.Input(shape=(1,))
         input_3 = keras.Input(shape=(1,))
 
-        close_weight = keras.Input(shape=(1,))
-        far_weight = keras.Input(shape=(1,))
-
         item_1 = bn(input_1)
         item_2 = bn(input_2)
         item_3 = bn(input_3)
@@ -467,7 +463,7 @@ class HybridRecommender(RecommendationBase):
         i1_i3_dist = 1 - i1_i3_dist
 
         loss = K.relu(i1_i2_dist - i1_i3_dist + margin)
-        model = keras.Model(inputs=[input_1, input_2, input_3, close_weight, far_weight],
+        model = keras.Model(inputs=[input_1, input_2, input_3],
                             outputs=[loss])
 
         encoder = bn

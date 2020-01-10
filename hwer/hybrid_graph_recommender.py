@@ -199,7 +199,7 @@ class HybridGCNRec(SVDppHybrid):
         g = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items,)
         gcn_msg, gcn_reduce = fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h')
         features = unit_length(np.concatenate((user_vectors, item_vectors)), axis=1)
-        # embedding = tf.Variable(initial_value=features, dtype=tf.float32, trainable=True)
+        features = tf.Variable(features, trainable=False, dtype=tf.float32)
         model = GCN(g,
                     gcn_msg, gcn_reduce,
                     features.shape[1],
@@ -210,49 +210,40 @@ class HybridGCNRec(SVDppHybrid):
                     gcn_dropout,
                     gcn_kernel_l2)
         learning_rate = LRSchedule(lr=gcn_lr, epochs=gcn_epochs, batch_size=gcn_batch_size, n_examples=len(user_item_affinities))
-        # optimizer = tf.keras.optimizers.Adam(learning_rate=gcn_lr, decay=5e-4)
         optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
-        loss = tf.keras.losses.MeanSquaredError()
         train = self.__user_item_affinities_triplet_trainer_data_gen__(user_ids, item_ids,
                                                                        user_item_affinities,
                                                                        user_id_to_index, item_id_to_index,
                                                                        hyperparams)
         train = train.shuffle(gcn_batch_size * 10).batch(gcn_batch_size).prefetch(8)
-        for epoch in range(gcn_epochs):
-            start = time.time()
-            total_rmse = 0.0
-            total_loss = 0.0
-            total_iters = 0
-            for x, y in train:
-                with tf.GradientTape() as tape:
-                    vectors = model(features)
-                    vectors = K.l2_normalize(vectors, axis=1)
 
-                    item_1 = tf.gather(vectors, x[0])
-                    item_2 = tf.gather(vectors, x[1])
-                    item_3 = tf.gather(vectors, x[2])
+        #
+        input_1 = keras.Input(shape=(1,), dtype=tf.int64)
+        input_2 = keras.Input(shape=(1,), dtype=tf.int64)
+        input_3 = keras.Input(shape=(1,), dtype=tf.int64)
+        vectors = model(features)
+        item_1 = tf.gather(vectors, input_1)
+        item_2 = tf.gather(vectors, input_2)
+        item_3 = tf.gather(vectors, input_3)
+        item_1 = tf.keras.layers.Flatten()(item_1)
+        item_2 = tf.keras.layers.Flatten()(item_2)
+        item_3 = tf.keras.layers.Flatten()(item_3)
+        item_1 = tf.math.l2_normalize(item_1, axis=-1)
+        item_2 = tf.math.l2_normalize(item_2, axis=-1)
+        item_3 = tf.math.l2_normalize(item_3, axis=-1)
+        i1_i2_dist = tf.keras.layers.Dot(axes=1, normalize=False)([item_1, item_2])
+        i1_i2_dist = 1 - i1_i2_dist
 
-                    i1_i2_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
-                    i1_i2_dist = 1 - i1_i2_dist
+        i1_i3_dist = tf.keras.layers.Dot(axes=1, normalize=False)([item_1, item_3])
+        i1_i3_dist = 1 - i1_i3_dist
+        loss = K.relu(i1_i2_dist - i1_i3_dist + margin)
 
-                    i1_i3_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_3])
-                    i1_i3_dist = 1 - i1_i3_dist
+        affinity_model = keras.Model(inputs=[input_1, input_2, input_3],
+                            outputs=[loss])
+        affinity_model.compile(optimizer=optimizer,
+                      loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
-                    error = K.relu(i1_i2_dist - i1_i3_dist + margin)
-                    loss_value = loss(y, error)
-                    total_rmse = total_rmse + loss_value
-                    loss_value += gcn_kernel_l2 * tf.reduce_mean([tf.reduce_mean(tf.nn.l2_loss(v)) for v in model.trainable_weights])
-                    total_loss += loss_value
-                    total_iters += 1
-
-                grads = tape.gradient(loss_value, model.trainable_weights)
-                optimizer.apply_gradients(zip(grads, model.trainable_weights))
-                del tape
-            total_rmse = total_rmse/total_iters
-            total_loss = total_loss / total_iters
-            total_time = time.time() - start
-            print("Epoch = %s/%s, RMSE = %.4f, Loss = %.6f, LR = %.6f, Time = %.1fs" % (epoch+1, gcn_epochs, total_rmse,total_loss , K.get_value(optimizer.learning_rate.lr), total_time))
-
+        affinity_model.fit(train, epochs=gcn_epochs, callbacks=[], verbose=verbose)
         vectors = model(features)
         user_vectors, item_vectors = vectors[:total_users], vectors[total_users:]
         return user_vectors, item_vectors
@@ -312,7 +303,6 @@ class HybridGCNRec(SVDppHybrid):
         #
         lr = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities), divisor=5)
         optimizer = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
-        loss = root_mean_squared_error
         total_users = len(user_ids) + 1
         total_items = len(item_ids) + 1
         edge_list = [(user_id_to_index[u]+1, total_users + item_id_to_index[i]+1) for u, i, r in user_item_affinities]
