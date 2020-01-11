@@ -59,11 +59,11 @@ class GCNLayer(layers.Layer):
         self.activation = activation
 
     def call(self, h):
+        h = tf.math.l2_normalize(h, axis=-1)
         self.g.ndata['h'] = h
-
         self.g.ndata['norm_h'] = self.g.ndata['h'] * self.g.ndata['norm']
         self.g.update_all(fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h'))  # consider fn.mean here, # try edge weights
-        # self.g.ndata['agg_h'] = self.g.ndata['agg_h'] * self.g.ndata['norm']  # consider removing 'norm' if fn.mean used above
+        self.g.ndata['agg_h'] = self.g.ndata['agg_h'] * self.g.ndata['norm']  # consider removing 'norm' if fn.mean used above
         h = tf.concat((h, self.g.ndata['agg_h']), axis=1)
         if self.gcn_reduce is not None and self.gcn_msg is not None:
             self.g.update_all(self.gcn_msg, self.gcn_reduce)
@@ -78,33 +78,37 @@ class GCNLayer(layers.Layer):
             return {'min_h': accum}
 
         def sigmoid_reduce(node):
-            accum = tf.reduce_sum(tf.nn.sigmoid(node.mailbox['m']), 1)
+            accum = tf.reduce_mean(tf.nn.sigmoid(node.mailbox['m']), 1)
             return {'sig_h': accum}
 
         def tanh_reduce(node):
-            accum = tf.reduce_sum(tf.nn.tanh(node.mailbox['m']), 1)
+            accum = tf.reduce_mean(tf.nn.tanh(node.mailbox['m']), 1)
             return {'tan_h': accum}
 
         def relu_reduce(node):
-            accum = tf.reduce_sum(tf.nn.relu(node.mailbox['m']), 1)
+            accum = tf.reduce_mean(tf.nn.relu(node.mailbox['m']), 1)
             return {'relu_h': accum}
 
         self.g.update_all(fn.copy_src('norm_h', 'm'), max_reduce)
+        self.g.ndata['max_h'] = self.g.ndata['max_h'] * self.g.ndata['norm']
         h = tf.concat((h, self.g.ndata['max_h']), axis=1)
 
         self.g.update_all(fn.copy_src('norm_h', 'm'), min_reduce)
+        self.g.ndata['min_h'] = self.g.ndata['min_h'] * self.g.ndata['norm']
         h = tf.concat((h, self.g.ndata['min_h']), axis=1)
 
         self.g.update_all(fn.copy_src('norm_h', 'm'), sigmoid_reduce)
+        self.g.ndata['sig_h'] = self.g.ndata['sig_h'] * self.g.ndata['norm']
         h = tf.concat((h, self.g.ndata['sig_h']), axis=1)
 
         self.g.update_all(fn.copy_src('norm_h', 'm'), tanh_reduce)
+        self.g.ndata['tan_h'] = self.g.ndata['tan_h'] * self.g.ndata['norm']
         h = tf.concat((h, self.g.ndata['tan_h']), axis=1)
 
         self.g.update_all(fn.copy_src('norm_h', 'm'), relu_reduce)
+        self.g.ndata['relu_h'] = self.g.ndata['relu_h'] * self.g.ndata['norm']
         h = tf.concat((h, self.g.ndata['relu_h']), axis=1)
 
-        h = tf.math.l2_normalize(h, axis=-1)
         h = tf.matmul(h, self.weight)
         if self.activation:
             h = self.activation(h)
@@ -139,7 +143,7 @@ class GCN(layers.Layer):
 
         # input layer
         self.layers.append(
-            GCNLayer(g, gcn_msg, gcn_reduce, in_features+1, n_hidden, activation, dropout, l2))
+            GCNLayer(g, gcn_msg, gcn_reduce, in_features, n_hidden, activation, dropout, l2))
         # hidden layers
         for i in range(n_layers - 1):
             self.layers.append(
@@ -148,9 +152,10 @@ class GCN(layers.Layer):
         self.layers.append(GCNLayer(g, gcn_msg, gcn_reduce, n_hidden, out_features, None, dropout, l2))
 
     def call(self, features):
-        h = tf.concat((features, tf.reshape(self.g.ndata['degree'], (-1, 1))), axis=1)
-        # h = features
+        # h = tf.concat((features, tf.reshape(self.g.ndata['degree'], (-1, 1))), axis=1)
+        h = features
         for layer in self.layers:
+            # h = tf.math.l2_normalize(h, axis=-1)
             h = layer(h)
         return h
 

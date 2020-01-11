@@ -615,7 +615,7 @@ class HybridRecommender(RecommendationBase):
         else:
             ratings = self.predict([(user, i) for i in res])
         results = list(sorted(zip(res, ratings), key=operator.itemgetter(1), reverse=True))
-        self.log.info("Find K Items for user = %s, time taken = %.4f",
+        self.log.debug("Find K Items for user = %s, time taken = %.4f",
                       user,
                       time.time() - start)
         return results

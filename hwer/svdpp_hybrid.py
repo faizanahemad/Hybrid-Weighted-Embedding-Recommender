@@ -329,7 +329,7 @@ class SVDppHybrid(HybridRecommender):
         assert len(predictions) == len(user_item_pairs)
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
-        self.log.info("Finished Predicting for n_samples = %s, time taken = %.2f",
+        self.log.debug("Finished Predicting for n_samples = %s, time taken = %.2f",
                       len(user_item_pairs),
                       time.time() - start)
         return predictions
