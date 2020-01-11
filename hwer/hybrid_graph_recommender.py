@@ -47,11 +47,9 @@ class GCNLayer(layers.Layer):
         self.gcn_reduce = gcn_reduce
         self.reg = keras.layers.ActivityRegularization(l2=l2)
         self.l2 = l2
-        w_init = tf.initializers.glorot_uniform()
-        self.weight = tf.Variable(initial_value=w_init(shape=(in_feats * 2, out_feats * 2),
-                                                       dtype='float32'), dtype=tf.float32,
-                                  trainable=True)
-        self.weight2 = tf.Variable(initial_value=w_init(shape=(out_feats * 2, out_feats),
+        # w_init = tf.initializers.glorot_uniform()
+        w_init = tf.initializers.glorot_normal()
+        self.weight = tf.Variable(initial_value=w_init(shape=(in_feats * 7, out_feats),
                                                        dtype='float32'), dtype=tf.float32,
                                   trainable=True)
         if dropout:
@@ -65,23 +63,57 @@ class GCNLayer(layers.Layer):
 
         self.g.ndata['norm_h'] = self.g.ndata['h'] * self.g.ndata['norm']
         self.g.update_all(fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h'))  # consider fn.mean here, # try edge weights
-        self.g.ndata['agg_h'] = self.g.ndata['agg_h'] * self.g.ndata['norm']  # consider removing 'norm' if fn.mean used above
+        # self.g.ndata['agg_h'] = self.g.ndata['agg_h'] * self.g.ndata['norm']  # consider removing 'norm' if fn.mean used above
         h = tf.concat((h, self.g.ndata['agg_h']), axis=1)
+        if self.gcn_reduce is not None and self.gcn_msg is not None:
+            self.g.update_all(self.gcn_msg, self.gcn_reduce)
+            h = tf.concat((h, self.g.ndata['external_h']), axis=1)
 
+        def max_reduce(node):
+            accum = tf.reduce_max(node.mailbox['m'], 1)
+            return {'max_h': accum}
+
+        def min_reduce(node):
+            accum = tf.reduce_min(node.mailbox['m'], 1)
+            return {'min_h': accum}
+
+        def sigmoid_reduce(node):
+            accum = tf.reduce_sum(tf.nn.sigmoid(node.mailbox['m']), 1)
+            return {'sig_h': accum}
+
+        def tanh_reduce(node):
+            accum = tf.reduce_sum(tf.nn.tanh(node.mailbox['m']), 1)
+            return {'tan_h': accum}
+
+        def relu_reduce(node):
+            accum = tf.reduce_sum(tf.nn.relu(node.mailbox['m']), 1)
+            return {'relu_h': accum}
+
+        self.g.update_all(fn.copy_src('norm_h', 'm'), max_reduce)
+        h = tf.concat((h, self.g.ndata['max_h']), axis=1)
+
+        self.g.update_all(fn.copy_src('norm_h', 'm'), min_reduce)
+        h = tf.concat((h, self.g.ndata['min_h']), axis=1)
+
+        self.g.update_all(fn.copy_src('norm_h', 'm'), sigmoid_reduce)
+        h = tf.concat((h, self.g.ndata['sig_h']), axis=1)
+
+        self.g.update_all(fn.copy_src('norm_h', 'm'), tanh_reduce)
+        h = tf.concat((h, self.g.ndata['tan_h']), axis=1)
+
+        self.g.update_all(fn.copy_src('norm_h', 'm'), relu_reduce)
+        h = tf.concat((h, self.g.ndata['relu_h']), axis=1)
+
+        h = tf.math.l2_normalize(h, axis=-1)
         h = tf.matmul(h, self.weight)
         if self.activation:
             h = self.activation(h)
-        h = tf.matmul(h, self.weight2)
-        if self.activation:
-            h = self.activation(h)
-        h = tf.math.l2_normalize(h, axis=-1)
 
         if self.dropout:
             h = self.dropout(h)
 
         if self.l2:
             _ = self.reg(self.weight)
-            _ = self.reg(self.weight2)
         #
         return h
 
@@ -197,11 +229,11 @@ class HybridGCNRec(SVDppHybrid):
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i]) for u, i, r in user_item_affinities]
         ratings = [r for u, i, r in user_item_affinities]
         g = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items,)
-        gcn_msg, gcn_reduce = fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h')
+        gcn_msg, gcn_reduce = fn.copy_src('h', 'm'), fn.sum('m', 'external_h')
         features = unit_length(np.concatenate((user_vectors, item_vectors)), axis=1)
         features = tf.Variable(features, trainable=False, dtype=tf.float32)
         model = GCN(g,
-                    gcn_msg, gcn_reduce,
+                    None, None,
                     features.shape[1],
                     gcn_hidden_dims,
                     self.n_collaborative_dims,
@@ -302,14 +334,14 @@ class HybridGCNRec(SVDppHybrid):
 
         #
         lr = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities), divisor=5)
-        optimizer = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
+        optimizer = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True, clipnorm=2.0)
         total_users = len(user_ids) + 1
         total_items = len(item_ids) + 1
         edge_list = [(user_id_to_index[u]+1, total_users + item_id_to_index[i]+1) for u, i, r in user_item_affinities]
         ratings = [r for u, i, r in user_item_affinities]
         g = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items)
         # gcn_msg = fn.src_mul_edge('norm_h', "weight", 'm')
-        gcn_msg, gcn_reduce = fn.copy_src('norm_h', 'm'), fn.sum('m', 'agg_h')
+        gcn_msg, gcn_reduce = fn.copy_src('h', 'm'), fn.sum('m', 'external_h')
         if use_content:
             user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
             item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
@@ -318,18 +350,8 @@ class HybridGCNRec(SVDppHybrid):
         features = unit_length(features, axis=1)
         features[np.isnan(features)] = 0.0
         features[np.isinf(features)] = 0.0
-        w_init = tf.initializers.glorot_uniform()
-        user_item_dot_scaler = tf.Variable(initial_value=w_init(shape=(self.n_collaborative_dims, self.n_collaborative_dims),
-                                                       dtype='float32'), dtype=tf.float32, trainable=True)
-        item_items_dot_scaler = tf.Variable(
-            initial_value=w_init(shape=(self.n_collaborative_dims, self.n_collaborative_dims),
-                                 dtype='float32'), dtype=tf.float32, trainable=True)
-        user_users_dot_scaler = tf.Variable(
-            initial_value=w_init(shape=(self.n_collaborative_dims, self.n_collaborative_dims),
-                                 dtype='float32'), dtype=tf.float32, trainable=True)
-
         model = GCN(g,
-                    gcn_msg, gcn_reduce,
+                    None, None,
                     features.shape[1],
                     network_width,
                     self.n_collaborative_dims,
@@ -355,6 +377,8 @@ class HybridGCNRec(SVDppHybrid):
 
         user_vec = tf.gather(vectors, input_user)
         item_vec = tf.gather(vectors, item)
+        user_vec = tf.keras.layers.Flatten()(user_vec)
+        item_vec = tf.keras.layers.Flatten()(item_vec)
         users_vecs = tf.gather(vectors, input_users)
         items_vecs = tf.gather(vectors, items)
 
@@ -368,16 +392,11 @@ class HybridGCNRec(SVDppHybrid):
         users_vecs = users_vecs * ni_input
         items_vecs = items_vecs * nu_input
 
-        kernel_regularizer = keras.layers.ActivityRegularization(l2=kernel_l2)
-        user_item_dot_scaler = kernel_regularizer(user_item_dot_scaler)
-        item_items_dot_scaler = kernel_regularizer(item_items_dot_scaler)
-        user_users_dot_scaler = kernel_regularizer(user_users_dot_scaler)
-
-        user_item_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(user_vec, user_item_dot_scaler), item_vec),
+        user_item_vec_dot = tf.reduce_sum(tf.multiply(user_vec, item_vec),
                                           axis=1)
-        item_items_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(item_vec, item_items_dot_scaler), items_vecs),
+        item_items_vec_dot = tf.reduce_sum(tf.multiply(item_vec, items_vecs),
                                            axis=1)
-        user_users_vec_dot = tf.reduce_sum(tf.multiply(tf.linalg.matmul(user_vec, user_users_dot_scaler), users_vecs),
+        user_users_vec_dot = tf.reduce_sum(tf.multiply(user_vec, users_vecs),
                                            axis=1)
 
         implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
@@ -404,13 +423,14 @@ class HybridGCNRec(SVDppHybrid):
                       loss=[root_mean_squared_error], metrics=[root_mean_squared_error, mean_absolute_error])
 
         rating_model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
+        # print(rating_model.summary())
+        # keras.utils.plot_model(rating_model, 'model.png', show_shapes=True, expand_nested=True,)
         #
         prediction_artifacts = {"vectors": model(features), "user_item_list": user_item_list,
                                 "item_user_list": item_user_list, "mu": mu,
                                 "user_bias": np.array(user_embedding_layer.get_weights()[0]).flatten(),
                                 "item_bias": np.array(item_embedding_layer.get_weights()[0]).flatten(),
-                                "total_users": total_users, "user_item_dot_scaler": user_item_dot_scaler.numpy(),
-                                "user_users_dot_scaler": user_users_dot_scaler.numpy(), "item_items_dot_scaler": item_items_dot_scaler.numpy(),
+                                "total_users": total_users,
                                 "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
                                 "ratings_count_by_item": ratings_count_by_item,
                                 "batch_size": batch_size, "gen_fn": gen_fn}
@@ -424,10 +444,6 @@ class HybridGCNRec(SVDppHybrid):
         user_bias = self.prediction_artifacts["user_bias"]
         item_bias = self.prediction_artifacts["item_bias"]
         total_users = self.prediction_artifacts["total_users"]
-        user_item_dot_scaler = self.prediction_artifacts["user_item_dot_scaler"]
-        user_users_dot_scaler = self.prediction_artifacts["user_users_dot_scaler"]
-        item_items_dot_scaler = self.prediction_artifacts["item_items_dot_scaler"]
-
 
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
         ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
@@ -478,9 +494,9 @@ class HybridGCNRec(SVDppHybrid):
             users_vecs = np.multiply(users_vecs, ni_input)
             items_vecs = np.multiply(items_vecs, nu_input)
 
-            user_item_vec_dot = np.sum(np.multiply(np.matmul(user_vec, user_item_dot_scaler), item_vec), axis=1)
-            item_items_vec_dot = np.sum(np.multiply(np.matmul(item_vec, item_items_dot_scaler), items_vecs), axis=1)
-            user_users_vec_dot = np.sum(np.multiply(np.matmul(user_vec, user_users_dot_scaler), users_vecs), axis=1)
+            user_item_vec_dot = np.sum(np.multiply(user_vec, item_vec), axis=1)
+            item_items_vec_dot = np.sum(np.multiply(item_vec, items_vecs), axis=1)
+            user_users_vec_dot = np.sum(np.multiply(user_vec, users_vecs), axis=1)
             implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
             bu = np.take(user_bias, user_input, axis=0)
             bi = np.take(item_bias, x[:, 1].astype(int), axis=0)
