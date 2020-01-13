@@ -101,9 +101,9 @@ enable_kfold = False
 enable_error_analysis = False
 verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
 test_retrieval = False
-cores = 10
 
 if test_data_subset:
+    cores = 10
     df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings,
                                                  cores)
 

@@ -113,6 +113,7 @@ pip install -r requirements.txt
 
 ### Interesting Papers
 - [Deep Reinforcement Learning based Recommendation with Explicit User-Item Interactions Modeling](https://arxiv.org/pdf/1810.12027.pdf)
+- [Inductive Representation Learning on Large Graphs](https://arxiv.org/abs/1706.02216)
 
 ### Datasets and Downloads
 - https://github.com/celiao/tmdbsimple/
