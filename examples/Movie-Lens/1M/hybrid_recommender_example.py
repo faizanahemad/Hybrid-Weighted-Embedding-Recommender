@@ -84,12 +84,26 @@ df_user, df_item, ratings = read_data()
 test_data_subset = True
 enable_kfold = False
 enable_error_analysis = False
-verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG"] else 0
+verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 test_retrieval = False
-cores = 40
 
 if test_data_subset:
-    df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings, cores)
+    # cores = 25
+    item_counts = ratings.groupby(['item'])['user'].count().reset_index()
+    item_counts = item_counts[(item_counts["user"] <= 200)&(item_counts["user"] >= 20)].head(400)
+    items = set(item_counts["item"])
+    ratings = ratings[ratings["item"].isin(items)]
+
+    user_counts = ratings.groupby(['user'])['item'].count().reset_index()
+    user_counts = user_counts[(user_counts["item"] <= 100)&(user_counts["item"] >= 20)].head(400)
+    users = set(user_counts["user"])
+    ratings = ratings[ratings["user"].isin(users)]
+
+    users = set(ratings["user"])
+    items = set(ratings["item"])
+    df_user = df_user[df_user["user"].isin(users)]
+    df_item = df_item[df_item["item"].isin(ratings.item)]
+    # df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings, cores)
 
 ratings = ratings[["user", "item", "rating"]]
 user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
@@ -121,18 +135,20 @@ hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
 hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.75, epochs=20, batch_size=128,
+                               prediction_network_params=dict(lr=0.00001, epochs=10, batch_size=2**9,
                                                               network_width=128, padding_length=50,
-                                                              network_depth=3, verbose=verbose,
+                                                              network_depth=2, verbose=verbose,
                                                               kernel_l2=0.0,
                                                               bias_regularizer=0.0, dropout=0.0, use_content=False),
-                               user_item_params=dict(lr=0.2, epochs=20, batch_size=64, l2=0.1,
-                                                     gcn_lr=0.01, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0,
+                               user_item_params=dict(lr=0.01, epochs=20, batch_size=64, l2=0.1,
+                                                     gcn_lr=0.005, gcn_epochs=1, gcn_layers=3, gcn_dropout=0.0,
                                                      gcn_hidden_dims=128, gcn_kernel_l2=0.001,
-                                                     gcn_batch_size=256,
-                                                     verbose=verbose, margin=1.0)))
+                                                     gcn_batch_size=2**14,
+                                                     verbose=verbose, margin=0.75)))
 
-hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10}, "algos": ["svdpp", "baseline"]}
+hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10},
+                            "svd": {"biased": False, "n_factors": 40},
+                            "algos": ["baseline", "svd"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperparameter_content,
                            svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )

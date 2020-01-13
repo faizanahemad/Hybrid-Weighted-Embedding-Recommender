@@ -182,10 +182,12 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
     end = time.time()
     total_time = end - start
 
-    assert np.sum(np.isnan(recsys.predict([(users[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl"),
+    default_preds = recsys.predict([(users[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl"),
                                            (users[0], items[0]),
                                            ("21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl", "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl"),
-                                           ("21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl", items[0])]))) == 0
+                                           ("21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl", items[0])])
+    print("Default Preds = ", default_preds)
+    assert np.sum(np.isnan(default_preds)) == 0
 
     recsys.fast_inference = True
     recsys.super_fast_inference = False
