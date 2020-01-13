@@ -9,9 +9,6 @@ import pickle as pkl
 import numpy as np
 import scipy.sparse as sp
 
-__author__ = "Zhang Zhengyan"
-__email__ = "zhangzhengyan14@mails.tsinghua.edu.cn"
-
 
 class Graph(object):
     def __init__(self):
@@ -32,6 +29,7 @@ class Graph(object):
     def read_g(self, g):
         self.G = g
         self.encode_node()
+        return self
 
     def read_edgelist(self, edge_list, weighted=False):
         self.G = nx.DiGraph()
@@ -55,10 +53,11 @@ class Graph(object):
         for x in edge_list:
             func(x)
         self.encode_node()
+        return self
 
 
 class Walker:
-    def __init__(self, G, p, q, workers):
+    def __init__(self, G, p, q, workers=None):
         self.G = G.G
         self.p = p
         self.q = q

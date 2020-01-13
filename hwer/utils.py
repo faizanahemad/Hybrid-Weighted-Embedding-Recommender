@@ -496,7 +496,7 @@ class LRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
         step = self.step
         div = self.divisor
         new_lr = np.interp(float(K.eval(step)), [0, total_steps / 3, 0.8 * total_steps, total_steps],
-                           [lr / div, lr, lr / div, lr / np.square(div)])
+                           [lr / div, lr, lr / div, lr / (2*div)])
         self.lrs.append(new_lr)
         self.step += 1
         self.lr = new_lr

@@ -381,9 +381,9 @@ class HybridRecommender(RecommendationBase):
                 return (user, second_item, distant_item), 0
 
             def generator():
-                for i in range(0, len(affinities), batch_size * 10):
+                for i in range(0, len(affinities), batch_size * 4):
                     start = i
-                    end = min(i + batch_size * 10, len(affinities))
+                    end = min(i + batch_size * 4, len(affinities))
                     generated = [get_one_example(u, v, w) for u, v, w in affinities[start:end]]
                     for g in generated:
                         yield g
@@ -468,7 +468,7 @@ class HybridRecommender(RecommendationBase):
 
         encoder = bn
         learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
-        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
+        sgd = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
         model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 

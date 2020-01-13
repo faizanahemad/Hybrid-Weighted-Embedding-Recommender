@@ -93,9 +93,9 @@ class SVDppHybrid(HybridRecommender):
 
         def generate_training_samples(affinities):
             def generator():
-                for i in range(0, len(affinities), batch_size*4):
+                for i in range(0, len(affinities), batch_size*2):
                     start = i
-                    end = min(i + batch_size*4, len(affinities))
+                    end = min(i + batch_size*2, len(affinities))
                     generated = [(gen_fn(u, v, nu, ni), r + rng(1)) for u, v, nu, ni, r in affinities[start:end]]
                     for g in generated:
                         yield g
@@ -112,7 +112,7 @@ class SVDppHybrid(HybridRecommender):
         train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
 
-        train = train.shuffle(batch_size*4).batch(batch_size).prefetch(8)
+        train = train.shuffle(batch_size*4).batch(batch_size).prefetch(2)
         return mu, user_bias, item_bias, train, \
                ratings_count_by_user, ratings_count_by_item, \
                min_affinity, max_affinity, user_item_list, item_user_list, \
@@ -329,7 +329,4 @@ class SVDppHybrid(HybridRecommender):
         assert len(predictions) == len(user_item_pairs)
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
-        self.log.debug("Finished Predicting for n_samples = %s, time taken = %.2f",
-                      len(user_item_pairs),
-                      time.time() - start)
         return predictions
