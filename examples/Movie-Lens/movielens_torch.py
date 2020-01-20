@@ -11,16 +11,17 @@ from functools import partial
 
 
 def ml100k_default_reader(directory):
-    def read_user_line(self, l):
+    def read_user_line(l):
         id_, age, gender, occupation, zip_ = l.strip().split('|')
-        age = np.searchsorted([20, 30, 40, 50, 60], age)  # bin the ages into <20, 20-30, 30-40, ..., >60
+        age = np.searchsorted([10, 20, 30, 40, 50, 60], age)  # bin the ages into <20, 20-30, 30-40, ..., >60
         return {'id': int(id_), 'gender': gender, 'age': age, 'occupation': occupation, 'zip': zip_}
 
-    def read_product_line(self, l):
+    def read_product_line(l):
         fields = l.strip().split('|')
         id_ = fields[0]
         title = fields[1]
         genres = fields[-19:]
+        genres = np.array(list(map(int, genres)))
 
         # extract year
         if re.match(r'.*\([0-9]{4}\)$', title):
@@ -34,7 +35,7 @@ def ml100k_default_reader(directory):
             data['genre' + str(i)] = (g != 0)
         return data
 
-    def read_rating_line(self, l):
+    def read_rating_line(l):
         user_id, product_id, rating, timestamp = l.split()
         return {'user_id': int(user_id), 'product_id': int(product_id), 'rating': float(rating),
                 'timestamp': int(timestamp)}
@@ -84,14 +85,18 @@ def ml100k_enhanced_reader(directory):
 
 class MovieLens(object):
 
-    def __init__(self, directory, split_by_time=None):
+    def __init__(self, dataset, directory, split_by_time=None):
         """
 
         :param directory:
         :param split_by_time: Set this to 'timestamp' to perform a user-based temporal split of the dataset.
         """
         self.split_by_time = split_by_time
-        users, products, ratings, genres = ml100k_default_reader(directory)
+        if dataset == 'ml-100k':
+            users, products, ratings, genres = ml100k_default_reader(directory)
+        elif dataset == 'ml-100k_enhanced':
+            users, products, ratings, genres = ml100k_enhanced_reader(directory)
+
         self.genres = genres
         self.products = products
         self.users = users
@@ -148,31 +153,6 @@ class MovieLens(object):
 
         g = dgl.DGLGraph(multigraph=True)
         g.add_nodes(len(user_ids) + len(product_ids))
-
-        # #
-        # self.users['zip'] = self.users['zip'].apply(lambda x: str(x)[:-3])
-        #
-        # from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, \
-        #     NumericEmbedding
-        # from hwer import Feature, FeatureSet, FeatureType
-        # embedding_mapper = {}
-        # embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=16)
-        #
-        # embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
-        # embedding_mapper['numeric'] = NumericEmbedding(4)
-        # embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
-        #
-        # u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL,
-        #              values=self.users[["gender", "age", "occupation", "zip"]].values)
-        # user_data = FeatureSet([u1])
-        #
-        # i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=df_item.text.values)
-        # i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=df_item.genres.values)
-        # i3 = Feature(feature_name="numeric", feature_type=FeatureType.NUMERIC,
-        #              values=np.abs(df_item[["title_length", "overview_length", "runtime"]].values) + 1)
-        # item_data = FeatureSet([i1, i2, i3])
-
-        #
 
         # user features
         for user_column in self.users.columns:
