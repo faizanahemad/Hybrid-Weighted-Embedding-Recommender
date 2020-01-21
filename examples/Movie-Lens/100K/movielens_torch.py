@@ -79,10 +79,6 @@ def ml100k_default_reader(directory):
     return users, products, ratings, genres
 
 
-def ml100k_enhanced_reader(directory):
-    pass
-
-
 class MovieLens(object):
 
     def __init__(self, dataset, directory, split_by_time=None):

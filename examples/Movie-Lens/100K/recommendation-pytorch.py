@@ -15,7 +15,7 @@ import stanfordnlp
 # If you don't have stanfordnlp installed and the English models downloaded, please uncomment this statement
 # stanfordnlp.download('en', force=True)
 
-ml = movielens.MovieLens('ml-100k', directory="100K/ml-100k")
+ml = movielens.MovieLens('ml-100k', directory="ml-100k")
 
 
 def mix_embeddings(ndata, emb, proj):
