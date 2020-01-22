@@ -11,11 +11,13 @@ dgl.load_backend('pytorch')
 
 import movielens_torch_vectorised as movielens
 import stanfordnlp
+import numpy as np
 
 # If you don't have stanfordnlp installed and the English models downloaded, please uncomment this statement
 # stanfordnlp.download('en', force=True)
 feature_size = 100
-ml = movielens.MovieLens('ml-100k', directory="100K/ml-100k", feature_size=feature_size*2)
+n_content_dims = 200
+ml = movielens.MovieLens('ml-100k', directory="100K/ml-100k", feature_size=n_content_dims)
 
 
 def mix_embeddings(ndata, proj):
@@ -36,11 +38,12 @@ def init_bias(param):
 
 
 class GraphSageConvWithSampling(nn.Module):
-    def __init__(self, feature_size):
+    def __init__(self, feature_size, dropout):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
         self.W = nn.Linear(feature_size * 2, feature_size)
+        self.drop = nn.Dropout(dropout)
         init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(self.W.bias)
 
@@ -50,24 +53,27 @@ class GraphSageConvWithSampling(nn.Module):
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         h_concat = torch.cat([h, h_agg], 1)
+        h_concat = self.drop(h_concat)
         h_new = F.leaky_relu(self.W(h_concat))
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
 
 class GraphSageWithSampling(nn.Module):
-    def __init__(self, feature_size, n_layers, G):
+    def __init__(self, n_content_dims, feature_size, n_layers, dropout, G):
         super(GraphSageWithSampling, self).__init__()
 
         self.feature_size = feature_size
         self.n_layers = n_layers
 
-        self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size) for _ in range(n_layers)])
-
-        w = nn.Linear(self.feature_size * 2, self.feature_size)
-        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(w.bias)
-        self.w = w
-        self.proj = nn.Sequential(w, nn.LeakyReLU())
+        self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size, dropout) for _ in range(n_layers)])
+        proj = []
+        for i in range(n_layers + 1):
+            w = nn.Linear(n_content_dims, feature_size)
+            init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
+            init_bias(w.bias)
+            drop = nn.Dropout(dropout)
+            proj.append(nn.Sequential(drop, w, nn.LeakyReLU()))
+        self.proj = nn.ModuleList(proj)
 
         self.G = G
 
@@ -86,7 +92,7 @@ class GraphSageWithSampling(nn.Module):
         for i in range(nf.num_layers):
             nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
-            mix_embeddings(nf.layers[i].data, model.gcn.proj)
+            mix_embeddings(nf.layers[i].data, self.proj[i])
         if self.n_layers == 0:
             return nf.layers[i].data['h']
         for i in range(self.n_layers):
@@ -106,8 +112,8 @@ class GraphSAGERecommender(nn.Module):
 
     def forward(self, nf, src, dst):
         h_output = self.gcn(nf)
-        h_src = h_output[nodeflow.map_from_parent_nid(-1, src, True)]
-        h_dst = h_output[nodeflow.map_from_parent_nid(-1, dst, True)]
+        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
+        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
         score = (h_src * h_dst).sum(1) + self.node_biases[src + 1] + self.node_biases[dst + 1]
         return score
 
@@ -132,17 +138,23 @@ mu = torch.mean(rating)
 rating_valid = g.edges[eid_valid].data['rating']
 rating_test = g.edges[eid_test].data['rating']
 
-
-model = GraphSAGERecommender(GraphSageWithSampling(feature_size, 2, g_train))
-opt = torch.optim.Adam(model.parameters(), lr=0.002, weight_decay=1e-9)
-
+n_layers = 2
+dropout = 0.05
+epochs = 50
 batch_size = 1024
-n_users = len(ml.user_ids)
-n_products = len(ml.product_ids)
-weight_reg = 0.0002
-bias_reg = 0.0002
+bias_reg = 1e-6
+lr = 0.3
 
-for epoch in range(50):
+model = GraphSAGERecommender(GraphSageWithSampling(n_content_dims, feature_size, n_layers, dropout, g_train))
+weight_reg = 1e-6
+# opt = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_reg, nesterov=False)
+opt = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=weight_reg)
+# scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
+#                                                 steps_per_epoch=int(np.ceil(len(src)/batch_size)),
+#                                                 div_factor=20, final_div_factor=20)
+
+
+for epoch in range(epochs):
     start = time.time()
     model.eval()
 
@@ -151,7 +163,7 @@ for epoch in range(50):
         g_train,
         batch_size,
         5,
-        2,
+        n_layers,
         seed_nodes=torch.arange(g.number_of_nodes()),
         prefetch=True,
         add_self_loop=True,
@@ -207,7 +219,7 @@ for epoch in range(50):
         g_train,  # the graph
         batch_size * 2,  # number of nodes to compute at a time, HACK 2
         5,  # number of neighbors for each node
-        2,  # number of layers in GCN
+        n_layers,  # number of layers in GCN
         seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
         prefetch=True,  # whether to prefetch the NodeFlows
         add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
@@ -219,15 +231,12 @@ for epoch in range(50):
     for s, d, r, nodeflow in zip(src_batches, dst_batches, rating_batches, sampler):
         score = model.forward(nodeflow, s, d)
         reg = bias_reg * (torch.norm(model.node_biases[src + 1], 2) + torch.norm(model.node_biases[dst + 1], 2))
-        reg = reg + weight_reg * (torch.norm(model.gcn.w.weight, 2) + torch.norm(model.gcn.w.bias, 2))
-        reg = reg + weight_reg * torch.sum(torch.Tensor([torch.norm(c.W.weight, 2) + torch.norm(c.W.bias, 2)  for c in model.gcn.convs]))
         loss = ((score - r) ** 2).mean() + reg
-        # L1_reg = L1_reg + torch.norm(param, 1)
-        # 0.5 * torch.sum(param**2)
 
         opt.zero_grad()
         loss.backward()
         opt.step()
+        # scheduler.step()
     total_time = time.time() - start
 
     print('Epoch %2d: ' % int(epoch+1), 'Training loss: %.4f' % loss.item(), 'Train RMSE: %.4f ||' % train_rmse.item(), 'Validation RMSE: %.4f' % valid_rmse.item(), 'Test RMSE: %.4f,' % test_rmse.item(), 'Time Taken: %.1f' % total_time)
