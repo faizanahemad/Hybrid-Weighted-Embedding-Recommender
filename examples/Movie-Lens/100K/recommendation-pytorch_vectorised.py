@@ -142,13 +142,12 @@ n_layers = 2
 dropout = 0.05
 epochs = 50
 batch_size = 1024
-bias_reg = 1e-6
-lr = 0.3
+lr = 0.001
 
 model = GraphSAGERecommender(GraphSageWithSampling(n_content_dims, feature_size, n_layers, dropout, g_train))
 weight_reg = 1e-6
 # opt = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_reg, nesterov=False)
-opt = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=weight_reg)
+opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_reg)
 # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
 #                                                 steps_per_epoch=int(np.ceil(len(src)/batch_size)),
 #                                                 div_factor=20, final_div_factor=20)
@@ -230,8 +229,7 @@ for epoch in range(epochs):
     # Training
     for s, d, r, nodeflow in zip(src_batches, dst_batches, rating_batches, sampler):
         score = model.forward(nodeflow, s, d)
-        reg = bias_reg * (torch.norm(model.node_biases[src + 1], 2) + torch.norm(model.node_biases[dst + 1], 2))
-        loss = ((score - r) ** 2).mean() + reg
+        loss = ((score - r) ** 2).mean()
 
         opt.zero_grad()
         loss.backward()
