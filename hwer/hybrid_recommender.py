@@ -350,9 +350,8 @@ class HybridRecommender(RecommendationBase):
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
         return user_vectors, item_vectors
 
-    def __user_item_affinities_triplet_trainer_data_gen__(self,
+    def __user_item_affinities_triplet_trainer_data_gen_fn__(self,
                                                  user_ids: List[str], item_ids: List[str],
-                                                 user_item_affinities: List[Tuple[str, str, float]],
                                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                                  hyperparams: Dict):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -390,12 +389,21 @@ class HybridRecommender(RecommendationBase):
 
             return generator
 
+        return generate_training_samples
+
+    def __user_item_affinities_triplet_trainer_data_gen__(self,
+                                                 user_ids: List[str], item_ids: List[str],
+                                                 user_item_affinities: List[Tuple[str, str, float]],
+                                                 user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                                 hyperparams: Dict):
+
         output_shapes = (((), (), ()), ())
         output_types = ((tf.int64, tf.int64, tf.int64), tf.float32)
-
+        generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
+                                                                                              user_id_to_index, item_id_to_index,
+                                                                                              hyperparams)
         train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
-
         return train
 
     def __user_item_affinities_triplet_trainer__(self,

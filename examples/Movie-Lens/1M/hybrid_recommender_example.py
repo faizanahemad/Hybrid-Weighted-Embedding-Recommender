@@ -32,15 +32,15 @@ def prepare_data_mappers():
     embedding_mapper = {}
     embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=4)
 
-    embedding_mapper['text'] = FasttextEmbedding(n_dims=32)
+    embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
     embedding_mapper['numeric'] = NumericEmbedding(4)
     embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
 
     u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL, values=df_user[["gender", "age", "occupation", "zip"]].values)
     user_data = FeatureSet([u1])
 
-    print("Numeric Nans = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]].isna()))
-    print("Numeric Zeros = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]] <= 0))
+    # print("Numeric Nans = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]].isna()))
+    # print("Numeric Zeros = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]] <= 0))
 
     i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=df_item.text.values)
     i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=df_item.genres.values)
@@ -84,26 +84,28 @@ df_user, df_item, ratings = read_data()
 test_data_subset = True
 enable_kfold = False
 enable_error_analysis = False
-verbose = 2 if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
+verbose = 2 # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 test_retrieval = False
 
 if test_data_subset:
-    # cores = 25
-    item_counts = ratings.groupby(['item'])['user'].count().reset_index()
-    item_counts = item_counts[(item_counts["user"] <= 200)&(item_counts["user"] >= 20)].head(400)
-    items = set(item_counts["item"])
-    ratings = ratings[ratings["item"].isin(items)]
-
-    user_counts = ratings.groupby(['user'])['item'].count().reset_index()
-    user_counts = user_counts[(user_counts["item"] <= 100)&(user_counts["item"] >= 20)].head(400)
-    users = set(user_counts["user"])
-    ratings = ratings[ratings["user"].isin(users)]
-
-    users = set(ratings["user"])
-    items = set(ratings["item"])
-    df_user = df_user[df_user["user"].isin(users)]
-    df_item = df_item[df_item["item"].isin(ratings.item)]
-    # df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings, cores)
+    cores = 40
+    # # ratings = ratings[ratings.rating.isin([1, 5])]
+    # item_counts = ratings.groupby(['item'])['user'].count().reset_index()
+    # item_counts = item_counts[(item_counts["user"] <= 200) & (item_counts["user"] >= 20)].head(100)
+    # items = set(item_counts["item"])
+    # ratings = ratings[ratings["item"].isin(items)]
+    #
+    # user_counts = ratings.groupby(['user'])['item'].count().reset_index()
+    # user_counts = user_counts[(user_counts["item"] <= 100) & (user_counts["item"] >= 20)].head(100)
+    # users = set(user_counts["user"])
+    # ratings = ratings[ratings["user"].isin(users)]
+    #
+    # # ratings = pd.concat((ratings[ratings.rating == 1].head(2), ratings[ratings.rating == 5].head(3)))
+    # users = set(ratings["user"])
+    # items = set(ratings["item"])
+    # df_user = df_user[df_user["user"].isin(ratings.user)]
+    # df_item = df_item[df_item["item"].isin(ratings.item)]
+    df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings, cores)
 
 ratings = ratings[["user", "item", "rating"]]
 user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
@@ -115,7 +117,7 @@ min_rating = np.min([r for u, i, r in user_item_affinities])
 max_rating = np.max([r for u, i, r in user_item_affinities])
 rating_scale = (min_rating, max_rating)
 
-print("Total Samples Taken = %s, |Users| = %s |Items| = %s" % (ratings.shape[0], len(user_list), len(item_list)))
+print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (ratings.shape[0], len(user_list), len(item_list), rating_scale))
 
 hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
                               knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }))
@@ -132,35 +134,35 @@ hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
                                  user_item_params=dict(lr=0.2, epochs=20, batch_size=64, l2=0.1,
                                                        verbose=verbose, margin=1.0)))
 
-hyperparameters_gcn = dict(n_dims=40, combining_factor=0.1,
-                           knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+hyperparameters_gcn = dict(n_dims=32, combining_factor=0.1,
+                           knn_params=dict(n_neighbors=5, index_time_params={'M': 15, 'ef_construction': 5, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.00001, epochs=10, batch_size=2**9,
-                                                              network_width=128, padding_length=50,
+                               prediction_network_params=dict(lr=0.005, epochs=25, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
-                                                              kernel_l2=0.0,
-                                                              bias_regularizer=0.0, dropout=0.0, use_content=False),
-                               user_item_params=dict(lr=0.01, epochs=20, batch_size=64, l2=0.1,
-                                                     gcn_lr=0.005, gcn_epochs=1, gcn_layers=3, gcn_dropout=0.0,
-                                                     gcn_hidden_dims=128, gcn_kernel_l2=0.001,
-                                                     gcn_batch_size=2**14,
+                                                              kernel_l2=1e-7, dropout=0.0, use_content=True),
+                               user_item_params=dict(lr=0.05, epochs=1, batch_size=64, l2=0.1,
+                                                     gcn_lr=0.002, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
+                                                     gcn_kernel_l2=1e-8,
+                                                     gcn_batch_size=1024,
                                                      verbose=verbose, margin=0.75)))
 
 hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10},
-                            "svd": {"biased": False, "n_factors": 40},
-                            "algos": ["baseline", "svd"]}
+                            "svd": {"biased": True, "n_factors": 10},
+                            "algos": ["baseline", "svd", "svdpp"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperparameter_content,
                            svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
 
 svdpp_hybrid = False
 gcn_hybrid = True
-surprise = False
+surprise = True
 content_only = False
 
 
 if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2, stratify=[u for u, i, r in user_item_affinities])
+    print("Train Length = ", len(train_affinities))
+    print("Validation Length =", len(validation_affinities))
     recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities, user_list, item_list,
                                                          hyperparamters_dict,
                                                          prepare_data_mappers, rating_scale,
@@ -169,10 +171,10 @@ if not enable_kfold:
                                                          enable_error_analysis=enable_error_analysis)
     results = display_results(results)
     user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
-    print(user_rating_count_metrics)
-    user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % cores, index=False)
-    results.reset_index().to_csv("overall_results_%s.csv" % cores, index=False)
-    visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
+    # print(user_rating_count_metrics)
+    # user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % cores, index=False)
+    # results.reset_index().to_csv("overall_results_%s.csv" % cores, index=False)
+    # visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
     if test_retrieval:
         recsys = recs[-1]
         user_id = df_user.user.values[0]

@@ -15,11 +15,13 @@ from surprise import SVDpp
 from tensorflow import keras
 from tensorflow.keras import layers
 from .random_walk import *
+import os
 
 import networkx as nx
 import tensorflow as tf
 from dgl import DGLGraph
 import dgl.function as fn
+import dgl
 from dgl.data import register_data_args, load_data
 
 
@@ -31,104 +33,7 @@ from .utils import RatingPredRegularization, get_rng, \
     normalize_affinity_scores_by_user_item_bs, get_clipped_rmse, unit_length_violations, UnitLengthRegularization, \
     unit_length
 
-
-class GCNLayer(layers.Layer):
-    def __init__(self,
-                 g,
-                 gcn_msg,
-                 gcn_reduce,
-                 in_feats,
-                 out_feats,
-                 activation,
-                 dropout,
-                 l2=0.0):
-        super(GCNLayer, self).__init__()
-        self.g = g
-        self.gcn_msg = gcn_msg
-        self.gcn_reduce = gcn_reduce
-        self.reg = keras.layers.ActivityRegularization(l2=l2)
-        self.l2 = l2
-        w_init = tf.initializers.glorot_uniform()
-        # w_init = tf.initializers.glorot_normal()
-        self.weight = tf.Variable(initial_value=w_init(shape=(in_feats * 4, out_feats),
-                                                       dtype='float32'), dtype=tf.float32,
-                                  trainable=True)
-        if dropout:
-            self.dropout = layers.Dropout(rate=dropout)
-        else:
-            self.dropout = 0.0
-        self.activation = activation
-
-    def call(self, h):
-        h = tf.math.l2_normalize(h, axis=-1)
-        h = h * self.g.ndata['norm']
-        self.g.ndata['h'] = h
-        self.g.update_all(fn.copy_src('h', 'm'), fn.sum('m', 'agg_h'))  # consider fn.mean here, # try edge weights
-        self.g.ndata['agg_h'] = self.g.ndata['agg_h'] * self.g.ndata['norm']  # consider removing 'norm' if fn.mean used above
-
-        def reduce_fn(node):
-            accum1 = tf.reduce_max(node.mailbox['m'], 1)
-            accum3 = tf.reduce_mean(tf.keras.activations.hard_sigmoid(node.mailbox['m']), 1)
-            accum = tf.concat((accum1, accum3), 1)
-            return {'accum_h': accum}
-
-        self.g.update_all(fn.copy_src('h', 'm'), reduce_fn)
-        self.g.ndata['accum_h'] = self.g.ndata['accum_h'] * self.g.ndata['norm']
-        if self.gcn_reduce is not None and self.gcn_msg is not None:
-            self.g.update_all(self.gcn_msg, self.gcn_reduce)
-            self.g.ndata['external_h'] = self.g.ndata['external_h'] * self.g.ndata['norm']
-            h = tf.concat((h, self.g.ndata['external_h']), axis=1)
-
-        h = tf.concat((self.g.ndata['h'], self.g.ndata['agg_h'], self.g.ndata['accum_h']), axis=1)
-        h = tf.matmul(h, self.weight)
-        if self.activation:
-            h = self.activation(h)
-
-        if self.dropout:
-            h = self.dropout(h)
-
-        if self.l2:
-            _ = self.reg(self.weight)
-        #
-        return h
-
-    def __call__(self, h):
-        return self.call(h)
-
-
-class GCN(layers.Layer):
-    def __init__(self,
-                 g,
-                 gcn_msg,
-                 gcn_reduce,
-                 in_features,
-                 n_hidden,
-                 out_features,
-                 n_layers,
-                 activation,
-                 dropout,
-                 l2=0.0):
-        super(GCN, self).__init__()
-        self.layers = []
-        self.g = g
-
-        # input layer
-        self.layers.append(
-            GCNLayer(g, gcn_msg, gcn_reduce, in_features, n_hidden, activation, dropout, l2))
-        # hidden layers
-        for i in range(n_layers - 1):
-            self.layers.append(
-                GCNLayer(g, gcn_msg, gcn_reduce, n_hidden, n_hidden, activation, dropout, l2))
-        # output layer
-        self.layers.append(GCNLayer(g, gcn_msg, gcn_reduce, n_hidden, out_features, None, dropout, l2))
-
-    def call(self, features):
-        # h = tf.concat((features, tf.reshape(self.g.ndata['degree'], (-1, 1))), axis=1)
-        h = features
-        for layer in self.layers:
-            # h = tf.math.l2_normalize(h, axis=-1)
-            h = layer(h)
-        return h
+from .gcn import *
 
 
 class HybridGCNRec(SVDppHybrid):
@@ -138,34 +43,10 @@ class HybridGCNRec(SVDppHybrid):
         super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims, fast_inference)
         self.log = getLogger(type(self).__name__)
         self.super_fast_inference = super_fast_inference
+        self.cpu = int(os.cpu_count()/2)
 
-    def __build_user_item_graph__(self, edge_list: List[Tuple[int, int]], edge_weights: List[float], total_users: int, total_items: int):
-
-        src, dst = tuple(zip(*edge_list))
-        g = DGLGraph()
-        g.add_nodes(total_users + total_items)
-
-        g.add_edges(src, dst)
-        g.add_edges(dst, src)
-        g.add_edges(g.nodes(), g.nodes())
-        n_edges = g.number_of_edges()
-        # # normalization
-        degs = g.in_degrees()
-        degs = tf.cast(tf.identity(degs), dtype=tf.float32)
-        norm = tf.math.pow(degs, -0.5)
-        norm = tf.where(tf.math.is_inf(norm), tf.zeros_like(norm), norm)
-        g.ndata['norm'] = tf.expand_dims(norm, -1)
-        g.ndata['degree'] = tf.math.tanh(tf.math.log1p(tf.math.log1p(tf.math.log1p(degs/100.0))))
-        edge_weights = np.array(edge_weights + edge_weights + [np.mean(edge_weights)] * g.number_of_nodes()).astype(np.float32)
-        ew_min = np.min(edge_weights)
-        ew_max = np.max(edge_weights)
-        edge_weights = (edge_weights - ew_min)/(ew_max - ew_min)
-        g.edata['weight'] = tf.expand_dims(edge_weights, -1)
-        return g
-
-    def user_item_affinities_triplet_trainer_data_gen__(self,
+    def user_item_affinities_triplet_trainer_data_gen_fn__(self,
                                                  user_ids: List[str], item_ids: List[str],
-                                                 user_item_affinities: List[Tuple[str, str, float]],
                                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                                  hyperparams: Dict):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -202,15 +83,15 @@ class HybridGCNRec(SVDppHybrid):
             def generator():
                 for walk in walker.simulate_walks_generator(5, walk_length=3):
                     nodes = list(set(walk))
-                    combinations = [(x, y) for i, x in enumerate(nodes) for y in nodes[i+1:]]
+                    combinations = [(x, y) for i, x in enumerate(nodes) for y in nodes[i + 1:]]
                     generated = [get_one_example(u, v) for u, v in combinations]
                     for g in generated:
                         yield g
 
             def generator():
-                for i in range(0, len(affinities), batch_size*2):
+                for i in range(0, len(affinities), batch_size):
                     start = i
-                    end = min(i + batch_size*2, len(affinities))
+                    end = min(i + batch_size, len(affinities))
                     combinations = []
                     for u, v, w in affinities[start:end]:
                         w1 = walker.node2vec_walk(3, u)
@@ -221,17 +102,11 @@ class HybridGCNRec(SVDppHybrid):
                         combinations.extend(c)
 
                     generated = [get_one_example(u, v) for u, v in combinations]
-                    random.shuffle(generated)
                     for g in generated:
                         yield g
+
             return generator
-
-        output_shapes = (((), (), ()), ())
-        output_types = ((tf.int64, tf.int64, tf.int64), tf.float32)
-
-        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
-                                               output_types=output_types, output_shapes=output_shapes, )
-        return train
+        return generate_training_samples
 
     def __user_item_affinities_triplet_trainer__(self,
                                          user_ids: List[str], item_ids: List[str],
@@ -248,9 +123,7 @@ class HybridGCNRec(SVDppHybrid):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         gcn_epochs = hyperparams["gcn_epochs"] if "gcn_epochs" in hyperparams else 5
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 5
-        gcn_batch_size = hyperparams["gcn_batch_size"] if "gcn_batch_size" in hyperparams else 5
         gcn_dropout = hyperparams["gcn_dropout"] if "gcn_dropout" in hyperparams else 0.0
-        gcn_hidden_dims = hyperparams["gcn_hidden_dims"] if "gcn_hidden_dims" in hyperparams else self.n_collaborative_dims * 4
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
@@ -268,76 +141,101 @@ class HybridGCNRec(SVDppHybrid):
         total_users = len(user_ids)
         total_items = len(item_ids)
 
-        # user_vectors = np.concatenate((user_vectors, user_triplet_vectors), axis=1)
-        # item_vectors = np.concatenate((item_vectors, item_triplet_vectors), axis=1)
-        user_vectors = user_triplet_vectors
-        item_vectors = item_triplet_vectors
+        edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i], r) for u, i, r in user_item_affinities]
 
-        edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i]) for u, i, r in user_item_affinities]
-        ratings = [r for u, i, r in user_item_affinities]
-        g = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items,)
-        gcn_msg, gcn_reduce = fn.copy_src('h', 'm'), fn.sum('m', 'external_h')
-        features = unit_length(np.concatenate((user_vectors, item_vectors)), axis=1)
-        features = tf.constant(features, dtype=tf.float32)
-        #
-        model = GCN(g,
-                    None, None,
-                    features.shape[1],
-                    gcn_hidden_dims,
-                    self.n_collaborative_dims,
-                    gcn_layers,
-                    tf.nn.leaky_relu,
-                    gcn_dropout,
-                    gcn_kernel_l2)
-        learning_rate = LRSchedule(lr=gcn_lr, epochs=gcn_epochs, batch_size=gcn_batch_size, n_examples=len(user_item_affinities))
-        optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
-        train = self.__user_item_affinities_triplet_trainer_data_gen__(user_ids, item_ids,
-                                                                       user_item_affinities,
-                                                                       user_id_to_index, item_id_to_index,
-                                                                       hyperparams)
-        train = train.shuffle(gcn_batch_size).batch(gcn_batch_size).prefetch(2)
-
-        loss = tf.keras.losses.MeanSquaredError()
+        g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids), np.concatenate((user_vectors, item_vectors)))
+        g_train.readonly()
+        model = GraphSAGETripletEmbedding(GraphSageWithSampling(self.n_content_dims, self.n_collaborative_dims,
+                                                                gcn_layers, gcn_dropout, g_train), margin)
+        opt = torch.optim.Adam(model.parameters(), lr=gcn_lr, weight_decay=gcn_kernel_l2)
+        generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
+                                                                                              user_id_to_index,
+                                                                                              item_id_to_index,
+                                                                                              hyperparams)
+        generator = generate_training_samples(user_item_affinities)
+        model.train()
         for epoch in range(gcn_epochs):
             start = time.time()
-            total_rmse = 0.0
-            total_loss = 0.0
-            total_iters = 0
-            for x, y in train:
-                with tf.GradientTape() as tape:
-                    vectors = model(features)
+            start_gen = time.time()
+            src, dst, neg = [], [], []
+            for (u, v, w), r in generator():
+                src.append(u)
+                dst.append(v)
+                neg.append(w)
+            #
+            total_gen = time.time() - start_gen
+            src = torch.LongTensor(src)
+            dst = torch.LongTensor(dst)
+            neg = torch.LongTensor(neg)
 
-                    item_1 = tf.gather(vectors, x[0])
-                    item_2 = tf.gather(vectors, x[1])
-                    item_3 = tf.gather(vectors, x[2])
-                    item_1 = K.l2_normalize(item_1, axis=1)
-                    item_2 = K.l2_normalize(item_2, axis=1)
-                    item_3 = K.l2_normalize(item_3, axis=1)
+            def train(src, dst, neg):
 
-                    i1_i2_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
-                    i1_i2_dist = 1 - i1_i2_dist
+                shuffle_idx = torch.randperm(len(src))
+                src_shuffled = src[shuffle_idx]
+                dst_shuffled = dst[shuffle_idx]
+                neg_shuffled = neg[shuffle_idx]
 
-                    i1_i3_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_3])
-                    i1_i3_dist = 1 - i1_i3_dist
+                src_batches = src_shuffled.split(batch_size)
+                dst_batches = dst_shuffled.split(batch_size)
+                neg_batches = neg_shuffled.split(batch_size)
 
-                    error = K.relu(i1_i2_dist - i1_i3_dist + margin)
-                    loss_value = loss(y, error)
-                    total_rmse = total_rmse + loss_value
-                    # loss_value += gcn_kernel_l2 * tf.reduce_mean([tf.reduce_mean(tf.nn.l2_loss(v)) for v in model.trainable_weights])
-                    total_loss += loss_value
-                    total_iters += 1
+                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
 
-                grads = tape.gradient(loss_value, model.trainable_weights)
-                optimizer.apply_gradients(zip(grads, model.trainable_weights))
-                del tape
-            total_rmse = total_rmse / total_iters
-            total_loss = total_loss / total_iters
+                sampler = dgl.contrib.sampling.NeighborSampler(
+                    g_train,  # the graph
+                    batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                    5,  # number of neighbors for each node
+                    gcn_layers,  # number of layers in GCN
+                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
+                    prefetch=True,  # whether to prefetch the NodeFlows
+                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
+                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
+                    num_workers=self.cpu,
+                )
+
+                # Training
+                for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
+                    score = model.forward(nodeflow, s, d, n)
+                    loss = (score ** 2).mean()
+
+                    opt.zero_grad()
+                    loss.backward()
+                    opt.step()
+                return loss
+
+            if epoch % 2 == 1:
+                loss = train(src, dst, neg)
+            else:
+                # Reverse Training
+                loss = loss + train(dst, src, neg)
+
             total_time = time.time() - start
-            print("Epoch = %s/%s, RMSE = %.4f, Loss = %.6f, LR = %.6f, Time = %.1fs" % (
-            epoch + 1, gcn_epochs, total_rmse, total_loss, K.get_value(optimizer.learning_rate.lr), total_time))
-        vectors = model(features)
-        user_vectors, item_vectors = vectors[:total_users], vectors[total_users:]
-        return user_triplet_vectors, item_triplet_vectors
+            self.log.info('Epoch %2d: ' % int(epoch + 1) + ' Training loss: %.4f' % loss.item() + ' Generator Time: %.1f' % total_gen + ' Time Taken: %.1f' % total_time)
+
+            #
+        model.eval()
+        sampler = dgl.contrib.sampling.NeighborSampler(
+            g_train,
+            batch_size,
+            5,
+            gcn_layers,
+            seed_nodes=torch.arange(g_train.number_of_nodes()),
+            prefetch=True,
+            add_self_loop=True,
+            shuffle=False,
+            num_workers=self.cpu
+        )
+
+        with torch.no_grad():
+            h = []
+            for nf in sampler:
+                # import pdb
+                # pdb.set_trace()
+                h.append(model.gcn.forward(nf))
+            h = torch.cat(h).numpy()
+
+        user_vectors, item_vectors = h[:total_users], h[total_users:]
+        return user_vectors, item_vectors
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
                                      user_item_affinities: List[Tuple[str, str, float]],
@@ -357,8 +255,6 @@ class HybridGCNRec(SVDppHybrid):
         padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
         use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
-        n_collaborative_dims = user_vectors.shape[1]
-        network_width = hyperparams["network_width"] if "network_width" in hyperparams else 128
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
         use_resnet = hyperparams["use_resnet"] if "use_resnet" in hyperparams else False
@@ -390,125 +286,188 @@ class HybridGCNRec(SVDppHybrid):
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
 
-
-        #
-        lr = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities), divisor=5)
-        optimizer = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True, clipnorm=2.0)
         total_users = len(user_ids) + 1
         total_items = len(item_ids) + 1
-        edge_list = [(user_id_to_index[u]+1, total_users + item_id_to_index[i]+1) for u, i, r in user_item_affinities]
-        ratings = [r for u, i, r in user_item_affinities]
-        g = self.__build_user_item_graph__(edge_list, ratings, total_users, total_items)
-        # gcn_msg = fn.src_mul_edge('norm_h', "weight", 'm')
-        gcn_msg, gcn_reduce = fn.copy_src('h', 'm'), fn.sum('m', 'external_h')
         if use_content:
             user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
             item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
+        else:
+            user_vectors = np.zeros_like(user_vectors)
+            item_vectors = np.zeros_like(item_vectors)
+        edge_list = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
+                     user_item_affinities]
+        g_train = build_dgl_graph(edge_list, total_users + total_items, np.concatenate((user_vectors, item_vectors)))
+        n_content_dims = user_vectors.shape[1]
+        g_train.readonly()
+        model = GraphSAGERecommender(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train))
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
 
-        features = np.concatenate((user_vectors, item_vectors))
-        features = unit_length(features, axis=1)
-        features[np.isnan(features)] = 0.0
-        features[np.isinf(features)] = 0.0
-        features = tf.Variable(features, trainable=True, dtype=tf.float32)
-        user_bias = tf.Variable(user_bias, trainable=True, dtype=tf.float32)
-        item_bias = tf.Variable(item_bias, trainable=True, dtype=tf.float32)
-        final_vectors = None
-        model = GCN(g,
-                    None, None,
-                    features.shape[1],
-                    network_width,
-                    self.n_collaborative_dims,
-                    network_depth,
-                    tf.nn.leaky_relu,
-                    dropout,
-                    kernel_l2)
-        loss = tf.keras.losses.MeanSquaredError()
+        enable_implicit = True
+        generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
+            user_ids, item_ids,
+            user_item_affinities,
+            user_content_vectors,
+            item_content_vectors,
+            user_vectors, item_vectors,
+            user_id_to_index,
+            item_id_to_index,
+            rating_scale, batch_size, padding_length,
+            0, False)
+        user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1,
+                                 ratings_count_by_user[user_id_to_index[u] + 1],
+                                 ratings_count_by_item[item_id_to_index[i] + 1], r) for u, i, r in user_item_affinities]
+        generator = generate_training_samples(user_item_affinities)
 
         for epoch in range(epochs):
             start = time.time()
-            total_iters = 0
-            total_rmse = 0.0
-            total_loss = 0.0
-            non_graph_time = 0.0
-            grad_time = 0.0
-            ap_grad_time = 0.0
-            for x, y in train:
-                with tf.GradientTape() as tape:
-                    vectors = model(features)
-                    start2 = time.time()
-                    user_input = x[0]
-                    item_input = x[1] + total_users
-                    users_input = x[2]
-                    items_input = x[3] + total_users
-                    nu_input = tf.expand_dims(tf.dtypes.cast(x[4], dtype=tf.float32), -1)
-                    ni_input = tf.expand_dims(tf.dtypes.cast(x[5], dtype=tf.float32), -1)
 
-                    user_vec = tf.gather(vectors, user_input)
-                    item_vec = tf.gather(vectors, item_input)
+            user = []
+            item = []
+            users = []
+            items = []
+            nus = []
+            nis = []
+            rating = []
+            start_gen = time.time()
+            for (u, i, us, iis, nu, ni), r in generator():
+                user.append(u)
+                item.append(i)
+                users.append(us)
+                items.append(iis)
+                nus.append(nu)
+                nis.append(ni)
+                rating.append(r)
+            total_gen = time.time() - start_gen
 
-                    users_vecs = tf.gather(vectors, users_input)
-                    items_vecs = tf.gather(vectors, items_input)
-                    users_vecs = tf.reduce_mean(users_vecs, axis=1)
-                    items_vecs = tf.reduce_mean(items_vecs, axis=1)
-                    users_vecs = tf.multiply(users_vecs, ni_input)
-                    items_vecs = tf.multiply(items_vecs, nu_input)
+            user = torch.LongTensor(user)
+            item = torch.LongTensor(item) + total_users
+            users = torch.LongTensor(users)
+            items = torch.LongTensor(items) + total_users
+            nus = torch.DoubleTensor(nus)
+            nis = torch.DoubleTensor(nis)
+            rating = torch.DoubleTensor(rating)
 
-                    user_item_vec_dot = tf.reduce_sum(tf.multiply(user_vec, item_vec), axis=1)
-                    item_items_vec_dot = tf.reduce_sum(tf.multiply(item_vec, items_vecs), axis=1)
-                    user_users_vec_dot = tf.reduce_sum(tf.multiply(user_vec, users_vecs), axis=1)
-                    implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
-                    bu = tf.gather(user_bias, user_input)
-                    bi = tf.gather(item_bias, x[1])
-                    bias_loss = bias_regularizer * (
-                                tf.reduce_mean(tf.nn.l2_loss(bu)) + tf.reduce_mean(tf.nn.l2_loss(bi)))
-                    kernel_loss = tf.reduce_mean([tf.reduce_mean(tf.nn.l2_loss(v)) for v in model.trainable_weights])
-                    kernel_loss = kernel_l2 * kernel_loss
-                    base_estimates = mu + bu + bi
-                    rating = implicit_term
-                    y = tf.dtypes.cast(y, tf.float32)
-                    non_graph_time += (time.time() - start2)
-                    loss_value = loss(y, rating)
-                    total_rmse = total_rmse + loss_value
-                    loss_value = loss_value + bias_loss + kernel_loss
-                    total_loss = total_loss + loss_value
-                    total_iters += 1
-                    final_vectors = vectors
-                gs = time.time()
-                grads = tape.gradient(loss_value, list(model.trainable_weights)+[features])
-                grad_time += (time.time() - gs)
-                gs = time.time()
-                optimizer.apply_gradients(zip(grads, list(model.trainable_weights)+[features]))
-                del tape
-                ap_grad_time += (time.time() - gs)
+            model.eval()
 
-                # print("After = ", len(model.trainable_weights), [tf.reduce_mean(tf.nn.l2_loss(v)).numpy() for v in model.trainable_weights])
+            # Validation & Test, we precompute GraphSage output for all nodes first.
+            sampler = dgl.contrib.sampling.NeighborSampler(
+                g_train,
+                batch_size,
+                5,
+                network_depth,
+                seed_nodes=torch.arange(g_train.number_of_nodes()),
+                prefetch=True,
+                add_self_loop=True,
+                shuffle=False,
+                num_workers=self.cpu
+            )
+
+            with torch.no_grad():
+                h = []
+                for nf in sampler:
+                    # import pdb
+                    # pdb.set_trace()
+                    h.append(model.gcn.forward(nf))
+                h = torch.cat(h)
+
+                # Compute Train RMSE
+                score = torch.zeros(len(user))
+                for i in range(0, len(user), batch_size):
+                    s = user[i:i + batch_size]
+                    d = item[i:i + batch_size]
+                    us = users[i:i + batch_size]
+                    iis = items[i:i + batch_size]
+                    nu = nus[i:i + batch_size]
+                    ni = nis[i:i + batch_size]
+                    res = (h[s] * h[d]).sum(1) + model.node_biases[s + 1] + model.node_biases[d + 1]
+                    score[i:i + batch_size] = res
+                train_rmse = ((score - rating) ** 2).mean().sqrt()
+
+            model.train()
+
+            shuffle_idx = torch.randperm(len(user))
+            src_shuffled = user[shuffle_idx]
+            dst_shuffled = item[shuffle_idx]
+            users_shuffled = users[shuffle_idx]
+            items_shuffled = items[shuffle_idx]
+            nus_shuffled = nus[shuffle_idx]
+            nis_shuffled = nis[shuffle_idx]
+            rating_shuffled = rating[shuffle_idx]
+
+            src_batches = src_shuffled.split(batch_size)
+            dst_batches = dst_shuffled.split(batch_size)
+            users_batches = users_shuffled.split(batch_size)
+            items_batches = items_shuffled.split(batch_size)
+            nus_batches = nus_shuffled.split(batch_size)
+            nis_batches = nis_shuffled.split(batch_size)
+            rating_batches = rating_shuffled.split(batch_size)
+
+            seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
+
+            sampler = dgl.contrib.sampling.NeighborSampler(
+                g_train,  # the graph
+                batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                5,  # number of neighbors for each node
+                network_depth,  # number of layers in GCN
+                seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
+                prefetch=True,  # whether to prefetch the NodeFlows
+                add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
+                shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
+                num_workers=self.cpu,
+            )
+
+            # Training
+            for s, d, us, iis, nus, nis,  r, nodeflow in zip(src_batches, dst_batches,users_batches, items_batches, nus_batches, nis_batches, rating_batches, sampler):
+                score = model.forward(nodeflow, s, d)
+                score_rev = model.forward(nodeflow, d, s)
+                loss = ((score - r) ** 2).mean() + ((score_rev - r) ** 2).mean()
+
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+
             total_time = time.time() - start
-            total_rmse = total_rmse / total_iters
-            total_loss = total_loss / total_iters
-            print("Time: NGT = %.2f, Grad = %.2f, Apply Grad = %.2f" % (non_graph_time, grad_time, ap_grad_time))
-            print("Epoch = %s/%s, RMSE = %.4f, Loss = %.6f, LR = %.6f, Time = %.1fs" % (
-                epoch + 1, epochs, total_rmse, total_loss, K.get_value(optimizer.learning_rate.lr), total_time))
 
+            self.log.info('Epoch %2d: ' % int(epoch + 1) + ' Training loss: %.4f' % loss.item() + ' Train RMSE: %.4f ||' % train_rmse.item() + ' Generator Time: %.1f' % total_gen + '|| Time Taken: %.1f' % total_time)
 
-        # print(rating_model.summary())
-        # keras.utils.plot_model(rating_model, 'model.png', show_shapes=True, expand_nested=True,)
-        #
-        prediction_artifacts = {"vectors": final_vectors, "user_item_list": user_item_list,
+        model.eval()
+        sampler = dgl.contrib.sampling.NeighborSampler(
+            g_train,
+            batch_size,
+            5,
+            network_depth,
+            seed_nodes=torch.arange(g_train.number_of_nodes()),
+            prefetch=True,
+            add_self_loop=True,
+            shuffle=False,
+            num_workers=self.cpu
+        )
+
+        with torch.no_grad():
+            h = []
+            for nf in sampler:
+                # import pdb
+                # pdb.set_trace()
+                h.append(model.gcn.forward(nf))
+            h = torch.cat(h).numpy()
+
+        bias = model.node_biases.detach().numpy()
+        assert len(bias) == total_users + total_items + 1
+
+        prediction_artifacts = {"vectors": h, "user_item_list": user_item_list,
                                 "item_user_list": item_user_list, "mu": mu,
-                                "user_bias": user_bias.numpy(),
-                                "item_bias": item_bias.numpy(),
+                                "bias": bias,
                                 "total_users": total_users,
                                 "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
                                 "ratings_count_by_item": ratings_count_by_item,
                                 "batch_size": batch_size, "gen_fn": gen_fn}
-        self.log.info("Built Prediction Network, model params = %s", model.count_params())
+        # self.log.info("Built Prediction Network, model params = %s", model.count_params())
         return prediction_artifacts
 
-    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
-        vectors = self.prediction_artifacts["vectors"]
+    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=False) -> List[float]:
+        h = self.prediction_artifacts["vectors"]
         mu = self.prediction_artifacts["mu"]
-        user_bias = self.prediction_artifacts["user_bias"]
-        item_bias = self.prediction_artifacts["item_bias"]
+        bias = self.prediction_artifacts["bias"]
         total_users = self.prediction_artifacts["total_users"]
 
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
@@ -523,7 +482,8 @@ class HybridGCNRec(SVDppHybrid):
                     start = i
                     end = min(i + batch_size, len(affinities))
                     generated = np.array([gen_fn(u, v, nu, ni) for u, v, nu, ni in affinities[start:end]])
-                    yield generated
+                    for g in generated:
+                        yield g
             return generator
 
         if self.fast_inference:
@@ -531,47 +491,84 @@ class HybridGCNRec(SVDppHybrid):
 
         if self.super_fast_inference:
             assert self.mu is not None
-            return [self.mu + self.bu[u] + self.bi[i] for u, i, in user_item_pairs]
+            predictions = [self.mu + self.bu[u] + self.bi[i] for u, i, in user_item_pairs]
+            return np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
 
         uip = [(self.user_id_to_index[u] + 1 if u in self.user_id_to_index else 0,
                 self.item_id_to_index[i] + 1 if i in self.item_id_to_index else 0,
-                ratings_count_by_user[self.user_id_to_index[u] + 1 if u in self.user_id_to_index else 0],
-                ratings_count_by_item[self.item_id_to_index[i] + 1 if i in self.item_id_to_index else 0]) for u, i in user_item_pairs]
+                ratings_count_by_user[self.user_id_to_index[u] + 1 if u in self.user_id_to_index else 1],
+                ratings_count_by_item[self.item_id_to_index[i] + 1 if i in self.item_id_to_index else 1]) for u, i in user_item_pairs]
 
         assert np.sum(np.isnan(uip)) == 0
+        generator = generate_prediction_samples(uip)
 
-        predictions = []
-        for x in generate_prediction_samples(uip)():
-            user_input = x[:, 0].astype(int)
-            item_input = x[:, 1].astype(int) + total_users
-            users_input = np.array([np.array(a, dtype=int) for a in x[:, 2]])
-            items_input = np.array([np.array(a, dtype=int) for a in x[:, 3]]) + total_users
-            nu_input = np.expand_dims(x[:, 4].astype(float), -1)
-            ni_input = np.expand_dims(x[:, 5].astype(float), -1)
+        user = []
+        item = []
+        users = []
+        items = []
+        nus = []
+        nis = []
+        for u, i, us, iis, nu, ni in generator():
+            user.append(u)
+            item.append(i)
+            users.append(us)
+            items.append(iis)
+            nus.append(nu)
+            nis.append(ni)
 
-            user_vec = np.take(vectors, user_input, axis=0)
-            item_vec = np.take(vectors, item_input, axis=0)
+        user = np.array(user).astype(int)
+        item = np.array(item).astype(int) + total_users
+        users = np.array(users).astype(int)
+        items = np.array(items).astype(int) + total_users
+        nus = np.array(nus)
+        nis = np.array(nis)
 
-            users_vecs = np.take(vectors, users_input, axis=0)
-            items_vecs = np.take(vectors, items_input, axis=0)
+        score = np.zeros(len(user))
+        for i in range(0, len(user), batch_size):
+            s = user[i:i + batch_size]
+            d = item[i:i + batch_size]
+            us = users[i:i + batch_size]
+            iis = items[i:i + batch_size]
+            nu = nus[i:i + batch_size]
+            ni = nis[i:i + batch_size]
+            res = (h[s] * h[d]).sum(1) + bias[s + 1] + bias[d + 1]
+            score[i:i + batch_size] = res
 
-            users_vecs = np.mean(users_vecs, axis=1)
-            items_vecs = np.mean(items_vecs, axis=1)
-            users_vecs = np.multiply(users_vecs, ni_input)
-            items_vecs = np.multiply(items_vecs, nu_input)
 
-            user_item_vec_dot = np.sum(np.multiply(user_vec, item_vec), axis=1)
-            item_items_vec_dot = np.sum(np.multiply(item_vec, items_vecs), axis=1)
-            user_users_vec_dot = np.sum(np.multiply(user_vec, users_vecs), axis=1)
-            implicit_term = user_item_vec_dot + item_items_vec_dot + user_users_vec_dot
-            bu = np.take(user_bias, user_input, axis=0)
-            bi = np.take(item_bias, x[:, 1].astype(int), axis=0)
-            rating = implicit_term
-            predictions.extend(rating)
+        predictions = score
+        # for x in generate_prediction_samples(uip)():
+        #     user_input = x[:, 0].astype(int)
+        #     item_input = x[:, 1].astype(int) + total_users
+        #     users_input = np.array([np.array(a, dtype=int) for a in x[:, 2]])
+        #     items_input = np.array([np.array(a, dtype=int) for a in x[:, 3]]) + total_users
+        #     nu_input = np.expand_dims(x[:, 4].astype(float), -1)
+        #     ni_input = np.expand_dims(x[:, 5].astype(float), -1)
+        #
+        #     user_vec = np.take(vectors, user_input, axis=0)
+        #     item_vec = np.take(vectors, item_input, axis=0)
+        #
+        #     users_vecs = np.take(vectors, users_input, axis=0)
+        #     items_vecs = np.take(vectors, items_input, axis=0)
+        #
+        #     users_vecs = np.mean(users_vecs, axis=1)
+        #     items_vecs = np.mean(items_vecs, axis=1)
+        #     users_vecs = np.multiply(users_vecs, ni_input)
+        #     items_vecs = np.multiply(items_vecs, nu_input)
+        #
+        #     user_item_vec_dot = np.sum(np.multiply(user_vec, item_vec), axis=1)
+        #     item_items_vec_dot = np.sum(np.multiply(item_vec, items_vecs), axis=1)
+        #     user_users_vec_dot = np.sum(np.multiply(user_vec, users_vecs), axis=1)
+        #     implicit_term = user_item_vec_dot
+        #     bu = np.take(user_bias, user_input, axis=0)
+        #     bi = np.take(item_bias, x[:, 1].astype(int), axis=0)
+        #     rating = implicit_term
+        #     # rating = (rating + 1)*(self.rating_scale[1] - self.rating_scale[0])/2 + self.rating_scale[0]
+        #     predictions.extend(rating)
 
         predictions = np.array(predictions)
+        # print(len(predictions), np.min(predictions), np.max(predictions))
         assert np.sum(np.isnan(predictions)) == 0
-        predictions[np.isnan(predictions)] = [self.mu + self.bu[u] + self.bi[i] for u, i in np.array(user_item_pairs)[np.isnan(predictions)]]
+        # predictions[np.isnan(predictions)] = [self.mu + self.bu[u] + self.bi[i] for u, i in np.array(user_item_pairs)[np.isnan(predictions)]]
         assert len(predictions) == len(user_item_pairs)
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])

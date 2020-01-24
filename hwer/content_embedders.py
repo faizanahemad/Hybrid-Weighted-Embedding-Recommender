@@ -327,3 +327,7 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
         self.log.debug("End Transform FlairGlove100AndBytePairEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
+
+
+class MixedTypeContentEmbedding(ContentEmbeddingBase):
+    pass

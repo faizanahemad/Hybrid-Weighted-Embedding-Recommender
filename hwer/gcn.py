@@ -1,77 +1,164 @@
 import math
 import torch
 import torch.nn as nn
-import dgl.function as fn
-
-class GCNLayer(nn.Module):
-    def __init__(self,
-                 g,
-                 in_feats,
-                 out_feats,
-                 activation,
-                 dropout,
-                 bias=True):
-        super(GCNLayer, self).__init__()
-        self.g = g
-        self.weight = nn.Parameter(torch.Tensor(in_feats, out_feats))
-        if bias:
-            self.bias = nn.Parameter(torch.Tensor(out_feats))
-        else:
-            self.bias = None
-        self.activation = activation
-        if dropout:
-            self.dropout = nn.Dropout(p=dropout)
-        else:
-            self.dropout = 0.
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
-        if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
-
-    def forward(self, h):
-        if self.dropout:
-            h = self.dropout(h)
-        h = torch.mm(h, self.weight)
-        # normalization by square root of src degree
-        h = h * self.g.ndata['norm']
-        self.g.ndata['h'] = h
-        self.g.update_all(fn.copy_src(src='h', out='m'),
-                          fn.sum(msg='m', out='h'))
-        h = self.g.ndata.pop('h')
-        # normalization by square root of dst degree
-        h = h * self.g.ndata['norm']
-        # bias
-        if self.bias is not None:
-            h = h + self.bias
-        if self.activation:
-            h = self.activation(h)
-        return h
+import torch.nn.functional as F
+import dgl
+import dgl.function as FN
+import numpy as np
+dgl.load_backend('pytorch')
 
 
-class GCN(nn.Module):
-    def __init__(self,
-                 g,
-                 in_feats,
-                 n_hidden,
-                 n_classes,
-                 n_layers,
-                 activation,
-                 dropout):
-        super(GCN, self).__init__()
-        self.layers = nn.ModuleList()
-        # input layer
-        self.layers.append(GCNLayer(g, in_feats, n_hidden, activation, 0.))
-        # hidden layers
-        for i in range(n_layers - 1):
-            self.layers.append(GCNLayer(g, n_hidden, n_hidden, activation, dropout))
-        # output layer
-        self.layers.append(GCNLayer(g, n_hidden, n_classes, None, dropout))
+def mix_embeddings(ndata, proj):
+    """Adds external (categorical and numeric) features into node representation G.ndata['h']"""
+    ndata['h'] = ndata['h'] + proj(ndata['content'])
 
-    def forward(self, features):
-        h = features
-        for layer in self.layers:
-            h = layer(h)
-        return h
+
+def init_weight(param, initializer, nonlinearity):
+    initializer = getattr(nn.init, initializer)
+    if nonlinearity is not None:
+        initializer(param)
+    else:
+        initializer(param, nn.init.calculate_gain(nonlinearity))
+
+
+def init_bias(param):
+    nn.init.constant_(param, 0)
+
+
+class GraphSageConvWithSampling(nn.Module):
+    def __init__(self, feature_size, dropout):
+        super(GraphSageConvWithSampling, self).__init__()
+
+        self.feature_size = feature_size
+        self.W = nn.Linear(feature_size * 2, feature_size)
+        self.drop = nn.Dropout(dropout)
+        init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(self.W.bias)
+
+    def forward(self, nodes):
+        h_agg = nodes.data['h_agg']
+        h = nodes.data['h']
+        w = nodes.data['w'][:, None]
+        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+        h_concat = torch.cat([h, h_agg], 1)
+        h_concat = self.drop(h_concat)
+        h_new = F.leaky_relu(self.W(h_concat))
+        return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
+
+
+class GraphSageWithSampling(nn.Module):
+    def __init__(self, n_content_dims, feature_size, n_layers, dropout, G):
+        super(GraphSageWithSampling, self).__init__()
+
+        self.feature_size = feature_size
+        self.n_layers = n_layers
+
+        self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size, dropout) for _ in range(n_layers)])
+        proj = []
+        for i in range(n_layers + 1):
+            w = nn.Linear(n_content_dims, feature_size)
+            init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
+            init_bias(w.bias)
+            drop = nn.Dropout(dropout)
+            proj.append(nn.Sequential(drop, w, nn.LeakyReLU()))
+        self.proj = nn.ModuleList(proj)
+
+        self.G = G
+
+        self.node_emb = nn.Embedding(G.number_of_nodes() + 1, feature_size)
+        nn.init.normal_(self.node_emb.weight, std=1 / self.feature_size)
+
+    msg = [FN.copy_src('h', 'h'),
+           FN.copy_src('one', 'one')]
+    red = [FN.sum('h', 'h_agg'), FN.sum('one', 'w')]
+
+    def forward(self, nf):
+        '''
+        nf: NodeFlow.
+        '''
+        nf.copy_from_parent(edge_embed_names=None)
+        for i in range(nf.num_layers):
+            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
+            nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
+            mix_embeddings(nf.layers[i].data, self.proj[i])
+        if self.n_layers == 0:
+            return nf.layers[i].data['h']
+        for i in range(self.n_layers):
+            nf.block_compute(i, self.msg, self.red, self.convs[i])
+
+        result = nf.layers[self.n_layers].data['h']
+        assert (result != result).sum() == 0
+        return result
+
+
+class GraphSAGERecommender(nn.Module):
+    def __init__(self, gcn):
+        super(GraphSAGERecommender, self).__init__()
+
+        self.gcn = gcn
+        self.node_biases = nn.Parameter(torch.zeros(gcn.G.number_of_nodes() + 1))
+
+    def forward(self, nf, src, dst):
+        h_output = self.gcn(nf)
+        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
+        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
+        score = (h_src * h_dst).sum(1) + self.node_biases[src + 1] + self.node_biases[dst + 1]
+        return score
+
+
+class GraphSAGERecommenderImplicit(nn.Module):
+    def __init__(self, gcn, padding_length):
+        super(GraphSAGERecommender, self).__init__()
+
+        self.gcn = gcn
+        self.node_biases = nn.Parameter(torch.zeros(gcn.G.number_of_nodes() + 1))
+        self.padding_length = padding_length
+
+    def forward(self, nf, src, dst, implicit):
+        h_output = self.gcn(nf)
+        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
+        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
+        h_imp = h_output[nf.map_from_parent_nid(-1, implicit.flatten(), True)]
+        h_imp = h_imp.reshape(tuple(implicit.shape)+(h_imp.shape[-1],))
+        h_imp = h_imp.sum(0)
+        score = (h_src * h_dst).sum(1) + self.node_biases[src + 1] + self.node_biases[dst + 1]
+        implicit_score = 0
+        return score
+
+
+class GraphSAGETripletEmbedding(nn.Module):
+    def __init__(self, gcn, margin=0.1):
+        super(GraphSAGETripletEmbedding, self).__init__()
+
+        self.gcn = gcn
+        self.margin = margin
+
+    def forward(self, nf, src, dst, neg):
+        h_output = self.gcn(nf)
+        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
+        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
+        h_neg = h_output[nf.map_from_parent_nid(-1, neg, True)]
+        d_a_b = 1.0 - (h_src * h_dst).sum(1)
+        d_a_c = 1.0 - (h_src * h_neg).sum(1)
+        score = F.relu(d_a_b + self.margin - d_a_c)
+        return score
+
+
+def build_dgl_graph(ratings, total_nodes, content_vectors):
+    g = dgl.DGLGraph(multigraph=True)
+    g.add_nodes(total_nodes)
+    g.ndata['content'] = torch.FloatTensor(content_vectors)
+    rating_user_vertices = [u for u, i, r in ratings]
+    rating_product_vertices = [i for u, i, r in ratings]
+    ratings = [r for u, i, r in ratings]
+    g.add_edges(
+        rating_user_vertices,
+        rating_product_vertices,
+        data={'inv': torch.zeros(len(ratings), dtype=torch.uint8),
+              'rating': torch.FloatTensor(ratings)})
+    g.add_edges(
+        rating_product_vertices,
+        rating_user_vertices,
+        data={'inv': torch.ones(len(ratings), dtype=torch.uint8),
+              'rating': torch.FloatTensor(ratings)})
+    return g

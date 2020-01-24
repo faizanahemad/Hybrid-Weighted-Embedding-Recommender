@@ -30,41 +30,28 @@ class SVDppHybrid(HybridRecommender):
         self.log = getLogger(type(self).__name__)
         self.super_fast_inference = super_fast_inference
 
-    def __build_dataset__(self, user_ids: List[str], item_ids: List[str],
-                          user_item_affinities: List[Tuple[str, str, float]],
-                          user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
-                          user_vectors: np.ndarray, item_vectors: np.ndarray,
-                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                          rating_scale: Tuple[float, float], hyperparams: Dict):
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
-        noise_augmentation = hyperparams["noise_augmentation"] if "noise_augmentation" in hyperparams else 0
-        use_content = hyperparams["use_content"] if "use_content" in hyperparams else True
+    def __prediction_network_datagen__(self, user_ids: List[str], item_ids: List[str],
+                                       user_item_affinities: List[Tuple[str, str, float]],
+                                       user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
+                                       user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                       user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                       rating_scale: Tuple[float, float],
+                                       batch_size: int, padding_length: int,
+                                       noise_augmentation: int, use_content: bool):
         rng = get_rng(noise_augmentation)
         ###
-        ratings = np.array([r for u, i, r in user_item_affinities])
-        min_affinity = np.min(ratings)
-        max_affinity = np.max(ratings)
-        mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item_bs(user_item_affinities, rating_scale)
-        affinity_range = max_affinity - min_affinity
-
-        user_bias = np.array([user_bias[u] if u in user_bias else 0.0 for u in user_ids])
-        item_bias = np.array([item_bias[i] if i in item_bias else 0.0 for i in item_ids])
-        user_bias = np.concatenate(([0], user_bias))
-        item_bias = np.concatenate(([0], item_bias))
-        self.log.debug("Mu = %.4f, Max User Bias = %.4f, Max Item Bias = %.4f, min-max-affinity = %s",
-                       mu, np.abs(np.max(user_bias)),
-                       np.abs(np.max(item_bias)), (min_affinity, max_affinity))
 
         ratings_count_by_user = Counter([user_id_to_index[u] + 1 for u, i, r in user_item_affinities])
         ratings_count_by_item = Counter([item_id_to_index[i] + 1 for u, i, r in user_item_affinities])
 
-        ratings_count_by_user = defaultdict(int, {k: 1/np.sqrt(v) for k, v in ratings_count_by_user.items()})
-        ratings_count_by_item = defaultdict(int, {k: 1/np.sqrt(v) for k, v in ratings_count_by_item.items()})
+        ratings_count_by_user = defaultdict(int, {k: 1 / np.sqrt(v) for k, v in ratings_count_by_user.items()})
+        ratings_count_by_item = defaultdict(int, {k: 1 / np.sqrt(v) for k, v in ratings_count_by_item.items()})
 
         user_item_list = defaultdict(list)
         item_user_list = defaultdict(list)
-        user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1, ratings_count_by_user[user_id_to_index[u] + 1], ratings_count_by_item[item_id_to_index[i] + 1], r) for u, i, r in user_item_affinities]
+        user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1,
+                                 ratings_count_by_user[user_id_to_index[u] + 1],
+                                 ratings_count_by_item[item_id_to_index[i] + 1], r) for u, i, r in user_item_affinities]
         for i, j, nu, ni, r in user_item_affinities:
             user_item_list[i].append(j)
             item_user_list[j].append(i)
@@ -93,14 +80,49 @@ class SVDppHybrid(HybridRecommender):
 
         def generate_training_samples(affinities):
             def generator():
-                for i in range(0, len(affinities), batch_size*2):
+                for i in range(0, len(affinities), batch_size * 2):
                     start = i
-                    end = min(i + batch_size*2, len(affinities))
+                    end = min(i + batch_size * 2, len(affinities))
                     generated = [(gen_fn(u, v, nu, ni), r + rng(1)) for u, v, nu, ni, r in affinities[start:end]]
                     for g in generated:
                         yield g
-            return generator
 
+            return generator
+        return generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list
+
+    def __build_dataset__(self, user_ids: List[str], item_ids: List[str],
+                          user_item_affinities: List[Tuple[str, str, float]],
+                          user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
+                          user_vectors: np.ndarray, item_vectors: np.ndarray,
+                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                          rating_scale: Tuple[float, float], hyperparams: Dict):
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
+        noise_augmentation = hyperparams["noise_augmentation"] if "noise_augmentation" in hyperparams else 0
+        use_content = hyperparams["use_content"] if "use_content" in hyperparams else True
+        ratings = np.array([r for u, i, r in user_item_affinities])
+        min_affinity = np.min(ratings)
+        max_affinity = np.max(ratings)
+        mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item_bs(user_item_affinities, rating_scale)
+
+        user_bias = np.array([user_bias[u] if u in user_bias else 0.0 for u in user_ids])
+        item_bias = np.array([item_bias[i] if i in item_bias else 0.0 for i in item_ids])
+        user_bias = np.concatenate(([0], user_bias))
+        item_bias = np.concatenate(([0], item_bias))
+        self.log.debug("Mu = %.4f, Max User Bias = %.4f, Max Item Bias = %.4f, min-max-affinity = %s",
+                       mu, np.abs(np.max(user_bias)),
+                       np.abs(np.max(item_bias)), (min_affinity, max_affinity))
+
+        generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
+            user_ids, item_ids,
+            user_item_affinities,
+            user_content_vectors,
+            item_content_vectors,
+            user_vectors, item_vectors,
+            user_id_to_index,
+            item_id_to_index,
+            rating_scale, batch_size, padding_length,
+            noise_augmentation, use_content)
         prediction_output_shape = ((), (), padding_length, padding_length, (), ())
         prediction_output_types = (tf.int64, tf.int64, tf.int64, tf.int64, tf.float64, tf.float64)
         if use_content:
@@ -108,6 +130,9 @@ class SVDppHybrid(HybridRecommender):
             prediction_output_types = prediction_output_types + (tf.float64, tf.float64, tf.float64, tf.float64)
         output_shapes = (prediction_output_shape, ())
         output_types = (prediction_output_types, tf.float64)
+        user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1,
+                                 ratings_count_by_user[user_id_to_index[u] + 1],
+                                 ratings_count_by_item[item_id_to_index[i] + 1], r) for u, i, r in user_item_affinities]
 
         train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
                                                output_types=output_types, output_shapes=output_shapes, )
