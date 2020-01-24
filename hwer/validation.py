@@ -402,8 +402,15 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
 
     def get_details(recsys, affinities):
         predictions = np.array(recsys.predict([(u, i) for u, i, r in affinities]))
-        assert np.sum(np.isnan(predictions)) == 0
-        assert np.sum(predictions <= 0) == 0
+        if np.sum(np.isnan(predictions)) > 0:
+            count = np.sum(np.isnan(predictions))
+            raise AssertionError("Encountered Nan Predictions = %s" % count, np.array(affinities)[np.isnan(predictions)])
+
+        if np.sum(predictions <= 0) > 0:
+            indices = predictions <= 0
+            count = np.sum(indices)
+            raise AssertionError("Encountered Less than 0 Predictions = %s" % count,
+                                 list(zip(predictions[indices], np.array(affinities)[indices])))
         actuals = np.array([r for u, i, r in affinities])
         rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
         mae = np.mean(np.abs(actuals - predictions))

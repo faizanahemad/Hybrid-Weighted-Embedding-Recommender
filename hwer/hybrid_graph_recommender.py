@@ -125,6 +125,7 @@ class HybridGCNRec(SVDppHybrid):
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 5
         gcn_dropout = hyperparams["gcn_dropout"] if "gcn_dropout" in hyperparams else 0.0
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        gcn_batch_size = hyperparams["gcn_batch_size"] if "gcn_batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
         gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
@@ -179,15 +180,15 @@ class HybridGCNRec(SVDppHybrid):
                 dst_shuffled = dst[shuffle_idx]
                 neg_shuffled = neg[shuffle_idx]
 
-                src_batches = src_shuffled.split(batch_size)
-                dst_batches = dst_shuffled.split(batch_size)
-                neg_batches = neg_shuffled.split(batch_size)
+                src_batches = src_shuffled.split(gcn_batch_size)
+                dst_batches = dst_shuffled.split(gcn_batch_size)
+                neg_batches = neg_shuffled.split(gcn_batch_size)
 
-                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
+                seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
 
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
-                    batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                    gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
                     5,  # number of neighbors for each node
                     gcn_layers,  # number of layers in GCN
                     seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
@@ -198,14 +199,16 @@ class HybridGCNRec(SVDppHybrid):
                 )
 
                 # Training
+                total_loss = 0.0
                 for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
                     score = model.forward(nodeflow, s, d, n)
                     loss = (score ** 2).mean()
+                    total_loss = total_loss + loss
 
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
-                return loss
+                return total_loss/len(src_batches)
 
             if epoch % 2 == 1:
                 loss = train(src, dst, neg)
@@ -220,7 +223,7 @@ class HybridGCNRec(SVDppHybrid):
         model.eval()
         sampler = dgl.contrib.sampling.NeighborSampler(
             g_train,
-            batch_size,
+            gcn_batch_size,
             5,
             gcn_layers,
             seed_nodes=torch.arange(g_train.number_of_nodes()),
@@ -233,8 +236,6 @@ class HybridGCNRec(SVDppHybrid):
         with torch.no_grad():
             h = []
             for nf in sampler:
-                # import pdb
-                # pdb.set_trace()
                 h.append(model.gcn.forward(nf))
             h = torch.cat(h).numpy()
 
@@ -382,10 +383,10 @@ class HybridGCNRec(SVDppHybrid):
                 for i in range(0, len(src), batch_size):
                     s = src[i:i + batch_size]
                     d = dst[i:i + batch_size]
-                    us = dst_to_srcs[i:i + batch_size]
-                    iis = src_to_dsts[i:i + batch_size]
-                    nu = src_to_dsts_count[i:i + batch_size]
-                    ni = dst_to_srcs_count[i:i + batch_size]
+                    d2s = dst_to_srcs[i:i + batch_size]
+                    s2d = src_to_dsts[i:i + batch_size]
+                    s2dc = src_to_dsts_count[i:i + batch_size]
+                    d2sc = dst_to_srcs_count[i:i + batch_size]
                     res = (h[s] * h[d]).sum(1) + model.node_biases[s + 1] + model.node_biases[d + 1]
                     score[i:i + batch_size] = res
                 train_rmse = ((score - rating) ** 2).mean().sqrt()
@@ -425,15 +426,15 @@ class HybridGCNRec(SVDppHybrid):
                 )
 
                 # Training
+                total_loss = 0.0
                 for s, d, us, iis, src_to_dsts_count, dst_to_srcs_count,  r, nodeflow in zip(src_batches, dst_batches,dst_to_srcs_batches, src_to_dsts_batches, src_to_dsts_count_batches, dst_to_srcs_count_batches, rating_batches, sampler):
                     score = model.forward(nodeflow, s, d)
-                    score_rev = model.forward(nodeflow, d, s)
-                    loss = ((score - r) ** 2).mean() + ((score_rev - r) ** 2).mean()
-
+                    loss = ((score - r) ** 2).mean()
+                    total_loss = total_loss + loss
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
-                return loss
+                return total_loss/len(src_batches)
             if epoch % 2 == 1:
                 loss = train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count)
             else:
@@ -477,7 +478,7 @@ class HybridGCNRec(SVDppHybrid):
         # self.log.info("Built Prediction Network, model params = %s", model.count_params())
         return prediction_artifacts
 
-    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=False) -> List[float]:
+    def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         h = self.prediction_artifacts["vectors"]
         mu = self.prediction_artifacts["mu"]
         bias = self.prediction_artifacts["bias"]
@@ -549,7 +550,6 @@ class HybridGCNRec(SVDppHybrid):
 
         predictions = score
         predictions = np.array(predictions)
-        assert np.sum(np.isnan(predictions)) == 0
         assert len(predictions) == len(user_item_pairs)
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])

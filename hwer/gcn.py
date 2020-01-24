@@ -69,8 +69,8 @@ class GraphSageWithSampling(nn.Module):
         if init_node_vectors is None:
             nn.init.normal_(self.node_emb.weight, std=1 / self.feature_size)
         else:
-            self.node_emb.weight = nn.Parameter(init_node_vectors)
-            # self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False, max_norm=1.0)
+            # self.node_emb.weight = nn.Parameter(init_node_vectors)
+            self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False, max_norm=1.0)
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
