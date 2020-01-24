@@ -307,7 +307,9 @@ class HybridGCNRec(SVDppHybrid):
         g_train = build_dgl_graph(edge_list, total_users + total_items, np.concatenate((user_vectors, item_vectors)))
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()
-        model = GraphSAGERecommender(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train))
+        zeroed_indices = [0, 1, total_users + 1]
+        model = GraphSAGERecommenderImplicit(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train),
+                                             padding_length=padding_length, zeroed_indices=zeroed_indices)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
 
         enable_implicit = True
@@ -387,7 +389,14 @@ class HybridGCNRec(SVDppHybrid):
                     s2d = src_to_dsts[i:i + batch_size]
                     s2dc = src_to_dsts_count[i:i + batch_size]
                     d2sc = dst_to_srcs_count[i:i + batch_size]
-                    res = (h[s] * h[d]).sum(1) + model.node_biases[s + 1] + model.node_biases[d + 1]
+                    s2d_imp = h[s2d]
+                    d2s_imp = h[d2s]
+                    #
+                    implicit = implicit_eval(h[d], s2d, s2dc, s2d_imp,
+                                             h[s], d2s, d2sc, d2s_imp,
+                                             zeroed_indices, enable_implicit=True)
+
+                    res = (h[s] * h[d]).sum(1) + model.node_biases[s + 1] + model.node_biases[d + 1] + implicit
                     score[i:i + batch_size] = res
                 train_rmse = ((score - rating) ** 2).mean().sqrt()
 
@@ -427,8 +436,8 @@ class HybridGCNRec(SVDppHybrid):
 
                 # Training
                 total_loss = 0.0
-                for s, d, us, iis, src_to_dsts_count, dst_to_srcs_count,  r, nodeflow in zip(src_batches, dst_batches,dst_to_srcs_batches, src_to_dsts_batches, src_to_dsts_count_batches, dst_to_srcs_count_batches, rating_batches, sampler):
-                    score = model.forward(nodeflow, s, d)
+                for s, d, d2s, s2d, s2dc, d2sc,  r, nodeflow in zip(src_batches, dst_batches, dst_to_srcs_batches, src_to_dsts_batches, src_to_dsts_count_batches, dst_to_srcs_count_batches, rating_batches, sampler):
+                    score = model.forward(nodeflow, s, d, s2d, s2dc, d2s, d2sc)
                     loss = ((score - r) ** 2).mean()
                     total_loss = total_loss + loss
                     opt.zero_grad()
@@ -474,7 +483,7 @@ class HybridGCNRec(SVDppHybrid):
                                 "total_users": total_users,
                                 "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
                                 "ratings_count_by_item": ratings_count_by_item,
-                                "batch_size": batch_size, "gen_fn": gen_fn}
+                                "batch_size": batch_size, "gen_fn": gen_fn, "zeroed_indices": zeroed_indices}
         # self.log.info("Built Prediction Network, model params = %s", model.count_params())
         return prediction_artifacts
 
@@ -483,6 +492,7 @@ class HybridGCNRec(SVDppHybrid):
         mu = self.prediction_artifacts["mu"]
         bias = self.prediction_artifacts["bias"]
         total_users = self.prediction_artifacts["total_users"]
+        zeroed_indices = self.prediction_artifacts["zeroed_indices"]
 
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
         ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
@@ -541,11 +551,16 @@ class HybridGCNRec(SVDppHybrid):
         for i in range(0, len(user), batch_size):
             s = user[i:i + batch_size]
             d = item[i:i + batch_size]
-            us = users[i:i + batch_size]
-            iis = items[i:i + batch_size]
-            nu = nus[i:i + batch_size]
-            ni = nis[i:i + batch_size]
-            res = (h[s] * h[d]).sum(1) + bias[s + 1] + bias[d + 1]
+            d2s = users[i:i + batch_size]
+            s2d = items[i:i + batch_size]
+            s2dc = nus[i:i + batch_size]
+            d2sc = nis[i:i + batch_size]
+            s2d_imp = h[s2d]
+            d2s_imp = h[d2s]
+            implicit = implicit_eval(h[d], s2d, s2dc, s2d_imp,
+                                     h[s], d2s, d2sc, d2s_imp,
+                                     zeroed_indices, enable_implicit=True)
+            res = (h[s] * h[d]).sum(1) + bias[s + 1] + bias[d + 1] + implicit
             score[i:i + batch_size] = res
 
         predictions = score

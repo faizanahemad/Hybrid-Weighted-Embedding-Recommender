@@ -110,23 +110,46 @@ class GraphSAGERecommender(nn.Module):
         return score
 
 
+def implicit_eval(h_dst, s2d, s2dc, s2d_imp,
+                  h_src, d2s, d2sc, d2s_imp,
+                  zeroed_indices, enable_implicit=True):
+    if enable_implicit:
+        for x in zeroed_indices:
+            s2d_imp[s2d == x] = 0.0
+        s2d_imp = s2dc * s2dc * (h_dst * s2d_imp.sum(1)).sum(1)
+
+        for x in zeroed_indices:
+            d2s_imp[d2s == x] = 0.0
+        d2s_imp = d2sc * d2sc * (h_src * d2s_imp.sum(1)).sum(1)
+        implicit = s2d_imp + d2s_imp
+        return implicit
+    else:
+        return 0.0
+
+
 class GraphSAGERecommenderImplicit(nn.Module):
-    def __init__(self, gcn, padding_length):
-        super(GraphSAGERecommender, self).__init__()
+    def __init__(self, gcn, padding_length, zeroed_indices):
+        super(GraphSAGERecommenderImplicit, self).__init__()
 
         self.gcn = gcn
         self.node_biases = nn.Parameter(torch.zeros(gcn.G.number_of_nodes() + 1))
         self.padding_length = padding_length
+        self.zeroed_indices = zeroed_indices
 
-    def forward(self, nf, src, dst, implicit):
+    def forward(self, nf, src, dst, s2d, s2dc, d2s, d2sc):
         h_output = self.gcn(nf)
         h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
         h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        h_imp = h_output[nf.map_from_parent_nid(-1, implicit.flatten(), True)]
-        h_imp = h_imp.reshape(tuple(implicit.shape)+(h_imp.shape[-1],))
-        h_imp = h_imp.sum(0)
-        score = (h_src * h_dst).sum(1) + self.node_biases[src + 1] + self.node_biases[dst + 1]
-        implicit_score = 0
+        s2d_imp = h_output[nf.map_from_parent_nid(-1, s2d.flatten(), True)]
+        s2d_imp = s2d_imp.reshape(tuple(s2d.shape)+(s2d_imp.shape[-1],))
+        d2s_imp = h_output[nf.map_from_parent_nid(-1, d2s.flatten(), True)]
+        d2s_imp = d2s_imp.reshape(tuple(d2s.shape) + (d2s_imp.shape[-1],))
+
+        implicit = implicit_eval(h_dst, s2d, s2dc, s2d_imp,
+                                 h_src, d2s, d2sc, d2s_imp,
+                                 self.zeroed_indices, enable_implicit=True)
+
+        score = (h_src * h_dst).sum(1) + self.node_biases[src + 1] + self.node_biases[dst + 1] + implicit
         return score
 
 

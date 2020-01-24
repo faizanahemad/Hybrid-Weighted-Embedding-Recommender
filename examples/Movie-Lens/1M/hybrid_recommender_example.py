@@ -88,7 +88,7 @@ verbose = 2 # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 test_retrieval = False
 
 if test_data_subset:
-    cores = 40
+    cores = 25
     # # ratings = ratings[ratings.rating.isin([1, 5])]
     # item_counts = ratings.groupby(['item'])['user'].count().reset_index()
     # item_counts = item_counts[(item_counts["user"] <= 200) & (item_counts["user"] >= 20)].head(100)
@@ -137,25 +137,25 @@ hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
 hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=5, index_time_params={'M': 15, 'ef_construction': 5, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.005, epochs=40, batch_size=1024, padding_length=50,
-                                                              network_depth=2, verbose=verbose,
-                                                              kernel_l2=1e-9, dropout=0.0, use_content=True),
+                               prediction_network_params=dict(lr=0.01, epochs=25, batch_size=1024, padding_length=50,
+                                                              network_depth=3, verbose=verbose,
+                                                              kernel_l2=1e-9, dropout=0.05, use_content=True),
                                user_item_params=dict(lr=0.2, epochs=5, batch_size=64, l2=0.01,
-                                                     gcn_lr=0.01, gcn_epochs=20, gcn_layers=1, gcn_dropout=0.0,
+                                                     gcn_lr=0.01, gcn_epochs=5, gcn_layers=0, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-9,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=0.75)))
 
-hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 20},
-                            "svd": {"biased": True, "n_factors": 20},
+hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
+                            "svd": {"biased": True, "n_factors": 10},
                             "algos": ["baseline", "svd", "svdpp"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperparameter_content,
                            svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
 
-svdpp_hybrid = False
+svdpp_hybrid = True
 gcn_hybrid = True
-surprise = False
+surprise = True
 content_only = False
 
 
