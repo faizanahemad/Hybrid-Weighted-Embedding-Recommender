@@ -125,35 +125,35 @@ hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
 hyperparameters_svdpp = dict(n_dims=40, combining_factor=0.1,
                              knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                              collaborative_params=dict(
-                                 prediction_network_params=dict(lr=0.75, epochs=30, batch_size=64,
+                                 prediction_network_params=dict(lr=0.75, epochs=20, batch_size=64,
                                                                 network_width=96, padding_length=50,
                                                                 network_depth=4, verbose=verbose,
-                                                                kernel_l2=0.002,
+                                                                kernel_l2=0.001,
                                                                 bias_regularizer=0.002, dropout=0.05,
                                                                 use_resnet=True, use_content=True),
-                                 user_item_params=dict(lr=0.2, epochs=20, batch_size=64, l2=0.1,
+                                 user_item_params=dict(lr=0.2, epochs=10, batch_size=64, l2=0.01,
                                                        verbose=verbose, margin=1.0)))
 
-hyperparameters_gcn = dict(n_dims=32, combining_factor=0.1,
+hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=5, index_time_params={'M': 15, 'ef_construction': 5, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.005, epochs=25, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.005, epochs=30, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
-                                                              kernel_l2=1e-7, dropout=0.0, use_content=True),
-                               user_item_params=dict(lr=0.05, epochs=1, batch_size=64, l2=0.1,
-                                                     gcn_lr=0.002, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
-                                                     gcn_kernel_l2=1e-8,
+                                                              kernel_l2=1e-9, dropout=0.0, use_content=True),
+                               user_item_params=dict(lr=0.2, epochs=5, batch_size=64, l2=0.01,
+                                                     gcn_lr=0.001, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
+                                                     gcn_kernel_l2=1e-9,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=0.75)))
 
-hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 10},
-                            "svd": {"biased": True, "n_factors": 10},
+hyperparameters_surprise = {"svdpp": {"n_factors": 10, "n_epochs": 20},
+                            "svd": {"biased": True, "n_factors": 20},
                             "algos": ["baseline", "svd", "svdpp"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperparameter_content,
                            svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
 
-svdpp_hybrid = False
+svdpp_hybrid = True
 gcn_hybrid = True
 surprise = True
 content_only = False

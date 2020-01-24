@@ -47,7 +47,7 @@ class GraphSageConvWithSampling(nn.Module):
 
 
 class GraphSageWithSampling(nn.Module):
-    def __init__(self, n_content_dims, feature_size, n_layers, dropout, G):
+    def __init__(self, n_content_dims, feature_size, n_layers, dropout, G, init_node_vectors=None):
         super(GraphSageWithSampling, self).__init__()
 
         self.feature_size = feature_size
@@ -66,7 +66,11 @@ class GraphSageWithSampling(nn.Module):
         self.G = G
 
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, feature_size)
-        nn.init.normal_(self.node_emb.weight, std=1 / self.feature_size)
+        if init_node_vectors is None:
+            nn.init.normal_(self.node_emb.weight, std=1 / self.feature_size)
+        else:
+            self.node_emb.weight = nn.Parameter(init_node_vectors)
+            # self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False, max_norm=1.0)
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]

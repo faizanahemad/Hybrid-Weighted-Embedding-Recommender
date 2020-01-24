@@ -80,9 +80,9 @@ class SVDppHybrid(HybridRecommender):
 
         def generate_training_samples(affinities):
             def generator():
-                for i in range(0, len(affinities), batch_size * 2):
+                for i in range(0, len(affinities), batch_size):
                     start = i
-                    end = min(i + batch_size * 2, len(affinities))
+                    end = min(i + batch_size, len(affinities))
                     generated = [(gen_fn(u, v, nu, ni), r + rng(1)) for u, v, nu, ni, r in affinities[start:end]]
                     for g in generated:
                         yield g
