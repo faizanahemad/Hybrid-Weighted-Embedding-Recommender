@@ -138,10 +138,10 @@ hyperparameters_gcn = dict(n_dims=48, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
                                prediction_network_params=dict(lr=0.01, epochs=30, batch_size=1024, padding_length=50,
-                                                              network_depth=3, verbose=verbose,
-                                                              kernel_l2=1e-8, dropout=0.1, use_content=True, enable_implicit=True),
-                               user_item_params=dict(lr=0.2, epochs=5, batch_size=64, l2=0.01,
-                                                     gcn_lr=0.01, gcn_epochs=5, gcn_layers=0, gcn_dropout=0.0,
+                                                              network_depth=2, verbose=verbose,
+                                                              kernel_l2=1e-8, dropout=0.05, use_content=True, enable_implicit=True),
+                               user_item_params=dict(lr=0.2, epochs=10, batch_size=64, l2=0.01,
+                                                     gcn_lr=0.005, gcn_epochs=10, gcn_layers=1, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-9,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=0.75)))
@@ -155,7 +155,7 @@ hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, content_only=hyperpar
 
 svdpp_hybrid = False
 gcn_hybrid = True
-surprise = False
+surprise = True
 content_only = False
 
 

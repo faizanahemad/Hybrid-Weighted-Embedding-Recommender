@@ -31,7 +31,7 @@ class GraphSageConvWithSampling(nn.Module):
 
         self.feature_size = feature_size
         self.W = nn.Linear(feature_size * 2, feature_size)
-        self.drop = nn.Dropout(dropout)
+        # self.drop = nn.Dropout(dropout)
         init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(self.W.bias)
 
@@ -41,7 +41,8 @@ class GraphSageConvWithSampling(nn.Module):
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         h_concat = torch.cat([h, h_agg], 1)
-        h_concat = self.drop(h_concat)
+        # h_concat = self.drop(h_concat)
+        # 2 layers here and no dropout?
         h_new = F.leaky_relu(self.W(h_concat))
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
@@ -54,14 +55,12 @@ class GraphSageWithSampling(nn.Module):
         self.n_layers = n_layers
 
         self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size, dropout) for _ in range(n_layers)])
-        proj = []
-        for i in range(n_layers + 1):
-            w = nn.Linear(n_content_dims, feature_size)
-            init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(w.bias)
-            drop = nn.Dropout(dropout)
-            proj.append(nn.Sequential(drop, w, nn.LeakyReLU()))
-        self.proj = nn.ModuleList(proj)
+
+        w = nn.Linear(n_content_dims, feature_size)
+        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(w.bias)
+        drop = nn.Dropout(dropout)
+        self.proj =nn.Sequential(drop, w, nn.LeakyReLU())
 
         self.G = G
 
@@ -84,7 +83,7 @@ class GraphSageWithSampling(nn.Module):
         for i in range(nf.num_layers):
             nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
-            mix_embeddings(nf.layers[i].data, self.proj[i])
+            mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
             return nf.layers[i].data['h']
         for i in range(self.n_layers):
@@ -127,7 +126,7 @@ def implicit_eval(h_dst, s2d, s2dc, s2d_imp,
         return 0.0
 
 
-def get_score(src, dst, node_biases,
+def get_score(src, dst, mean, node_biases,
               h_dst, s2d, s2dc, s2d_imp,
               h_src, d2s, d2sc, d2s_imp,
               zeroed_indices, enable_implicit=True):
@@ -135,12 +134,12 @@ def get_score(src, dst, node_biases,
                              h_src, d2s, d2sc, d2s_imp,
                              zeroed_indices, enable_implicit=enable_implicit)
 
-    score = (h_src * h_dst).sum(1) + node_biases[src + 1] + node_biases[dst + 1] + implicit
+    score = mean + (h_src * h_dst).sum(1) + node_biases[src + 1] + node_biases[dst + 1] + implicit
     return score
 
 
 class GraphSAGERecommenderImplicit(nn.Module):
-    def __init__(self, gcn, node_biases, padding_length, zeroed_indices, enable_implicit):
+    def __init__(self, gcn, mean, node_biases, padding_length, zeroed_indices, enable_implicit):
         super(GraphSAGERecommenderImplicit, self).__init__()
 
         self.gcn = gcn
@@ -153,6 +152,7 @@ class GraphSAGERecommenderImplicit(nn.Module):
         self.padding_length = padding_length
         self.zeroed_indices = zeroed_indices
         self.enable_implicit = enable_implicit
+        self.mean = mean
 
     def forward(self, nf, src, dst, s2d, s2dc, d2s, d2sc):
         h_output = self.gcn(nf)
@@ -163,7 +163,7 @@ class GraphSAGERecommenderImplicit(nn.Module):
         d2s_imp = h_output[nf.map_from_parent_nid(-1, d2s.flatten(), True)]
         d2s_imp = d2s_imp.reshape(tuple(d2s.shape) + (d2s_imp.shape[-1],))
 
-        score = get_score(src, dst, self.node_biases,
+        score = get_score(src, dst, self.mean, self.node_biases,
                           h_dst, s2d, s2dc, s2d_imp,
                           h_src, d2s, d2sc, d2s_imp,
                           self.zeroed_indices, enable_implicit=self.enable_implicit)

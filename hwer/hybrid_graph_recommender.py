@@ -310,8 +310,9 @@ class HybridGCNRec(SVDppHybrid):
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
+        mu = 0.0
         model = GraphSAGERecommenderImplicit(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train),
-                                             biases, padding_length=padding_length, zeroed_indices=zeroed_indices, enable_implicit=enable_implicit)
+                                             mu, None, padding_length=padding_length, zeroed_indices=zeroed_indices, enable_implicit=enable_implicit)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
 
         generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
@@ -394,7 +395,7 @@ class HybridGCNRec(SVDppHybrid):
                     d2s_imp = h[d2s]
                     #
 
-                    res = get_score(s, d, model.node_biases,
+                    res = get_score(s, d, mu, model.node_biases,
                                     h[d], s2d, s2dc, s2d_imp,
                                     h[s], d2s, d2sc, d2s_imp,
                                     zeroed_indices, enable_implicit=enable_implicit)
@@ -560,7 +561,7 @@ class HybridGCNRec(SVDppHybrid):
             s2d_imp = h[s2d]
             d2s_imp = h[d2s]
 
-            res = get_score(s, d, bias,
+            res = get_score(s, d, mu, bias,
                             h[d], s2d, s2dc, s2d_imp,
                             h[s], d2s, d2sc, d2s_imp,
                             zeroed_indices, enable_implicit=enable_implicit)
