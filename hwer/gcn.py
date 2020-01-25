@@ -127,14 +127,32 @@ def implicit_eval(h_dst, s2d, s2dc, s2d_imp,
         return 0.0
 
 
+def get_score(src, dst, node_biases,
+              h_dst, s2d, s2dc, s2d_imp,
+              h_src, d2s, d2sc, d2s_imp,
+              zeroed_indices, enable_implicit=True):
+    implicit = implicit_eval(h_dst, s2d, s2dc, s2d_imp,
+                             h_src, d2s, d2sc, d2s_imp,
+                             zeroed_indices, enable_implicit=enable_implicit)
+
+    score = (h_src * h_dst).sum(1) + node_biases[src + 1] + node_biases[dst + 1] + implicit
+    return score
+
+
 class GraphSAGERecommenderImplicit(nn.Module):
-    def __init__(self, gcn, padding_length, zeroed_indices):
+    def __init__(self, gcn, node_biases, padding_length, zeroed_indices, enable_implicit):
         super(GraphSAGERecommenderImplicit, self).__init__()
 
         self.gcn = gcn
-        self.node_biases = nn.Parameter(torch.zeros(gcn.G.number_of_nodes() + 1))
+        if node_biases is not None:
+            assert len(node_biases) == gcn.G.number_of_nodes() + 1
+            node_biases[zeroed_indices] = 0.0
+            self.node_biases = nn.Parameter(torch.FloatTensor(node_biases))
+        else:
+            self.node_biases = nn.Parameter(torch.zeros(gcn.G.number_of_nodes() + 1))
         self.padding_length = padding_length
         self.zeroed_indices = zeroed_indices
+        self.enable_implicit = enable_implicit
 
     def forward(self, nf, src, dst, s2d, s2dc, d2s, d2sc):
         h_output = self.gcn(nf)
@@ -145,11 +163,11 @@ class GraphSAGERecommenderImplicit(nn.Module):
         d2s_imp = h_output[nf.map_from_parent_nid(-1, d2s.flatten(), True)]
         d2s_imp = d2s_imp.reshape(tuple(d2s.shape) + (d2s_imp.shape[-1],))
 
-        implicit = implicit_eval(h_dst, s2d, s2dc, s2d_imp,
-                                 h_src, d2s, d2sc, d2s_imp,
-                                 self.zeroed_indices, enable_implicit=True)
+        score = get_score(src, dst, self.node_biases,
+                          h_dst, s2d, s2dc, s2d_imp,
+                          h_src, d2s, d2sc, d2s_imp,
+                          self.zeroed_indices, enable_implicit=self.enable_implicit)
 
-        score = (h_src * h_dst).sum(1) + self.node_biases[src + 1] + self.node_biases[dst + 1] + implicit
         return score
 
 

@@ -266,6 +266,7 @@ class HybridGCNRec(SVDppHybrid):
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
         use_resnet = hyperparams["use_resnet"] if "use_resnet" in hyperparams else False
+        enable_implicit = hyperparams["enable_implicit"] if "enable_implicit" in hyperparams else False
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
@@ -304,15 +305,15 @@ class HybridGCNRec(SVDppHybrid):
             item_vectors = np.zeros_like(item_vectors)
         edge_list = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                      user_item_affinities]
+        biases = np.concatenate(([0.0], user_bias, item_bias))
         g_train = build_dgl_graph(edge_list, total_users + total_items, np.concatenate((user_vectors, item_vectors)))
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicit(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train),
-                                             padding_length=padding_length, zeroed_indices=zeroed_indices)
+                                             biases, padding_length=padding_length, zeroed_indices=zeroed_indices, enable_implicit=enable_implicit)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
 
-        enable_implicit = True
         generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
             user_ids, item_ids,
             user_item_affinities,
@@ -392,11 +393,11 @@ class HybridGCNRec(SVDppHybrid):
                     s2d_imp = h[s2d]
                     d2s_imp = h[d2s]
                     #
-                    implicit = implicit_eval(h[d], s2d, s2dc, s2d_imp,
-                                             h[s], d2s, d2sc, d2s_imp,
-                                             zeroed_indices, enable_implicit=True)
 
-                    res = (h[s] * h[d]).sum(1) + model.node_biases[s + 1] + model.node_biases[d + 1] + implicit
+                    res = get_score(s, d, model.node_biases,
+                                    h[d], s2d, s2dc, s2d_imp,
+                                    h[s], d2s, d2sc, d2s_imp,
+                                    zeroed_indices, enable_implicit=enable_implicit)
                     score[i:i + batch_size] = res
                 train_rmse = ((score - rating) ** 2).mean().sqrt()
 
@@ -482,7 +483,7 @@ class HybridGCNRec(SVDppHybrid):
                                 "bias": bias,
                                 "total_users": total_users,
                                 "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
-                                "ratings_count_by_item": ratings_count_by_item,
+                                "ratings_count_by_item": ratings_count_by_item, "enable_implicit": enable_implicit,
                                 "batch_size": batch_size, "gen_fn": gen_fn, "zeroed_indices": zeroed_indices}
         # self.log.info("Built Prediction Network, model params = %s", model.count_params())
         return prediction_artifacts
@@ -493,6 +494,7 @@ class HybridGCNRec(SVDppHybrid):
         bias = self.prediction_artifacts["bias"]
         total_users = self.prediction_artifacts["total_users"]
         zeroed_indices = self.prediction_artifacts["zeroed_indices"]
+        enable_implicit = self.prediction_artifacts["enable_implicit"]
 
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
         ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
@@ -557,10 +559,11 @@ class HybridGCNRec(SVDppHybrid):
             d2sc = nis[i:i + batch_size]
             s2d_imp = h[s2d]
             d2s_imp = h[d2s]
-            implicit = implicit_eval(h[d], s2d, s2dc, s2d_imp,
-                                     h[s], d2s, d2sc, d2s_imp,
-                                     zeroed_indices, enable_implicit=True)
-            res = (h[s] * h[d]).sum(1) + bias[s + 1] + bias[d + 1] + implicit
+
+            res = get_score(s, d, bias,
+                            h[d], s2d, s2dc, s2d_imp,
+                            h[s], d2s, d2sc, d2s_imp,
+                            zeroed_indices, enable_implicit=enable_implicit)
             score[i:i + batch_size] = res
 
         predictions = score
