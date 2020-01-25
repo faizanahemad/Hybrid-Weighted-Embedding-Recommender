@@ -310,9 +310,8 @@ class HybridGCNRec(SVDppHybrid):
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
-        mu = 0.0
         model = GraphSAGERecommenderImplicit(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train),
-                                             mu, None, padding_length=padding_length, zeroed_indices=zeroed_indices, enable_implicit=enable_implicit)
+                                             mu, biases, padding_length=padding_length, zeroed_indices=zeroed_indices, enable_implicit=enable_implicit)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
 
         generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
@@ -395,7 +394,7 @@ class HybridGCNRec(SVDppHybrid):
                     d2s_imp = h[d2s]
                     #
 
-                    res = get_score(s, d, mu, model.node_biases,
+                    res = get_score(s, d, model.mu, model.node_biases,
                                     h[d], s2d, s2dc, s2d_imp,
                                     h[s], d2s, d2sc, d2s_imp,
                                     zeroed_indices, enable_implicit=enable_implicit)
@@ -422,7 +421,7 @@ class HybridGCNRec(SVDppHybrid):
                 dst_to_srcs_count_batches = dst_to_srcs_count_shuffled.split(batch_size)
                 rating_batches = rating_shuffled.split(batch_size)
 
-                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
+                seed_nodes = torch.cat(sum([[s, d,] for s, d in zip(src_batches, dst_batches)], []))
 
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
@@ -478,6 +477,7 @@ class HybridGCNRec(SVDppHybrid):
 
         bias = model.node_biases.detach().numpy()
         assert len(bias) == total_users + total_items + 1
+        mu = model.mu.detach().numpy()
 
         prediction_artifacts = {"vectors": h, "user_item_list": user_item_list,
                                 "item_user_list": item_user_list, "mu": mu,
