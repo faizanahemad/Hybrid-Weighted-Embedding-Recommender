@@ -16,6 +16,7 @@ from scipy.special import comb
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
 from tensorflow import keras
+import operator
 
 from .logging import getLogger
 
@@ -86,6 +87,16 @@ def shuffle_copy(*args):
     return results[0] if len(args) == 1 else results
 
 
+def reciprocal_rank(y_true, y_pred):
+    y_true = set(y_true)
+    rr = 0.0
+    for i, e in enumerate(y_pred):
+        if e in y_true:
+            rr = 1.0/(i+1)
+            return rr
+    return rr
+
+
 def average_precision(y_true, y_pred):
     len_y_true = max(1, len(y_true))
     y_pred = np.array(y_pred)
@@ -115,21 +126,23 @@ def mean_average_precision(y_true: List[List[str]], y_pred: List[List[str]]):
     return np.mean(sn)
 
 
-def ndcg(y_true: List[str], y_pred: List[str]):
-    y_pred = np.array(y_pred)
-    if len(y_pred.shape) == 2:
-        y_pred = y_pred[:, 0]
-    y_pred = np.array(y_pred).reshape((1, -1))[0]
-    y_true = np.array(y_true).reshape((1, -1))[0]
+def ndcg(y_true: Dict[str, float], y_pred: List[str]):
+    idcg = 0.0
+    y_true_sorted = sorted(y_true.items(), key=operator.itemgetter(1), reverse=True)
+    y_true_sorted = y_true_sorted[:len(y_pred)]
+    for i, (item, rel) in enumerate(y_true_sorted):
+        pos = i + 1
+        idcg_pos = (2 ** rel - 1)/np.log2(pos + 1)
+        idcg += idcg_pos
 
+    dcg = 0.0
+    y_pred = [(i, y_true[i] if i in y_true else 0) for i in y_pred]
+    for i, (item, rel) in enumerate(y_pred):
+        pos = i + 1
+        dcg += (2 ** rel - 1)/np.log2(pos + 1)
 
-def ndcg_by_users(y_true: Dict[str, List[str]], y_pred: Dict[str, List[str]]):
-    sn = []
-    for k, v in y_true.items():
-        yp = y_pred[k] if k in y_pred else []
-        y = v
-        sn.append(ndcg(y, yp))
-    return np.mean(sn)
+    return dcg/idcg
+
 
 
 def measure_array_dist_element_displacement(X1, X2):

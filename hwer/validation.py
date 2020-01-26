@@ -31,7 +31,7 @@ from surprise import Reader
 from ast import literal_eval
 import networkx as nx
 
-from .utils import normalize_affinity_scores_by_user, average_precision
+from .utils import normalize_affinity_scores_by_user, average_precision, reciprocal_rank, ndcg
 from . import SVDppHybrid, ContentRecommendation, HybridGCNRec
 
 
@@ -55,6 +55,7 @@ def model_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, floa
 def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):
     validation_users = list(set([u for u, i, r in validation_affinities]))
     train_users = list(set([u for u, i, r in train_affinities]))
+    assert len(validation_users) == len(train_users) and set(train_users) == set(validation_users)
     train_uid = defaultdict(set)
     items_extracted_length = []
     s = time.time()
@@ -65,8 +66,10 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         train_uid[u].add(i)
 
     train_actuals = defaultdict(list)
+    train_actuals_score_dict = defaultdict(dict)
     for u, i, r in train_affinities:
         train_actuals[u].append((i, r))
+        train_actuals_score_dict[u][i] = r
 
     for u, i in train_actuals.items():
         remaining_items = list(sorted(i, key=operator.itemgetter(1), reverse=True))
@@ -81,6 +84,8 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         train_predictions[u] = list(remaining_items)
 
     train_mean_ap = np.mean([average_precision(train_actuals[u], train_predictions[u]) for u in train_users])
+    train_mrr = np.mean([reciprocal_rank(train_actuals[u], train_predictions[u]) for u in train_users])
+    train_ndcg = np.mean([ndcg(train_actuals_score_dict[u], train_predictions[u]) for u in train_users])
 
     #
     for u, i in predictions.items():
@@ -92,21 +97,26 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
     for u, i, r in validation_affinities:
         validation_actuals[u].append((i, r))
 
+    validation_actuals_score_dict = defaultdict(dict)
     for u, i in validation_actuals.items():
         remaining_items = list(sorted(i, key=operator.itemgetter(1), reverse=True))
         remaining_items = list(filter(lambda x: x[0] not in train_uid[u], remaining_items))
+        validation_actuals_score_dict[u] = dict(remaining_items)
         remaining_items = [i for i, r in remaining_items]
         items_extracted_length.append(len(remaining_items))
         validation_actuals[u] = remaining_items
 
     mean_ap = np.mean([average_precision(validation_actuals[u], predictions[u]) for u in validation_users])
+    mrr = np.mean([reciprocal_rank(validation_actuals[u], predictions[u]) for u in validation_users])
+    val_ndcg = np.mean([ndcg(validation_actuals_score_dict[u], predictions[u]) for u in validation_users])
 
-    return {"train_map": train_mean_ap, "map": mean_ap, "retrieval_time": pred_time, "ndcg": 0.0,
+    return {"train_map": train_mean_ap, "map": mean_ap, "train_mrr": train_mrr, "mrr": mrr,
+            "retrieval_time": pred_time, "train_ndcg": train_ndcg, "ndcg": val_ndcg,
             "actuals": validation_actuals, "predictions": predictions,
             "train_actuals": train_actuals, "train_predictions": train_predictions,}
 
 
-def test_surprise(train, test, algo=["baseline", "svd", "svdpp"], algo_params={}, rating_scale=(1, 5)):
+def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}, rating_scale=(1, 5)):
     train_affinities = train
     validation_affinities = test
     items = list(set([i for u, i, r in train]))
@@ -140,7 +150,8 @@ def test_surprise(train, test, algo=["baseline", "svd", "svdpp"], algo_params={}
         user_rating_count_metrics["algo"] = name
         stats = {"algo": name, "rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
                  "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
-                "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time,
+                 "train_ndcg": ex_ee["train_ndcg"], "ndcg": ex_ee["ndcg"], "train_mrr": ex_ee["train_mrr"], "mrr": ex_ee["mrr"],
+                 "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time,
                  "user_rating_count_metrics": user_rating_count_metrics}
         return stats
 
@@ -168,7 +179,7 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
                              n_content_dims=hyperparameters["n_dims"],
                              n_collaborative_dims=hyperparameters["n_dims"],
                              fast_inference=False, super_fast_inference=False)
-    elif algo == "gcn_hybrid":
+    elif algo in ["gcn_hybrid", "gcn_hybrid_implicit", "gcn_hybrid_deep", "gcn_hybrid_implicit_deep"]:
         recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
                               rating_scale=rating_scale,
@@ -256,7 +267,9 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
 
 def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
               get_data_mappers, rating_scale,
-              svdpp_hybrid=True, gcn_hybrid=True, surprise=True, content_only=True, enable_error_analysis=False):
+              svdpp_hybrid=True, surprise=True,
+              gcn_hybrid=True, gcn_hybrid_implicit=True, gcn_hybrid_deep=True, gcn_hybrid_implicit_deep=True,
+              content_only=True, enable_error_analysis=False):
     results = []
     recs = []
     user_rating_count_metrics = pd.DataFrame([], columns=["algo", "user_rating_count", "rmse", "mae", "train_map", "map", "train_rmse", "train_mae"])
@@ -295,6 +308,35 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                           items, hyperparameters, get_data_mappers, rating_scale,
                                                                             algo="gcn_hybrid",
+                                                                            enable_error_analysis=enable_error_analysis)
+        results.extend(res)
+        recs.append(gcn_rec)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
+    if gcn_hybrid_implicit:
+        hyperparameters = hyperparamters_dict["gcn_hybrid_implicit"]
+        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+                                                                          items, hyperparameters, get_data_mappers, rating_scale,
+                                                                            algo="gcn_hybrid_implicit",
+                                                                            enable_error_analysis=enable_error_analysis)
+        results.extend(res)
+        recs.append(gcn_rec)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
+
+    if gcn_hybrid_deep:
+        hyperparameters = hyperparamters_dict["gcn_hybrid_deep"]
+        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+                                                                          items, hyperparameters, get_data_mappers, rating_scale,
+                                                                            algo="gcn_hybrid_deep",
+                                                                            enable_error_analysis=enable_error_analysis)
+        results.extend(res)
+        recs.append(gcn_rec)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
+
+    if gcn_hybrid_implicit_deep:
+        hyperparameters = hyperparamters_dict["gcn_hybrid_implicit_deep"]
+        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+                                                                          items, hyperparameters, get_data_mappers, rating_scale,
+                                                                            algo="gcn_hybrid_implicit_deep",
                                                                             enable_error_analysis=enable_error_analysis)
         results.extend(res)
         recs.append(gcn_rec)
@@ -422,8 +464,10 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
                                                                  ex_ee["actuals"], ex_ee["predictions"],
                                                                  ex_ee["train_actuals"], ex_ee["train_predictions"])
     stats = {"rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
-            "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
-            "train_rmse": train_rmse, "train_mae": train_mae}
+             "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
+             "train_ndcg": ex_ee["train_ndcg"], "ndcg": ex_ee["ndcg"], "train_mrr": ex_ee["train_mrr"],
+             "mrr": ex_ee["mrr"],
+             "train_rmse": train_rmse, "train_mae": train_mae}
     return predictions, actuals, stats, user_rating_count_metrics
 
 

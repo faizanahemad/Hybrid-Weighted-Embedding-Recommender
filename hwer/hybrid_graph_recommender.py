@@ -151,7 +151,7 @@ class HybridGCNRec(SVDppHybrid):
         g_train.readonly()
         n_content_dims = user_vectors.shape[1]
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims,
-                                                                gcn_layers, gcn_dropout, g_train, triplet_vectors), margin)
+                                                                gcn_layers, gcn_dropout, False, g_train, triplet_vectors), margin)
         opt = torch.optim.Adam(model.parameters(), lr=gcn_lr, weight_decay=gcn_kernel_l2)
         generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
                                                                                               user_id_to_index,
@@ -258,14 +258,14 @@ class HybridGCNRec(SVDppHybrid):
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
+        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 2
         bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.0
         padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
         use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
-        use_resnet = hyperparams["use_resnet"] if "use_resnet" in hyperparams else False
+        deep_mode = hyperparams["deep_mode"] if "deep_mode" in hyperparams else False
         enable_implicit = hyperparams["enable_implicit"] if "enable_implicit" in hyperparams else False
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
@@ -310,7 +310,7 @@ class HybridGCNRec(SVDppHybrid):
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
-        model = GraphSAGERecommenderImplicit(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train),
+        model = GraphSAGERecommenderImplicit(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, deep_mode, g_train),
                                              mu, biases, padding_length=padding_length, zeroed_indices=zeroed_indices, enable_implicit=enable_implicit)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
 
@@ -376,8 +376,6 @@ class HybridGCNRec(SVDppHybrid):
             with torch.no_grad():
                 h = []
                 for nf in sampler:
-                    # import pdb
-                    # pdb.set_trace()
                     h.append(model.gcn.forward(nf))
                 h = torch.cat(h)
 

@@ -26,11 +26,18 @@ def init_bias(param):
 
 
 class GraphSageConvWithSampling(nn.Module):
-    def __init__(self, feature_size, dropout, activation):
+    def __init__(self, feature_size, dropout, activation, deep_mode=False):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
-        self.W = nn.Linear(feature_size * 2, feature_size)
+
+        self.deep_mode = deep_mode
+        if deep_mode:
+            self.W_agg = nn.Linear(feature_size, feature_size * 4)
+            self.W_h = nn.Linear(feature_size, feature_size * 4)
+            self.W = nn.Linear(feature_size * 8, feature_size)
+        else:
+            self.W = nn.Linear(feature_size * 2, feature_size)
         self.drop = nn.Dropout(dropout)
         init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(self.W.bias)
@@ -41,6 +48,9 @@ class GraphSageConvWithSampling(nn.Module):
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+        if self.deep_mode:
+            h = F.leaky_relu(self.W_h(h))
+            h_agg = F.leaky_relu(self.W_agg(h_agg))
         h_concat = torch.cat([h, h_agg], 1)
         h_concat = self.drop(h_concat)
         # 2 layers here and resnet layers?
@@ -51,7 +61,7 @@ class GraphSageConvWithSampling(nn.Module):
 
 
 class GraphSageWithSampling(nn.Module):
-    def __init__(self, n_content_dims, feature_size, n_layers, dropout, G, init_node_vectors=None):
+    def __init__(self, n_content_dims, feature_size, n_layers, dropout, deep_mode, G, init_node_vectors=None):
         super(GraphSageWithSampling, self).__init__()
 
         self.feature_size = feature_size
@@ -60,9 +70,9 @@ class GraphSageWithSampling(nn.Module):
         convs = []
         for i in range(n_layers):
             if i >= n_layers - 1:
-                convs.append(GraphSageConvWithSampling(feature_size, 0.0, None))
+                convs.append(GraphSageConvWithSampling(feature_size, 0.0, None, deep_mode))
             else:
-                convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu))
+                convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu, deep_mode))
 
         self.convs = nn.ModuleList(convs)
 
@@ -104,24 +114,9 @@ class GraphSageWithSampling(nn.Module):
         return result
 
 
-class GraphSAGERecommender(nn.Module):
-    def __init__(self, gcn):
-        super(GraphSAGERecommender, self).__init__()
-
-        self.gcn = gcn
-        self.node_biases = nn.Parameter(torch.zeros(gcn.G.number_of_nodes() + 1))
-
-    def forward(self, nf, src, dst):
-        h_output = self.gcn(nf)
-        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
-        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        score = (h_src * h_dst).sum(1) + self.node_biases[src + 1] + self.node_biases[dst + 1]
-        return score
-
-
 def implicit_eval(h_dst, s2d, s2dc, s2d_imp,
                   h_src, d2s, d2sc, d2s_imp,
-                  zeroed_indices, enable_implicit=True):
+                  zeroed_indices, enable_implicit):
     if enable_implicit:
         for x in zeroed_indices:
             s2d_imp[s2d == x] = 0.0
@@ -139,7 +134,7 @@ def implicit_eval(h_dst, s2d, s2dc, s2d_imp,
 def get_score(src, dst, mean, node_biases,
               h_dst, s2d, s2dc, s2d_imp,
               h_src, d2s, d2sc, d2s_imp,
-              zeroed_indices, enable_implicit=True):
+              zeroed_indices, enable_implicit):
     implicit = implicit_eval(h_dst, s2d, s2dc, s2d_imp,
                              h_src, d2s, d2sc, d2s_imp,
                              zeroed_indices, enable_implicit=enable_implicit)
@@ -168,10 +163,13 @@ class GraphSAGERecommenderImplicit(nn.Module):
         h_output = self.gcn(nf)
         h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
         h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        s2d_imp = h_output[nf.map_from_parent_nid(-1, s2d.flatten(), True)]
-        s2d_imp = s2d_imp.reshape(tuple(s2d.shape)+(s2d_imp.shape[-1],))
-        d2s_imp = h_output[nf.map_from_parent_nid(-1, d2s.flatten(), True)]
-        d2s_imp = d2s_imp.reshape(tuple(d2s.shape) + (d2s_imp.shape[-1],))
+        s2d_imp = 0.0
+        d2s_imp = 0.0
+        if self.enable_implicit:
+            s2d_imp = h_output[nf.map_from_parent_nid(-1, s2d.flatten(), True)]
+            s2d_imp = s2d_imp.reshape(tuple(s2d.shape)+(s2d_imp.shape[-1],))
+            d2s_imp = h_output[nf.map_from_parent_nid(-1, d2s.flatten(), True)]
+            d2s_imp = d2s_imp.reshape(tuple(d2s.shape) + (d2s_imp.shape[-1],))
 
         score = get_score(src, dst, self.mu, self.node_biases,
                           h_dst, s2d, s2dc, s2d_imp,
