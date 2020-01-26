@@ -132,19 +132,18 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         index_time_params = self.knn_params["index_time_params"]
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
-        user_knn = hnswlib.Index(space='cosine', dim=self.n_output_dims)
+        user_knn = hnswlib.Index(space='cosine', dim=user_vectors.shape[1])
         user_knn.init_index(max_elements=len(user_ids) * 2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])
         user_knn.set_ef(n_neighbors * 2)
         assert len(user_vectors) == len(self.users_set)
-        assert user_vectors.shape[1] == self.n_output_dims
+        assert user_vectors.shape[1] == item_vectors.shape[1]
         user_knn.add_items(user_vectors, list(range(len(self.users_set))))
 
-        item_knn = hnswlib.Index(space='cosine', dim=self.n_output_dims)
+        item_knn = hnswlib.Index(space='cosine', dim=item_vectors.shape[1])
         item_knn.init_index(max_elements=len(item_ids) * 2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])
         item_knn.set_ef(n_neighbors * 2)
-        assert item_vectors.shape[1] == self.n_output_dims
         assert len(item_vectors) == len(self.items_set)
         item_knn.add_items(item_vectors, list(range(len(self.items_set))))
 
@@ -198,9 +197,6 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.user_only_features = list(set(self.user_features) - set(self.item_features))
         self.mu, self.bu, self.bi, self.spread, uid = normalize_affinity_scores_by_user_item_bs(user_item_affinities)
         return uid
-
-    def default_prediction(self, user_item_pairs: List[Tuple[str, str]]) -> List[Tuple[str, str, float]]:
-        return [(u, i, self.mu + self.bu[u] + self.bi[i]) for u, i in user_item_pairs]
 
     @abc.abstractmethod
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:

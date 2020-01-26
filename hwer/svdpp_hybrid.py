@@ -355,3 +355,15 @@ class SVDppHybrid(HybridRecommender):
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
         return predictions
+
+    def prepare_for_knn(self, alpha, content_data_used,
+                        user_content_vectors, item_content_vectors,
+                        user_vectors, item_vectors):
+        assert user_vectors.shape == user_content_vectors.shape
+        assert item_vectors.shape == item_content_vectors.shape
+        if content_data_used:
+            user_content_vectors, item_content_vectors = user_content_vectors * alpha, item_content_vectors * alpha
+            user_vectors, item_vectors = user_vectors * (1 - alpha), item_vectors * (1 - alpha)
+            user_vectors = user_content_vectors + user_vectors
+            item_vectors = item_content_vectors + item_vectors
+        return user_vectors,  item_vectors

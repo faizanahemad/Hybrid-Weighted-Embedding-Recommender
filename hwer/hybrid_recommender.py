@@ -589,20 +589,29 @@ class HybridRecommender(RecommendationBase):
                                              self.user_id_to_index, self.item_id_to_index, self.rating_scale, **svd_params)
         self.prediction_artifacts["svd_model"] = svd_model
 
+
+        self.log.debug("Fit Method, Before KNN, Unit Length Violations:: user = %s, item = %s",
+                       unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
+
+        user_vectors, item_vectors = self.prepare_for_knn(alpha, content_data_used,
+                                                          user_content_vectors, item_content_vectors,
+                                                          user_vectors, item_vectors)
+        _, _ = self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
+        self.fit_done = True
+        self.log.info("End Fitting Recommender, user_vectors shape = %s, item_vectors shape = %s, Time to fit = %.1f",
+                      user_vectors.shape, item_vectors.shape, time.time() - start_time)
+        return user_vectors, item_vectors
+
+    @abc.abstractmethod
+    def prepare_for_knn(self, alpha, content_data_used,
+                        user_content_vectors, item_content_vectors,
+                        user_vectors, item_vectors):
         user_content_vectors, item_content_vectors = user_content_vectors * alpha, item_content_vectors * alpha
         user_vectors, item_vectors = user_vectors * (1 - alpha), item_vectors * (1 - alpha)
         if content_data_used:
             user_vectors = np.concatenate((user_content_vectors, user_vectors), axis=1)
             item_vectors = np.concatenate((item_content_vectors, item_vectors), axis=1)
             assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_output_dims
-
-        self.log.debug("Fit Method, Before KNN, Unit Length Violations:: user = %s, item = %s",
-                       unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
-
-        _, _ = self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
-        self.fit_done = True
-        self.log.info("End Fitting Recommender, user_vectors shape = %s, item_vectors shape = %s, Time to fit = %.1f",
-                      user_vectors.shape, item_vectors.shape, time.time() - start_time)
         return user_vectors, item_vectors
 
     @abc.abstractmethod
