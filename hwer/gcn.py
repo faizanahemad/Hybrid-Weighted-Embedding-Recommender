@@ -69,7 +69,7 @@ class GraphSageWithSampling(nn.Module):
         convs = []
         for i in range(n_layers):
             if i >= n_layers - 1:
-                convs.append(GraphSageConvWithSampling(feature_size, 0.0, None, deep_mode))
+                convs.append(GraphSageConvWithSampling(feature_size, dropout, None, deep_mode))
             else:
                 convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu, deep_mode))
 

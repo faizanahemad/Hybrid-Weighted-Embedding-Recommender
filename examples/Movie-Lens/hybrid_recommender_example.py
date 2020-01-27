@@ -89,11 +89,11 @@ hyperparameters_svdpp = dict(n_dims=48, combining_factor=0.1,
 hyperparameters_gcn = dict(n_dims=48, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.0008, epochs=25, batch_size=1024, padding_length=50,
-                                                              network_depth=2, verbose=verbose,
+                               prediction_network_params=dict(lr=0.001, epochs=25, batch_size=1024, padding_length=50,
+                                                              network_depth=3, verbose=verbose,
                                                               kernel_l2=1e-3, dropout=0.5, use_content=True, enable_implicit=False),
-                               user_item_params=dict(lr=0.2, epochs=5, batch_size=64, l2=0.001,
-                                                     gcn_lr=0.001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
+                               user_item_params=dict(lr=0.1, epochs=10, batch_size=64, l2=0.0001,
+                                                     gcn_lr=0.0001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=0.75)))
@@ -147,7 +147,7 @@ hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_hybrid_implicit=h
 
 content_only = False
 svdpp_hybrid = False
-surprise = False
+surprise = True
 gcn_hybrid = True
 gcn_hybrid_implicit = False
 gcn_hybrid_deep = False
