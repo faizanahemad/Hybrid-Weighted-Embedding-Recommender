@@ -8,9 +8,6 @@ beautifulsoup4==4.8.1
 bidict==0.18.3
 bleach==3.1.0
 blis==0.4.1
-boto==2.49.0
-boto3==1.10.6
-botocore==1.13.6
 bpemb==0.3.0
 certifi==2019.9.11
 cffi==1.13.1
@@ -37,7 +34,6 @@ gast==0.2.2
 gensim==3.8.1
 google-pasta==0.1.7
 graphviz==0.13.2
-grpcio==1.24.1
 h5py==2.10.0
 hnswlib==0.3.2.0
 hyperopt==0.2.2
@@ -52,10 +48,6 @@ Jinja2==2.10.3
 jmespath==0.9.4
 joblib==0.14.0
 jsonschema==3.0.2
-jupyter==1.0.0
-jupyter-client==5.3.4
-jupyter-console==6.0.0
-jupyter-core==4.6.0
 Keras-Applications==1.0.8
 Keras-Preprocessing==1.1.0
 kiwisolver==1.1.0
