@@ -35,7 +35,7 @@ from .utils import normalize_affinity_scores_by_user, average_precision, recipro
 from . import SVDppHybrid, ContentRecommendation, HybridGCNRec
 
 
-def surprise_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, float]]]:
+def surprise_get_topk(model, users, items, k=200) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
         p = [(i, model.predict(u, i).est) for i in items]
@@ -44,7 +44,7 @@ def surprise_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, f
     return predictions
 
 
-def model_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, float]]]:
+def model_get_topk(model, users, items, k=200) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
         p = model.find_items_for_user(u)
@@ -52,14 +52,14 @@ def model_get_topk(model, users, items, k=100) -> Dict[str, List[Tuple[str, floa
     return predictions
 
 
-def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):
+def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list, k=100):
     validation_users = list(set([u for u, i, r in validation_affinities]))
     train_users = list(set([u for u, i, r in train_affinities]))
     assert len(validation_users) == len(train_users) and set(train_users) == set(validation_users)
     train_uid = defaultdict(set)
     items_extracted_length = []
     s = time.time()
-    predictions = get_topk(model, validation_users, item_list)
+    predictions = get_topk(model, validation_users, item_list, k=k * 2)
     e = time.time()
     pred_time = e - s
     for u, i, r in train_affinities:
@@ -80,18 +80,12 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
     for u, i in predictions.items():
         remaining_items = list(sorted(i, key=operator.itemgetter(1), reverse=True))
         remaining_items = [i for i, r in remaining_items]
-        predictions[u] = remaining_items
-        train_predictions[u] = list(remaining_items)
+        predictions[u] = list(filter(lambda x: x not in train_uid[u], remaining_items))[:k]
+        train_predictions[u] = remaining_items[:k]
 
     train_mean_ap = np.mean([average_precision(train_actuals[u], train_predictions[u]) for u in train_users])
     train_mrr = np.mean([reciprocal_rank(train_actuals[u], train_predictions[u]) for u in train_users])
     train_ndcg = np.mean([ndcg(train_actuals_score_dict[u], train_predictions[u]) for u in train_users])
-
-    #
-    for u, i in predictions.items():
-        remaining_items = list(filter(lambda x: x not in train_uid[u], i))
-        items_extracted_length.append(len(remaining_items))
-        predictions[u] = remaining_items
 
     validation_actuals = defaultdict(list)
     for u, i, r in validation_affinities:

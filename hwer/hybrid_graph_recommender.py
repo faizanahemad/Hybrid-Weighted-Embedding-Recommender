@@ -40,9 +40,8 @@ class HybridGCNRec(SVDppHybrid):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False,
                  super_fast_inference: bool = False):
-        super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims, fast_inference)
+        super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims, fast_inference, super_fast_inference)
         self.log = getLogger(type(self).__name__)
-        self.super_fast_inference = super_fast_inference
         self.cpu = int(os.cpu_count()/2)
 
     def user_item_affinities_triplet_trainer_data_gen_fn__(self,
@@ -515,9 +514,7 @@ class HybridGCNRec(SVDppHybrid):
             return self.fast_predict(user_item_pairs)
 
         if self.super_fast_inference:
-            assert self.mu is not None
-            predictions = [self.mu + self.bu[u] + self.bi[i] for u, i, in user_item_pairs]
-            return np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
+            return self.super_fast_predict(user_item_pairs)
 
         uip = [(self.user_id_to_index[u] + 1 if u in self.user_id_to_index else 0,
                 self.item_id_to_index[i] + 1 if i in self.item_id_to_index else 0,

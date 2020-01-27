@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 
 pip install --upgrade pip
-cat requirements.txt | xargs -n 1 pip install
-pip install gpustat
 pip uninstall -y tensorflow
 pip uninstall -y tensorflow-gpu
-pip install tensorflow-gpu==2.0
+cat requirements.txt | xargs -n 1 pip install
+pip install gpustat
 pip install -e .
 
 git config --global user.name "Faizan Ahemad"

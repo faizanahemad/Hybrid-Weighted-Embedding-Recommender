@@ -79,12 +79,11 @@ pip install -r requirements.txt
 
 # TODO
 - Add new item/user with content features https://stats.stackexchange.com/questions/320962/matrix-factorization-in-recommender-systems-adding-a-new-user?rq=1
-- Add Testing for Implicit and content data framework like https://github.com/benfred/implicit and https://github.com/lyst/lightfm
+- Add Testing for Implicit and content data framework like https://github.com/benfred/implicit and https://github.com/lyst/lightfm and https://maciejkula.github.io/spotlight/index.html
 - Add Testing for Fast.ai recommendation framework
 - Add `Recall@K` for user's with less than `L` ratings in training.
 - Add support to detect if gpu present and change `env_setup.sh` accordingly. 
 - Add Filter Function support for search functions
-- Weighted node combination in GCN
 - Try Huber Loss
 - Ability to Test with multiple recsys with different hyper-params
 - Hyper param optimisation via bayesian opt

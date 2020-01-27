@@ -12,7 +12,7 @@ from tensorflow import keras
 
 from surprise import Dataset
 from surprise import Reader
-from surprise import SVDpp
+from surprise import SVDpp, SVD
 import pandas as pd
 
 from .content_recommender import ContentRecommendation
@@ -26,7 +26,7 @@ from .utils import unit_length, normalize_affinity_scores_by_user, UnitLengthReg
 
 class HybridRecommender(RecommendationBase):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
-                 n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False):
+                 n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False, super_fast_inference: bool = False):
         super().__init__(knn_params=knn_params, rating_scale=rating_scale,
                          n_output_dims=n_content_dims + n_collaborative_dims)
         self.cb = ContentRecommendation(embedding_mapper, knn_params, rating_scale,
@@ -37,6 +37,7 @@ class HybridRecommender(RecommendationBase):
         self.prediction_artifacts = None
         self.log = getLogger(type(self).__name__)
         self.fast_inference = fast_inference
+        self.super_fast_inference = super_fast_inference
 
     def __entity_entity_affinities_triplet_trainer__(self,
                                              entity_ids: List[str],
@@ -499,9 +500,11 @@ class HybridRecommender(RecommendationBase):
         train = Dataset.load_from_df(train, reader).build_full_trainset()
         n_epochs = svd_params["n_epochs"] if "n_epochs" in svd_params else 10
         n_factors = svd_params["n_factors"] if "n_factors" in svd_params else 10
-        svd_model = SVDpp(n_factors=n_factors, n_epochs=n_epochs)
+        svd_model = SVD(n_factors=n_factors, n_epochs=n_epochs)
         svd_model.fit(train)
-        return svd_model
+        svdpp_model = SVDpp(n_factors=n_factors, n_epochs=n_epochs)
+        svdpp_model.fit(train)
+        return svdpp_model, svd_model
 
     @abc.abstractmethod
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
@@ -585,8 +588,9 @@ class HybridRecommender(RecommendationBase):
                                                                      self.user_id_to_index, self.item_id_to_index,
                                                                      self.rating_scale, prediction_network_params)
         self.prediction_artifacts = prediction_artifacts
-        svd_model = self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
+        svdpp_model, svd_model = self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
                                              self.user_id_to_index, self.item_id_to_index, self.rating_scale, **svd_params)
+        self.prediction_artifacts["svdpp_model"] = svdpp_model
         self.prediction_artifacts["svd_model"] = svd_model
 
 
@@ -618,16 +622,22 @@ class HybridRecommender(RecommendationBase):
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         pass
 
-    def fast_predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+    def super_fast_predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         svd_model = self.prediction_artifacts["svd_model"]
         return [svd_model.predict(u, i).est for u, i in user_item_pairs]
+
+    def fast_predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+        svdpp_model = self.prediction_artifacts["svdpp_model"]
+        return [svdpp_model.predict(u, i).est for u, i in user_item_pairs]
 
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
                             negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
         start = time.time()
         results = super().find_items_for_user(user, positive, negative, k=k)
         res, dist = zip(*results)
-        if self.fast_inference:
+        if self.super_fast_inference:
+            ratings = self.super_fast_predict([(user, i) for i in res])
+        elif self.fast_inference:
             ratings = self.fast_predict([(user, i) for i in res])
         else:
             ratings = self.predict([(user, i) for i in res])
