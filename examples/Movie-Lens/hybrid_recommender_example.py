@@ -89,9 +89,9 @@ hyperparameters_svdpp = dict(n_dims=48, combining_factor=0.1,
 hyperparameters_gcn = dict(n_dims=48, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.0008, epochs=17, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.0008, epochs=25, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
-                                                              kernel_l2=1e-6, dropout=0.2, use_content=True, enable_implicit=False),
+                                                              kernel_l2=1e-3, dropout=0.5, use_content=True, enable_implicit=False),
                                user_item_params=dict(lr=0.2, epochs=5, batch_size=64, l2=0.001,
                                                      gcn_lr=0.001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
@@ -101,9 +101,9 @@ hyperparameters_gcn = dict(n_dims=48, combining_factor=0.1,
 hyperparameters_gcn_implicit = dict(n_dims=48, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=21, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.001, epochs=24, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
-                                                              kernel_l2=1e-6, dropout=0.2, use_content=True, enable_implicit=True),
+                                                              kernel_l2=1e-6, dropout=0.25, use_content=True, enable_implicit=True),
                                user_item_params=dict(lr=0.2, epochs=5, batch_size=64, l2=0.001,
                                                      gcn_lr=0.001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
@@ -114,9 +114,9 @@ hyperparameters_gcn_implicit = dict(n_dims=48, combining_factor=0.1,
 hyperparameters_gcn_deep = dict(n_dims=48, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=21, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.001, epochs=24, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
-                                                              kernel_l2=1e-6, dropout=0.2, use_content=True, deep_mode=True),
+                                                              kernel_l2=1e-6, dropout=0.25, use_content=True, deep_mode=True),
                                user_item_params=dict(lr=0.2, epochs=5, batch_size=64, l2=0.001,
                                                      gcn_lr=0.001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
@@ -126,9 +126,9 @@ hyperparameters_gcn_deep = dict(n_dims=48, combining_factor=0.1,
 hyperparameters_gcn_implicit_deep = dict(n_dims=48, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=21, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.001, epochs=24, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
-                                                              kernel_l2=1e-6, dropout=0.2, use_content=True,
+                                                              kernel_l2=1e-6, dropout=0.25, use_content=True,
                                                               deep_mode=True, enable_implicit=True),
                                user_item_params=dict(lr=0.2, epochs=5, batch_size=64, l2=0.001,
                                                      gcn_lr=0.001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
@@ -149,9 +149,9 @@ content_only = False
 svdpp_hybrid = False
 surprise = False
 gcn_hybrid = True
-gcn_hybrid_implicit = True
-gcn_hybrid_deep = True
-gcn_hybrid_implicit_deep = True
+gcn_hybrid_implicit = False
+gcn_hybrid_deep = False
+gcn_hybrid_implicit_deep = False
 
 
 if not enable_kfold:

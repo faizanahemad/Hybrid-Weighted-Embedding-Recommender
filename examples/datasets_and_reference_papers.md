@@ -13,3 +13,9 @@ Approach and Deep Learning](https://arxiv.org/pdf/1706.05730.pdf)
         - [Deep Reinforcement Learning based
 Recommendation with Explicit User-Item
 Interactions Modeling](https://arxiv.org/pdf/1810.12027.pdf)
+
+## Benchmarks
+- ML-100k
+    - https://www.researchgate.net/publication/318763945_AutoSVD_An_Efficient_Hybrid_Collaborative_Filtering_Model_via_Contractive_Auto-encoders/figures?lo=1 and https://www.researchgate.net/publication/318763945_AutoSVD_An_Efficient_Hybrid_Collaborative_Filtering_Model_via_Contractive_Auto-encoders
+    - https://www.librec.net/release/v1.3/example.html
+    - https://paperswithcode.com/sota/collaborative-filtering-on-movielens-100k

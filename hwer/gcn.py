@@ -53,7 +53,6 @@ class GraphSageConvWithSampling(nn.Module):
             h_agg = F.leaky_relu(self.W_agg(h_agg))
         h_concat = torch.cat([h, h_agg], 1)
         h_concat = self.drop(h_concat)
-        # 2 layers here and resnet layers?
         h_new = self.W(h_concat)
         if self.activation is not None:
             h_new = self.activation(h_new)
