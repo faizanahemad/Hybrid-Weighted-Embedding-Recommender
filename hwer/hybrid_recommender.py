@@ -222,52 +222,6 @@ class HybridRecommender(RecommendationBase):
         assert np.sum(np.isnan(item_vectors)) == 0
         return user_vectors, item_vectors
 
-    def __user_item_affinities_ns_trainer_data_gen__(self,
-                                                 user_ids: List[str], item_ids: List[str],
-                                                 user_item_affinities: List[Tuple[str, str, float]],
-                                                 user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                                 hyperparams: Dict):
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        ns = hyperparams["ns"] if "ns" in hyperparams else 50
-        total_users = len(user_ids)
-        total_items = len(item_ids)
-
-        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            affinities = [(user_id_to_index[i], item_id_to_index[j], r) for i, j, r in affinities]
-            user_item_dict = defaultdict(set)
-            item_user_dict = defaultdict(set)
-
-            for u, i, r in affinities:
-                user_item_dict[u].add(i)
-                item_user_dict[i].add(u)
-
-            def get_one_example(i, j, r):
-                user = i
-                second_item = total_users + j
-                random_items = np.random.randint(0, total_users + total_items, ns * 5)
-                random_items = set(random_items) - user_item_dict[i]
-                random_items = random_items - item_user_dict[j]
-                negs = np.array(list(random_items))
-                negs = negs[np.random.randint(0, len(negs), ns)]
-                return (user, second_item, negs), 0
-
-            def generator():
-                for i in range(0, len(affinities), batch_size * 4):
-                    start = i
-                    end = min(i + batch_size * 4, len(affinities))
-                    generated = [get_one_example(u, v, w) for u, v, w in affinities[start:end]]
-                    for g in generated:
-                        yield g
-
-            return generator
-
-        output_shapes = (((), (), ns), ())
-        output_types = ((tf.int64, tf.int64, tf.int64), tf.float32)
-
-        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
-                                               output_types=output_types, output_shapes=output_shapes, )
-
-        return train
 
     def __user_item_affinities_ns_trainer__(self,
                                          user_ids: List[str], item_ids: List[str],

@@ -44,42 +44,30 @@ class HybridGCNRec(SVDppHybrid):
         self.log = getLogger(type(self).__name__)
         self.cpu = int(os.cpu_count()/2)
 
-    def user_item_affinities_triplet_trainer_data_gen_fn__(self,
+    def __user_item_affinities_ns_data_gen_fn__(self,
                                                  user_ids: List[str], item_ids: List[str],
                                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                                  hyperparams: Dict):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        ns = hyperparams["ns"] if "ns" in hyperparams else 50
         total_users = len(user_ids)
         total_items = len(item_ids)
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
-            adjacency_set = defaultdict(set)
-
             graph = Graph().read_edgelist(affinities)
             walker = Walker(graph, p=4, q=2)
             walker.preprocess_transition_probs()
-
-            for u, i, r in affinities:
-                adjacency_set[u].add(i)
-                adjacency_set[i].add(u)
-
-            def get_negative_example(i, j):
-                random_items = np.random.randint(0, total_users + total_items, 10)
-                random_items = set(random_items) - adjacency_set[i]
-                random_items = random_items - adjacency_set[j]
-                random_items = np.array(list(random_items))
-                distant_item = np.random.randint(0, total_users + total_items)
-                distant_item = random_items[0] if len(random_items) > 0 else distant_item
-                return distant_item
+            randomstate = np.random.default_rng(np.random.randint(0, 1000000))
+            total_entities = total_users + total_items
 
             def get_one_example(i, j):
                 user = i
                 second_item = j
-                distant_item = get_negative_example(i, j)
-                return (user, second_item, distant_item), 0
+                negs = randomstate.choice(total_entities, 100, replace=False, shuffle=True)
+                return (user, second_item, negs), 0
 
-            def generator():
+            def generator1():
                 for walk in walker.simulate_walks_generator(5, walk_length=3):
                     nodes = list(set(walk))
                     combinations = [(x, y) for i, x in enumerate(nodes) for y in nodes[i + 1:]]
@@ -92,12 +80,12 @@ class HybridGCNRec(SVDppHybrid):
                     start = i
                     end = min(i + batch_size, len(affinities))
                     combinations = []
-                    for u, v, w in affinities[start:end]:
+                    for u, v, r in affinities[start:end]:
                         w1 = walker.node2vec_walk(3, u)
-                        nxt = w1[1]
-                        c = [(x, y) for i, x in enumerate(w1) for y in w1[i + 1:]]
-                        c = c + [(u, v)] + [(v, nxt)] if v != nxt else []
-                        c = list(set(c))
+                        w2 = walker.node2vec_walk(3, v)
+                        c1 = [(x, y) for i, x in enumerate(w1) for y in w1[i + 1:]]
+                        c2 = [(x, y) for i, x in enumerate(w2) for y in w2[i + 1:]]
+                        c = [(u, v)] + c1 + c2
                         combinations.extend(c)
 
                     generated = [get_one_example(u, v) for u, v in combinations]
@@ -483,7 +471,9 @@ class HybridGCNRec(SVDppHybrid):
                                 "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
                                 "ratings_count_by_item": ratings_count_by_item, "enable_implicit": enable_implicit,
                                 "batch_size": batch_size, "gen_fn": gen_fn, "zeroed_indices": zeroed_indices}
-        # self.log.info("Built Prediction Network, model params = %s", model.count_params())
+        model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.log.info("Built Prediction Network, model params = %s", params)
         return prediction_artifacts
 
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
