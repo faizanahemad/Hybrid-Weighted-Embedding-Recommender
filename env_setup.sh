@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 
 pip install --upgrade pip
-pip uninstall -y tensorflow
 pip uninstall -y tensorflow-gpu
 cat requirements.txt | xargs -n 1 pip install
 pip install gpustat
