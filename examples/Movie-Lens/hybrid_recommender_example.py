@@ -27,26 +27,25 @@ from hwer import FasttextEmbedding
 
 import movielens_data_reader as mdr
 
-
-read_data = mdr.get_data_reader(dataset="100K")
-df_user, df_item, ratings = read_data()
-prepare_data_mappers = mdr.get_data_mapper(df_user, df_item, dataset="100K")
-
 #
+dataset="100K"
 test_data_subset = False
 enable_kfold = False
 enable_error_analysis = False
 verbose = 2 # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 
+read_data = mdr.get_data_reader(dataset=dataset)
+df_user, df_item, ratings = read_data()
+
 if test_data_subset:
-    if False:
+    if True:
         item_counts = ratings.groupby(['item'])['user'].count().reset_index()
-        item_counts = item_counts[(item_counts["user"] <= 200) & (item_counts["user"] >= 20)].head(100)
+        item_counts = item_counts[(item_counts["user"] <= 100) & (item_counts["user"] >= 20)].head(50)
         items = set(item_counts["item"])
         ratings = ratings[ratings["item"].isin(items)]
 
         user_counts = ratings.groupby(['user'])['item'].count().reset_index()
-        user_counts = user_counts[(user_counts["item"] <= 100) & (user_counts["item"] >= 20)].head(100)
+        user_counts = user_counts[(user_counts["item"] <= 100) & (user_counts["item"] >= 20)].head(50)
         users = set(user_counts["user"])
         ratings = ratings[ratings["user"].isin(users)]
 
@@ -58,6 +57,8 @@ if test_data_subset:
     else:
         cores = 10
         df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings, cores)
+
+prepare_data_mappers = mdr.get_data_mapper(df_user, df_item, dataset=dataset)
 
 ratings = ratings[["user", "item", "rating"]]
 user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
@@ -90,10 +91,10 @@ hyperparameters_gcn = dict(n_dims=48, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
                                prediction_network_params=dict(lr=0.001, epochs=25, batch_size=1024, padding_length=50,
-                                                              network_depth=3, verbose=verbose,
-                                                              kernel_l2=1e-3, dropout=0.5, use_content=True, enable_implicit=False),
-                               user_item_params=dict(lr=0.1, epochs=10, batch_size=64, l2=0.0001,
-                                                     gcn_lr=0.0001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
+                                                              network_depth=2, verbose=verbose,
+                                                              kernel_l2=1e-4, dropout=0.25, use_content=True, enable_implicit=False),
+                               user_item_params=dict(lr=0.1, epochs=2, batch_size=64, l2=0.0001,
+                                                     gcn_lr=0.1, gcn_epochs=10, gcn_layers=0, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=0.75)))
@@ -138,7 +139,7 @@ hyperparameters_gcn_implicit_deep = dict(n_dims=48, combining_factor=0.1,
 
 hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
                             "svd": {"biased": True, "n_factors": 20},
-                            "algos": ["baseline", "svd", "svdpp"]}
+                            "algos": ["svdpp"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_hybrid_implicit=hyperparameters_gcn_implicit,
                            gcn_hybrid_deep=hyperparameters_gcn_deep, gcn_hybrid_implicit_deep=hyperparameters_gcn_implicit_deep,
@@ -147,7 +148,7 @@ hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_hybrid_implicit=h
 
 content_only = False
 svdpp_hybrid = False
-surprise = True
+surprise = False
 gcn_hybrid = True
 gcn_hybrid_implicit = False
 gcn_hybrid_deep = False

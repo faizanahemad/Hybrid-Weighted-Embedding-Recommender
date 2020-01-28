@@ -49,22 +49,22 @@ class HybridGCNRec(SVDppHybrid):
                                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                                  hyperparams: Dict):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        ns = hyperparams["ns"] if "ns" in hyperparams else 50
+        ns = hyperparams["ns"] if "ns" in hyperparams else 5
         total_users = len(user_ids)
         total_items = len(item_ids)
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
-            graph = Graph().read_edgelist(affinities)
-            walker = Walker(graph, p=4, q=2)
-            walker.preprocess_transition_probs()
+            # graph = Graph().read_edgelist(affinities)
+            # walker = Walker(graph, p=4, q=2)
+            # walker.preprocess_transition_probs()
             randomstate = np.random.default_rng(np.random.randint(0, 1000000))
             total_entities = total_users + total_items
 
             def get_one_example(i, j):
                 user = i
                 second_item = j
-                negs = randomstate.choice(total_entities, 100, replace=False, shuffle=True)
+                negs = randomstate.choice(total_entities, ns, replace=False, shuffle=True)
                 return (user, second_item, negs), 0
 
             def generator1():
@@ -81,11 +81,11 @@ class HybridGCNRec(SVDppHybrid):
                     end = min(i + batch_size, len(affinities))
                     combinations = []
                     for u, v, r in affinities[start:end]:
-                        w1 = walker.node2vec_walk(3, u)
-                        w2 = walker.node2vec_walk(3, v)
-                        c1 = [(x, y) for i, x in enumerate(w1) for y in w1[i + 1:]]
-                        c2 = [(x, y) for i, x in enumerate(w2) for y in w2[i + 1:]]
-                        c = [(u, v)] + c1 + c2
+                        # w1 = walker.node2vec_walk(3, u)
+                        # w2 = walker.node2vec_walk(3, v)
+                        # c1 = [(x, y) for i, x in enumerate(w1) for y in w1[i + 1:]]
+                        # c2 = [(x, y) for i, x in enumerate(w2) for y in w2[i + 1:]]
+                        c = [(u, v)] # + [(w1[0], w1[-1])] + [(w2[0], w2[-1])]
                         combinations.extend(c)
 
                     generated = [get_one_example(u, v) for u, v in combinations]
@@ -137,10 +137,10 @@ class HybridGCNRec(SVDppHybrid):
         g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids), np.concatenate((user_vectors, item_vectors)))
         g_train.readonly()
         n_content_dims = user_vectors.shape[1]
-        model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims,
+        model = GraphSAGENegativeSamplingEmbedding(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims,
                                                                 gcn_layers, gcn_dropout, False, g_train, triplet_vectors), margin)
         opt = torch.optim.Adam(model.parameters(), lr=gcn_lr, weight_decay=gcn_kernel_l2)
-        generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
+        generate_training_samples = self.__user_item_affinities_ns_data_gen_fn__(user_ids, item_ids,
                                                                                               user_id_to_index,
                                                                                               item_id_to_index,
                                                                                               hyperparams)
@@ -156,6 +156,7 @@ class HybridGCNRec(SVDppHybrid):
                 neg.append(w)
             #
             total_gen = time.time() - start_gen
+            print("Generated random walks and NS in time = %.2f" % total_gen)
             src = torch.LongTensor(src)
             dst = torch.LongTensor(dst)
             neg = torch.LongTensor(neg)
@@ -171,7 +172,7 @@ class HybridGCNRec(SVDppHybrid):
                 dst_batches = dst_shuffled.split(gcn_batch_size)
                 neg_batches = neg_shuffled.split(gcn_batch_size)
 
-                seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
+                seed_nodes = torch.cat(sum([[s, d, n.flatten()] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
 
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
@@ -188,8 +189,7 @@ class HybridGCNRec(SVDppHybrid):
                 # Training
                 total_loss = 0.0
                 for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
-                    score = model.forward(nodeflow, s, d, n)
-                    loss = (score ** 2).mean()
+                    loss = model.forward(nodeflow, s, d, n)
                     total_loss = total_loss + loss
 
                     opt.zero_grad()

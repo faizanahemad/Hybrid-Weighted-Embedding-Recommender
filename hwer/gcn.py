@@ -196,6 +196,45 @@ class GraphSAGETripletEmbedding(nn.Module):
         return score
 
 
+def negative_sampling_loss_v1(emb_u, emb_v, neg_emb_v):
+    losses = 0.0
+    score = torch.mul(emb_u, emb_v).squeeze().sum(1)
+    score = F.logsigmoid(score).sum()
+    losses += score
+    neg_score = torch.bmm(neg_emb_v, emb_u.unsqueeze(2)).squeeze()
+    neg_score = F.logsigmoid(-1 * neg_score.sum(1)).sum()
+    losses += neg_score
+    return -1 * losses
+
+
+def negative_sampling_loss_v2(h_src, h_dst, h_neg):
+    t1 = F.logsigmoid((h_src * h_dst).sum(1)).sum()
+    neg_score = h_neg.bmm(h_src.unsqueeze(2)).squeeze(2)
+    t3 = F.logsigmoid(-1.0 * neg_score).sum()
+    loss = -1.0 * (t1 + t3)
+    return loss
+
+
+class GraphSAGENegativeSamplingEmbedding(nn.Module):
+    def __init__(self, gcn, margin=0.1):
+        super(GraphSAGENegativeSamplingEmbedding, self).__init__()
+
+        self.gcn = gcn
+        self.margin = margin
+
+    def forward(self, nf, src, dst, neg):
+        h_output = self.gcn(nf)
+        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
+        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
+        h_neg = h_output[nf.map_from_parent_nid(-1, neg.flatten(), True)]
+        h_neg = h_neg.reshape(tuple(neg.shape) + (h_neg.shape[-1],))
+
+        loss1 = negative_sampling_loss_v1(h_src, h_dst, h_neg)
+        loss2 = negative_sampling_loss_v2(h_src, h_dst, h_neg)
+
+        return loss2
+
+
 def build_dgl_graph(ratings, total_nodes, content_vectors):
     g = dgl.DGLGraph(multigraph=True)
     g.add_nodes(total_nodes)
