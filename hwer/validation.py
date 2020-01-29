@@ -394,6 +394,8 @@ def display_results(results: List[Dict[str, Any]]):
 
 def visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities):
     # TODO: combining factor as X-axis, y-axis as map, hue as user_rating_count
+    # TODO: plot RMSE and NDCG
+    # TODO: support which algos have to be plotted?
     validation_users_count = len(set([u for u, i, r in validation_affinities]))
     results['retrieval_time'] = results['retrieval_time'] / validation_users_count
     results['retrieval_time'] = results['retrieval_time'] * 1000

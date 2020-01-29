@@ -13,6 +13,9 @@ Approach and Deep Learning](https://arxiv.org/pdf/1706.05730.pdf)
         - [Deep Reinforcement Learning based
 Recommendation with Explicit User-Item
 Interactions Modeling](https://arxiv.org/pdf/1810.12027.pdf)
+- [Word2Vec Negative Sampling](https://papers.nips.cc/paper/5021-distributed-representations-of-words-and-phrases-and-their-compositionality.pdf)
+
+
 
 ## Benchmarks
 - ML-100k

@@ -222,89 +222,6 @@ class HybridRecommender(RecommendationBase):
         assert np.sum(np.isnan(item_vectors)) == 0
         return user_vectors, item_vectors
 
-
-    def __user_item_affinities_ns_trainer__(self,
-                                         user_ids: List[str], item_ids: List[str],
-                                         user_item_affinities: List[Tuple[str, str, float]],
-                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                         n_output_dims: int,
-                                         hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
-
-        self.log.debug("Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
-                       len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-        margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
-        ns = hyperparams["ns"] if "ns" in hyperparams else 50
-
-        assert np.sum(np.isnan(user_vectors)) == 0
-        assert np.sum(np.isnan(item_vectors)) == 0
-
-        n_input_dims = user_vectors.shape[1]
-        assert user_vectors.shape[1] == item_vectors.shape[1]
-        train = self.__user_item_affinities_ns_trainer_data_gen__(user_ids, item_ids,
-                                                 user_item_affinities,
-                                                 user_id_to_index, item_id_to_index,
-                                                 hyperparams)
-        train = train.shuffle(batch_size * 10).batch(batch_size).prefetch(32)
-
-        total_users = len(user_ids)
-
-        input_1 = keras.Input(shape=(1,), dtype=tf.int64)
-        input_2 = keras.Input(shape=(1,), dtype=tf.int64)
-        input_3 = keras.Input(shape=(ns,), dtype=tf.int64)
-
-        embeddings_initializer = tf.keras.initializers.Constant(np.concatenate((user_vectors, item_vectors)))
-        embeddings = keras.layers.Embedding(len(user_ids) + len(item_ids), n_input_dims, input_length=ns+2,
-                                            embeddings_initializer=embeddings_initializer)
-        all_embeddings = embeddings(K.concatenate([input_1, input_2, input_3]))
-        item_1 = tf.keras.layers.Lambda(lambda x: x[:, 0])(all_embeddings)
-        item_2 = tf.keras.layers.Lambda(lambda x: x[:, 1])(all_embeddings)
-        negative_samples = tf.keras.layers.Lambda(lambda x: x[:, 2:])(all_embeddings)
-
-        item_1 = tf.keras.layers.Flatten()(item_1)
-        item_2 = tf.keras.layers.Flatten()(item_2)
-
-        # item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
-        item_1 = K.l2_normalize(item_1, axis=-1)
-        item_2 = K.l2_normalize(item_2, axis=-1)
-        negative_samples = K.l2_normalize(negative_samples, axis=-1)
-
-        item_1 = np.sqrt(5.0) * item_1
-        item_2 = np.sqrt(5.0) * item_2
-        negative_samples = np.sqrt(5.0) * negative_samples
-
-        i1_i2_dot = tf.keras.layers.Dot(axes=1)([item_1, item_2])
-        i1_i2_dot = tf.keras.activations.sigmoid(i1_i2_dot)
-        loss = -1.0 * K.log(i1_i2_dot)
-
-        # item_1 = tf.broadcast_to(item_1, [ns, n_input_dims])
-        loss_2 = (negative_samples @ item_1[..., None])[..., 0]
-        # https://stackoverflow.com/questions/38235555/tensorflow-matmul-of-input-matrix-with-batch-data
-
-        loss_2 = K.sum(K.log(tf.keras.activations.sigmoid(loss_2)))
-        loss = loss + loss_2
-        # loss = loss/ns
-
-        model = keras.Model(inputs=[input_1, input_2, input_3],
-                            outputs=[loss])
-
-        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
-        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
-        model.compile(optimizer=sgd,
-                      loss=['mean_squared_error'], metrics=["mean_squared_error"])
-
-        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
-        vectors = embeddings.embeddings.numpy()
-        user_vectors = vectors[:total_users]
-        item_vectors = vectors[total_users:]
-        self.log.debug("End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s",
-                       unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
-        return user_vectors, item_vectors
-
     def __user_item_affinities_triplet_trainer_data_gen_fn__(self,
                                                  user_ids: List[str], item_ids: List[str],
                                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
@@ -315,23 +232,11 @@ class HybridRecommender(RecommendationBase):
 
         def generate_training_samples(affinities: List[Tuple[str, str, float]]):
             affinities = [(user_id_to_index[i], item_id_to_index[j], r) for i, j, r in affinities]
-            user_item_dict = defaultdict(set)
-            item_user_dict = defaultdict(set)
-
-            for u, i, r in affinities:
-                user_item_dict[u].add(i)
-                item_user_dict[i].add(u)
 
             def get_one_example(i, j, r):
                 user = i
                 second_item = total_users + j
-
-                random_items = np.random.randint(0, total_users + total_items, 50)
-                random_items = set(random_items) - user_item_dict[i]
-                random_items = random_items - item_user_dict[j]
-                random_items = np.array(list(random_items))
                 distant_item = np.random.randint(0, total_users + total_items)
-                distant_item = random_items[0] if len(random_items) > 0 else distant_item
                 return (user, second_item, distant_item), 0
 
             def generator():
@@ -394,6 +299,7 @@ class HybridRecommender(RecommendationBase):
         def build_base_network(embedding_size, n_output_dims, vectors):
             i1 = keras.Input(shape=(1,))
 
+            # TODO: Unit vectorise here
             embeddings_initializer = tf.keras.initializers.Constant(vectors)
             k = 2
             if l2:
