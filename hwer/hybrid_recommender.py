@@ -300,6 +300,7 @@ class HybridRecommender(RecommendationBase):
             i1 = keras.Input(shape=(1,))
 
             # TODO: Unit vectorise here
+            vectors = unit_length(vectors, axis=-1)
             embeddings_initializer = tf.keras.initializers.Constant(vectors)
             k = 2
             if l2:

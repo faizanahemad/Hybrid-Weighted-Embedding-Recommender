@@ -19,6 +19,7 @@ from node2vec import Node2Vec
 import networkx as nx
 from .random_walk import *
 import os
+from joblib import Parallel, delayed
 
 
 import networkx as nx
@@ -48,72 +49,77 @@ class HybridGCNRec(SVDppHybrid):
         self.log = getLogger(type(self).__name__)
         self.cpu = int(os.cpu_count()/2)
 
-    def __word2vec_generator__(self,
-                             user_ids: List[str], item_ids: List[str],
-                             user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                             hyperparams: Dict):
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        total_users = len(user_ids)
-        total_items = len(item_ids)
-
-        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
-            affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-            all_words = set(list(flatten([[u, i] for u, i, r in affinities])))
-            graph = Graph().read_edgelist(affinities)
-            walker = Walker(graph, p=2, q=2)
-            walker.preprocess_transition_probs()
-
-            def generator1():
-                for walk in walker.simulate_walks_generator(5, walk_length=4):
-                    yield walk
-
-            def generator2():
-                for u, v, r in affinities:
-                    w1 = walker.node2vec_walk(4, u)
-                    w2 = walker.node2vec_walk(4, v)
-                    for g in [w1, w2]:
-                        yield g
-
-            return generator2
-        return generate_training_samples
-
-    def __word2vec_trainer(self,
+    def __word2vec_trainer__(self,
                                          user_ids: List[str], item_ids: List[str],
                                          user_item_affinities: List[Tuple[str, str, float]],
                                          user_vectors: np.ndarray, item_vectors: np.ndarray,
                                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                          n_output_dims: int,
                                          hyperparams: Dict):
+        walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 40
+        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
+        window = hyperparams["window"] if "window" in hyperparams else 4
+        iter = hyperparams["iter"] if "iter" in hyperparams else 2
+        p = hyperparams["p"] if "p" in hyperparams else 0.5
+        q = hyperparams["q"] if "q" in hyperparams else 0.5
+
         total_users = len(user_ids)
         total_items = len(item_ids)
 
-        generate_training_samples = self.__word2vec_generator__(user_ids, item_ids,
-                                                                user_id_to_index,
-                                                                item_id_to_index,
-                                                                hyperparams)
+        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
+            affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
+            affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
+            graph = Graph().read_edgelist(affinities)
+            walker = Walker(graph, p=p, q=q)
+            ts = time.time()
+            walker.preprocess_transition_probs()
+            print("Transition Prob Preprocess = %.1f" % (time.time() - ts))
 
+            def generator1():
+                for walk in walker.simulate_walks_generator(num_walks, walk_length=walk_length):
+                    yield walk
+
+            def generator2():
+                for u, v, r in affinities:
+                    w1 = walker.node2vec_walk(10, u)
+                    w2 = walker.node2vec_walk(10, v)
+                    for g in [w1, w2]:
+                        yield g
+
+            return generator1
+
+        total_users = len(user_ids)
+        total_items = len(item_ids)
+
+        sentences_generator = generate_training_samples(user_item_affinities)
+
+
+        gts = time.time()
+        start = gts
+        gt = 0.0
+
+        # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
         sentences = []
-        for w in generate_training_samples(user_item_affinities)():
+        for w in sentences_generator():
             sentences.append(list(map(str, w)))
-        import more_itertools
-        all_words = set(list(more_itertools.flatten(sentences)))
-        alpha = 0.01
-        min_alpha = 0.002
-
+        gt += time.time() - gts
+        np.random.shuffle(sentences)
         w2v = Word2Vec(sentences, min_count=1,
-                       size=self.n_collaborative_dims, window=4, workers=self.cpu, sg=1,
-                       negative=10, max_vocab_size=10000000, iter=1, alpha=alpha, min_alpha=min_alpha)
+                       size=self.n_collaborative_dims, window=window, workers=self.cpu, sg=1,
+                       negative=10, max_vocab_size=None, iter=1)
 
-        start_alpha = 0.001
-        end_alpha = 0.0002
-        for _ in range(10):
+        for _ in range(iter):
+            gts = time.time()
             sentences = []
-            for w in generate_training_samples(user_item_affinities)():
+            for w in sentences_generator():
                 sentences.append(list(map(str, w)))
-            w2v.train(sentences, total_examples=len(sentences), epochs=1, start_alpha=start_alpha, end_alpha=end_alpha)
+            # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
 
-        print(w2v.wv.vectors.shape, total_users + total_items, len(all_words), len(sentences))
+            gt += time.time() - gts
+            np.random.shuffle(sentences)
+            w2v.train(sentences, total_examples=len(sentences), epochs=2)
+
+        print(gt, time.time() - start)
         user_vectors = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
         return user_vectors, item_vectors
@@ -125,14 +131,23 @@ class HybridGCNRec(SVDppHybrid):
                                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                          n_output_dims: int,
                                          hyperparams: Dict):
+        walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 60
+        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 140
+        window = hyperparams["window"] if "window" in hyperparams else 4
+        iter = hyperparams["iter"] if "iter" in hyperparams else 5
+        p = hyperparams["p"] if "p" in hyperparams else 0.5
+        q = hyperparams["q"] if "q" in hyperparams else 0.5
+
         total_users = len(user_ids)
         total_items = len(item_ids)
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in user_item_affinities]
         affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
         edges = [(str(x), str(y)) for x, y, w in affinities]
         graph = nx.DiGraph(edges)
-        node2vec = Node2Vec(graph, dimensions=n_output_dims, walk_length=5, num_walks=10, workers=self.cpu)
-        n2v = node2vec.fit(window=5, min_count=1, batch_words=1000)
+        node2vec = Node2Vec(graph, dimensions=n_output_dims, p=p, q=q,
+                            walk_length=walk_length, num_walks=num_walks, workers=self.cpu)
+        n2v = node2vec.fit(window=window, min_count=1, batch_words=1000, iter=iter,
+                           workers=self.cpu, sg=1, negative=10, max_vocab_size=None,)
         user_vectors = np.array([n2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([n2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
         return user_vectors, item_vectors
@@ -210,12 +225,22 @@ class HybridGCNRec(SVDppHybrid):
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
         gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
+        enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
+        node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
 
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
         # TODO: init user_vectors and item_vectors for triplet training using word2vec/node2vec
+        w2v_user_vectors, w2v_item_vectors = user_vectors, item_vectors
+        if enable_node2vec:
+            w2v_user_vectors, w2v_item_vectors = self.__node2vec_trainer__(user_ids, item_ids, user_item_affinities,
+                                                                   user_vectors, item_vectors,
+                                                                   user_id_to_index,
+                                                                   item_id_to_index,
+                                                                   n_output_dims,
+                                                                   node2vec_params)
         user_triplet_vectors, item_triplet_vectors = super().__user_item_affinities_triplet_trainer__(user_ids, item_ids, user_item_affinities,
-                              user_vectors, item_vectors,
+                              w2v_user_vectors, w2v_item_vectors,
                               user_id_to_index,
                               item_id_to_index,
                               n_output_dims,
@@ -229,9 +254,13 @@ class HybridGCNRec(SVDppHybrid):
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i], r) for u, i, r in user_item_affinities]
 
         # TODO: For content vectors here concat original content vectors with word2vec/node2vec vectors
-        g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids), np.concatenate((user_vectors, item_vectors)))
+        graph_user_vectors, graph_item_vectors = user_vectors, item_vectors
+        if enable_node2vec:
+            graph_user_vectors = np.concatenate((user_vectors, w2v_user_vectors), axis=1)
+            graph_item_vectors = np.concatenate((item_vectors, w2v_item_vectors), axis=1)
+        g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids), np.concatenate((graph_user_vectors, graph_item_vectors)))
         g_train.readonly()
-        n_content_dims = user_vectors.shape[1]
+        n_content_dims = graph_user_vectors.shape[1]
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims,
                                                                 gcn_layers, gcn_dropout, False, g_train, triplet_vectors), margin)
         opt = torch.optim.Adam(model.parameters(), lr=gcn_lr, weight_decay=gcn_kernel_l2)
@@ -327,12 +356,12 @@ class HybridGCNRec(SVDppHybrid):
             unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
 
         #
-        user_vectors, item_vectors = self.__word2vec_trainer(user_ids, item_ids, user_item_affinities,
-                                                             user_vectors, item_vectors,
-                                                             user_id_to_index,
-                                                             item_id_to_index,
-                                                             n_output_dims,
-                                                             hyperparams)
+        user_vectors, item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
+                                                               user_vectors, item_vectors,
+                                                               user_id_to_index,
+                                                               item_id_to_index,
+                                                               n_output_dims,
+                                                               hyperparams)
         return user_vectors, item_vectors
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],

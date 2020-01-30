@@ -107,7 +107,8 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
     return {"train_map": train_mean_ap, "map": mean_ap, "train_mrr": train_mrr, "mrr": mrr,
             "retrieval_time": pred_time, "train_ndcg": train_ndcg, "ndcg": val_ndcg,
             "actuals": validation_actuals, "predictions": predictions,
-            "train_actuals": train_actuals, "train_predictions": train_predictions,}
+            "train_actuals": train_actuals, "train_predictions": train_predictions,
+            "train_actuals_score_dict": train_actuals_score_dict, "validation_actuals_score_dict": validation_actuals_score_dict}
 
 
 def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}, rating_scale=(1, 5)):
@@ -140,7 +141,8 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
         user_rating_count_metrics = metrics_by_num_interactions_user(train_affinities, validation_affinities,
                                                                      train_predictions, predictions,
                                                                      ex_ee["actuals"], ex_ee["predictions"],
-                                                                     ex_ee["train_actuals"], ex_ee["train_predictions"])
+                                                                     ex_ee["train_actuals"], ex_ee["train_predictions"],
+                                                                     ex_ee["train_actuals_score_dict"], ex_ee["validation_actuals_score_dict"])
         user_rating_count_metrics["algo"] = name
         stats = {"algo": name, "rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
                  "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
@@ -343,8 +345,9 @@ def metrics_by_num_interactions_user(train_affinities: List[Tuple[str, str, floa
                                      train_predictions: np.ndarray, val_predictions: np.ndarray,
                                      val_user_topk_actuals: Dict[str, List[str]], val_user_topk_predictions: Dict[str, List[str]],
                                      train_user_topk_actuals: Dict[str, List[str]], train_user_topk_predictions: Dict[str, List[str]],
+                                     train_actuals_score_dict: Dict[str, Dict[str, float]], validation_actuals_score_dict: Dict[str, Dict[str, float]],
                                      mode="le",
-                                     increments=2):
+                                     increments=5):
     columns = ["user", "item", "rating"]
     train_affinities = pd.DataFrame(train_affinities, columns=columns)
     validation_affinities = pd.DataFrame(validation_affinities, columns=columns)
@@ -376,8 +379,15 @@ def metrics_by_num_interactions_user(train_affinities: List[Tuple[str, str, floa
         train_map = np.mean([average_precision(train_user_topk_actuals[u], train_user_topk_predictions[u]) for u in users])
         mean_ap = np.mean([average_precision(val_user_topk_actuals[u], val_user_topk_predictions[u]) for u in users])
 
-        results.append(["", uc, val_rmse, val_mae, train_map, mean_ap, train_rmse, train_mae])
-    results = pd.DataFrame(results, columns=["algo", "user_rating_count", "rmse", "mae", "train_map", "map", "train_rmse", "train_mae"])
+        train_mrr = np.mean([reciprocal_rank(train_user_topk_actuals[u], train_user_topk_predictions[u]) for u in users])
+        train_ndcg = np.mean([ndcg(train_actuals_score_dict[u], train_user_topk_predictions[u]) for u in users])
+
+        mrr = np.mean([reciprocal_rank(val_user_topk_actuals[u], val_user_topk_predictions[u]) for u in users])
+        val_ndcg = np.mean([ndcg(validation_actuals_score_dict[u], val_user_topk_predictions[u]) for u in users])
+
+        results.append(["", uc, val_rmse, val_mae, train_map, mean_ap, mrr, val_ndcg, train_rmse, train_mae, train_mrr, train_ndcg])
+    results = pd.DataFrame(results, columns=["algo", "user_rating_count", "rmse", "mae", "train_map", "map", "mrr", "ndcg",
+                                             "train_rmse", "train_mae", "train_mrr", "train_ndcg"])
     return results
 
 
@@ -416,6 +426,22 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.show()
 
     plt.figure(figsize=(12, 8))
+    plt.title("RMSE vs Algorithm")
+    sns.barplot(results.index, results.rmse)
+    plt.xlabel("Algorithm")
+    plt.ylabel("RMSE")
+    plt.xticks(rotation=45, ha='right')
+    plt.show()
+
+    plt.figure(figsize=(12, 8))
+    plt.title("NDCG vs Algorithm")
+    sns.barplot(results.index, results.ndcg)
+    plt.xlabel("Algorithm")
+    plt.ylabel("NDCG")
+    plt.xticks(rotation=45, ha='right')
+    plt.show()
+
+    plt.figure(figsize=(12, 8))
     plt.title("Mean Average Precision vs Algorithm")
     sns.barplot(results.index, results.map)
     plt.xlabel("Algorithm")
@@ -432,6 +458,24 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.figure(figsize=(12, 8))
     plt.title("Mean Average Precision vs User Rating Count")
     sns.lineplot(x="user_rating_count", y="map", hue="algo", style="algo", markers=True, data=user_rating_count_metrics)
+    plt.xticks(rotation=45, ha='right')
+    plt.show()
+
+    plt.figure(figsize=(12, 8))
+    plt.title("RMSE vs User Rating Count")
+    sns.lineplot(x="user_rating_count", y="rmse", hue="algo", style="algo", markers=True, data=user_rating_count_metrics)
+    plt.xticks(rotation=45, ha='right')
+    plt.show()
+
+    plt.figure(figsize=(12, 8))
+    plt.title("Mean Reciprocal Rank vs User Rating Count")
+    sns.lineplot(x="user_rating_count", y="mrr", hue="algo", style="algo", markers=True, data=user_rating_count_metrics)
+    plt.xticks(rotation=45, ha='right')
+    plt.show()
+
+    plt.figure(figsize=(12, 8))
+    plt.title("NDCG vs User Rating Count")
+    sns.lineplot(x="user_rating_count", y="ndcg", hue="algo", style="algo", markers=True, data=user_rating_count_metrics)
     plt.xticks(rotation=45, ha='right')
     plt.show()
 
@@ -458,7 +502,8 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
     ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
     user_rating_count_metrics = metrics_by_num_interactions_user(train_affinities, validation_affinities, train_predictions, predictions,
                                                                  ex_ee["actuals"], ex_ee["predictions"],
-                                                                 ex_ee["train_actuals"], ex_ee["train_predictions"])
+                                                                 ex_ee["train_actuals"], ex_ee["train_predictions"],
+                                                                 ex_ee["train_actuals_score_dict"], ex_ee["validation_actuals_score_dict"])
     stats = {"rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
              "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
              "train_ndcg": ex_ee["train_ndcg"], "ndcg": ex_ee["ndcg"], "train_mrr": ex_ee["train_mrr"],

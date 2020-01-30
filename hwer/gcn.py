@@ -35,13 +35,17 @@ class GraphSageConvWithSampling(nn.Module):
         if deep_mode:
             self.W_agg = nn.Linear(feature_size, feature_size * 4)
             self.W_h = nn.Linear(feature_size, feature_size * 4)
+            self.W1 = nn.Linear(feature_size * 8, feature_size * 8)
             self.W = nn.Linear(feature_size * 8, feature_size)
         else:
             self.W = nn.Linear(feature_size * 2, feature_size)
         self.drop = nn.Dropout(dropout)
-        init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(self.W.bias)
         self.activation = activation
+        if self.activation is not None:
+            init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
+        else:
+            init_weight(self.W.weight, 'xavier_uniform_', 'linear')
+        init_bias(self.W.bias)
 
     def forward(self, nodes):
         h_agg = nodes.data['h_agg']
@@ -52,6 +56,9 @@ class GraphSageConvWithSampling(nn.Module):
             h = F.leaky_relu(self.W_h(h))
             h_agg = F.leaky_relu(self.W_agg(h_agg))
         h_concat = torch.cat([h, h_agg], 1)
+        if self.deep_mode:
+            h_concat = self.drop(h_concat)
+            h_concat = F.leaky_relu(self.W1(h_concat))
         h_concat = self.drop(h_concat)
         h_new = self.W(h_concat)
         if self.activation is not None:

@@ -169,8 +169,8 @@ if not enable_kfold:
     results = display_results(results)
     user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
     # print(user_rating_count_metrics)
-    # user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % cores, index=False)
-    # results.reset_index().to_csv("overall_results_%s.csv" % cores, index=False)
+    # user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % dataset, index=False)
+    results.reset_index().to_csv("overall_results_%s.csv" % dataset, index=False)
     visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
 else:
     X = np.array(user_item_affinities)
