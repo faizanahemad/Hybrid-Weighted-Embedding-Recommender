@@ -86,20 +86,17 @@ class Walker:
         n_neighbors = len(cur_nbrs)
         if n_neighbors == 0:
             return walk
-        else:
-            walk.append(cur_nbrs[random.choices(range(n_neighbors), alias_nodes[start_node])[0]])
 
+        walk.append(cur_nbrs[random.choices(range(n_neighbors), alias_nodes[start_node])[0]])
         for _ in range(walk_length - 1):
             cur = walk[-1]
             cur_nbrs = adjacency_list[cur]
             n_neighbors = len(cur_nbrs)
             if n_neighbors == 0:
                 return walk
-
             prev = walk[-2]
             pos = (prev, cur)
-            next = cur_nbrs[random.choices(range(n_neighbors), alias_edges[pos])[0]]
-            walk.append(next)
+            walk.append(cur_nbrs[random.choices(range(n_neighbors), alias_edges[pos])[0]])
 
         return walk
 
@@ -126,6 +123,40 @@ class Walker:
         for walk_iter in range(num_walks):
             for node in nodes:
                 yield node2vec_walk(walk_length=walk_length, start_node=node)
+
+    def simulate_walks_generator_optimised(self, num_walks, walk_length):
+        '''
+        Repeatedly simulate random walks from each node.
+        '''
+        nodes = self.nodes
+        adjacency_list = self.adjacency_list
+        alias_nodes = self.alias_nodes
+        alias_edges = self.alias_edges
+
+        # def build_walk(node):
+        #     node_cur_nbrs = adjacency_list[node]
+        #     cur, back = random.choices(node_cur_nbrs, alias_nodes[node])[0], node
+        #     walk = [back, cur]
+        #     for _ in range(walk_length - 1):
+        #         cur_nbrs = adjacency_list[cur]
+        #         cur, back = random.choices(cur_nbrs, alias_edges[(back, cur)])[0], cur
+        #         walk.append(cur)
+        #     return walk
+
+        # walks = Parallel(n_jobs=4, backend="threading")(delayed(build_walk)(node) for node in nodes * num_walks)
+        # for w in walks:
+        #     yield w
+
+        for node in nodes:
+            node_cur_nbrs = adjacency_list[node]
+            for _ in range(num_walks):
+                cur, back = random.choices(node_cur_nbrs, alias_nodes[node])[0], node
+                walk = [back, cur]
+                for _ in range(walk_length - 1):
+                    cur_nbrs = adjacency_list[cur]
+                    cur, back = random.choices(cur_nbrs, alias_edges[(back, cur)])[0], cur
+                    walk.append(cur)
+                yield walk
 
     def preprocess_transition_probs(self):
         '''

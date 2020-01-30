@@ -66,33 +66,14 @@ class HybridGCNRec(SVDppHybrid):
         total_users = len(user_ids)
         total_items = len(item_ids)
 
-        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
-            affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-            graph = Graph().read_edgelist(affinities)
-            walker = Walker(graph, p=p, q=q)
-            ts = time.time()
-            walker.preprocess_transition_probs()
-            print("Transition Prob Preprocess = %.1f" % (time.time() - ts))
+        affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in user_item_affinities]
+        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
+        graph = Graph().read_edgelist(affinities)
+        walker = Walker(graph, p=p, q=q)
+        walker.preprocess_transition_probs()
 
-            def generator1():
-                for walk in walker.simulate_walks_generator(num_walks, walk_length=walk_length):
-                    yield walk
-
-            def generator2():
-                for u, v, r in affinities:
-                    w1 = walker.node2vec_walk(10, u)
-                    w2 = walker.node2vec_walk(10, v)
-                    for g in [w1, w2]:
-                        yield g
-
-            return generator1
-
-        total_users = len(user_ids)
-        total_items = len(item_ids)
-
-        sentences_generator = generate_training_samples(user_item_affinities)
-
+        def sentences_generator():
+            return walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
 
         gts = time.time()
         start = gts
@@ -225,7 +206,7 @@ class HybridGCNRec(SVDppHybrid):
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
         gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
-        enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
+        enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else True
         node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
 
         assert np.sum(np.isnan(user_vectors)) == 0
@@ -233,7 +214,7 @@ class HybridGCNRec(SVDppHybrid):
         # TODO: init user_vectors and item_vectors for triplet training using word2vec/node2vec
         w2v_user_vectors, w2v_item_vectors = user_vectors, item_vectors
         if enable_node2vec:
-            w2v_user_vectors, w2v_item_vectors = self.__node2vec_trainer__(user_ids, item_ids, user_item_affinities,
+            w2v_user_vectors, w2v_item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
                                                                    user_vectors, item_vectors,
                                                                    user_id_to_index,
                                                                    item_id_to_index,
@@ -356,12 +337,12 @@ class HybridGCNRec(SVDppHybrid):
             unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
 
         #
-        user_vectors, item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
-                                                               user_vectors, item_vectors,
-                                                               user_id_to_index,
-                                                               item_id_to_index,
-                                                               n_output_dims,
-                                                               hyperparams)
+        # user_vectors, item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
+        #                                                        user_vectors, item_vectors,
+        #                                                        user_id_to_index,
+        #                                                        item_id_to_index,
+        #                                                        n_output_dims,
+        #                                                        hyperparams)
         return user_vectors, item_vectors
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
