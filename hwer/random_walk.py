@@ -10,6 +10,7 @@ import numpy as np
 import scipy.sparse as sp
 import os
 from joblib import Parallel, delayed
+import random
 
 
 class Graph(object):
@@ -69,6 +70,7 @@ class Walker:
         self.nodes = list(self.G.nodes())
         self.edges = list(self.G.edges())
         self.G = {node: dict(self.G[node]) for node in self.nodes}
+        self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
     def node2vec_walk(self, walk_length, start_node):
         '''
@@ -79,23 +81,24 @@ class Walker:
         adjacency_list = self.adjacency_list
 
         walk = [start_node]
-        cur = walk[-1]
-        cur_nbrs = adjacency_list[cur]
-        if len(cur_nbrs) > 0:
-            walk.append(cur_nbrs[alias_draw(alias_nodes[cur][0], alias_nodes[cur][1])])
-        else:
+        # put next 5 lines as fn
+        cur_nbrs = adjacency_list[start_node]
+        n_neighbors = len(cur_nbrs)
+        if n_neighbors == 0:
             return walk
+        else:
+            walk.append(cur_nbrs[random.choices(range(n_neighbors), alias_nodes[start_node])[0]])
 
         for _ in range(walk_length - 1):
             cur = walk[-1]
             cur_nbrs = adjacency_list[cur]
-            if len(cur_nbrs) == 0:
+            n_neighbors = len(cur_nbrs)
+            if n_neighbors == 0:
                 return walk
 
             prev = walk[-2]
             pos = (prev, cur)
-            next = cur_nbrs[alias_draw(alias_edges[pos][0],
-                                       alias_edges[pos][1])]
+            next = cur_nbrs[random.choices(range(n_neighbors), alias_edges[pos])[0]]
             walk.append(next)
 
         return walk
@@ -106,11 +109,10 @@ class Walker:
         '''
         walks = []
         nodes = self.nodes
-        print('Walk iteration:')
+        node2vec_walk = self.node2vec_walk
         for walk_iter in range(num_walks):
-            print(str(walk_iter+1), '/', str(num_walks))
             for node in nodes:
-                walks.append(self.node2vec_walk(
+                walks.append(node2vec_walk(
                     walk_length=walk_length, start_node=node))
 
         return walks
@@ -120,33 +122,10 @@ class Walker:
         Repeatedly simulate random walks from each node.
         '''
         nodes = self.nodes
+        node2vec_walk = self.node2vec_walk
         for walk_iter in range(num_walks):
             for node in nodes:
-                yield self.node2vec_walk(walk_length=walk_length, start_node=node)
-
-    def get_alias_edge(self, src, dst):
-        '''
-        Get the alias edge setup lists for a given edge.
-        '''
-        G = self.G
-        p = self.p
-        q = self.q
-        g_dst = G[dst]
-
-        zipped = [(dst_nbr, dst_nbr == src, dst_nbr == dst, g_dst[dst_nbr]['weight']) for dst_nbr in g_dst]
-        unnormalized_probs = []
-        for dst_nbr, b1, b2, w in zipped:
-            if b1:
-                unnormalized_probs.append(w/p)
-            elif b2:
-                unnormalized_probs.append(w)
-            else:
-                unnormalized_probs.append(w / q)
-        #
-        norm_const = sum(unnormalized_probs)
-        normalized_probs = [u_prob/norm_const for u_prob in unnormalized_probs]
-
-        return alias_setup(normalized_probs)
+                yield node2vec_walk(walk_length=walk_length, start_node=node)
 
     def preprocess_transition_probs(self):
         '''
@@ -155,67 +134,47 @@ class Walker:
         G = self.G
         cpu = int(os.cpu_count()/2)
 
-        def node_processor(node):
-            n = G[node]
-            unnormalized_probs = [n[nbr]['weight'] for nbr in n]
+        def node_processor(n):
+            unnormalized_probs = [nbr['weight'] for nbr in n.values()]
             norm_const = sum(unnormalized_probs)
             normalized_probs = [u_prob / norm_const for u_prob in unnormalized_probs]
-            node_alias = alias_setup(normalized_probs)
-            return node_alias
+            return normalized_probs
 
         # node_aliases = Parallel(n_jobs=cpu, prefer="threads")(delayed(node_processor)(node) for node in G.nodes())
         # alias_nodes = dict(zip([node for node in G.nodes()], node_aliases))
 
         alias_nodes = {}
-        for node in self.nodes:
-            alias_nodes[node] = node_processor(node)
+        for node, nd in self.G.items():
+            alias_nodes[node] = node_processor(nd)
 
         # edge_aliases = Parallel(n_jobs=cpu, prefer="threads")(delayed(lambda edge: self.get_alias_edge(edge[0], edge[1]))(edge) for edge in G.edges())
         # alias_edges = dict(zip([edge for edge in G.edges()], edge_aliases))
 
         alias_edges = {}
+
+        def edge_processor(src, dst, g_dst, p, q):
+            '''
+            Get the alias edge setup lists for a given edge.
+            '''
+
+            zipped = [(dst_nbr == src, dst_nbr == dst, g_dst[dst_nbr]['weight']) for dst_nbr in g_dst]
+            unnormalized_probs = []
+            for b1, b2, w in zipped:
+                if b1:
+                    unnormalized_probs.append(w / p)
+                elif b2:
+                    unnormalized_probs.append(w)
+                else:
+                    unnormalized_probs.append(w / q) # HERE
+            #
+            norm_const = sum(unnormalized_probs)
+            normalized_probs = [u_prob / norm_const for u_prob in unnormalized_probs]
+            return normalized_probs
+
+        p = self.p
+        q = self.q
         for edge in self.edges:
-            alias_edges[edge] = self.get_alias_edge(edge[0], edge[1])
+            alias_edges[edge] = edge_processor(edge[0], edge[1], G[edge[1]], p, q)
 
         self.alias_nodes = alias_nodes
         self.alias_edges = alias_edges
-
-        return
-
-
-def alias_setup(probs):
-    '''
-    Compute utility lists for non-uniform sampling from discrete distributions.
-    Refer to https://hips.seas.harvard.edu/blog/2013/03/03/the-alias-method-efficient-sampling-with-many-discrete-outcomes/
-    for details
-    '''
-    K = len(probs)
-    J = np.zeros(K, dtype=np.int32)
-
-    q = K * np.array(probs)
-    c = q < 1.0
-    smaller = list(np.where(c)[0])
-    larger = list(np.where(~c)[0])
-
-    while len(smaller) > 0 and len(larger) > 0:
-        small = smaller.pop()
-        large = larger.pop()
-
-        J[small] = large
-        q[large] = q[large] + q[small] - 1.0
-        if q[large] < 1.0:
-            smaller.append(large)
-        else:
-            larger.append(large)
-
-    return J, q
-
-
-def alias_draw(J, q):
-    '''
-    Draw sample from a non-uniform discrete distribution using alias sampling.
-    '''
-    kk = int(np.random.rand()*len(J))
-    if np.random.rand() < q[kk]:
-        return kk
-    return J[kk]
