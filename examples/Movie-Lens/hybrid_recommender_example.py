@@ -62,15 +62,9 @@ if test_data_subset:
 prepare_data_mappers = mdr.get_data_mapper(df_user, df_item, dataset=dataset)
 ratings = ratings[["user", "item", "rating"]]
 user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
-users_for_each_rating = [row[0] for row in ratings.values]
-user_list = list(df_user.user.values)
-item_list = list(df_item.item.values)
+rating_scale = (np.min([r for u, i, r in user_item_affinities]), np.max([r for u, i, r in user_item_affinities]))
 
-min_rating = np.min([r for u, i, r in user_item_affinities])
-max_rating = np.max([r for u, i, r in user_item_affinities])
-rating_scale = (min_rating, max_rating)
-
-print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (ratings.shape[0], len(user_list), len(item_list), rating_scale))
+print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (ratings.shape[0], len(df_user.user.values), len(df_item.item.values), rating_scale))
 
 hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
                               knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }))
@@ -90,11 +84,11 @@ hyperparameters_svdpp = dict(n_dims=48, combining_factor=0.1,
 hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=40, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.001, epochs=45, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
                                                               kernel_l2=2e-4, dropout=0.25, use_content=True, enable_implicit=False),
-                               user_item_params=dict(lr=0.1, epochs=10, batch_size=64, l2=0.0001,
-                                                     gcn_lr=0.00075, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
+                               user_item_params=dict(lr=0.1, epochs=15, batch_size=64, l2=0.0001,
+                                                     gcn_lr=0.00075, gcn_epochs=25, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=1.0)))
@@ -102,12 +96,12 @@ hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
 hyperparameters_gcn_node2vec = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=40, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.001, epochs=45, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
                                                               kernel_l2=2e-4, dropout=0.25,
                                                               use_content=True, enable_implicit=False, enable_node2vec=True),
-                               user_item_params=dict(lr=0.1, epochs=10, batch_size=64, l2=0.0001,
-                                                     gcn_lr=0.00075, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
+                               user_item_params=dict(lr=0.1, epochs=15, batch_size=64, l2=0.0001,
+                                                     gcn_lr=0.00075, gcn_epochs=25, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=1.0)))
@@ -115,11 +109,11 @@ hyperparameters_gcn_node2vec = dict(n_dims=64, combining_factor=0.1,
 hyperparameters_gcn_implicit = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=40, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.001, epochs=45, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
                                                               kernel_l2=2e-4, dropout=0.25, use_content=True, enable_implicit=True),
-                               user_item_params=dict(lr=0.2, epochs=10, batch_size=64, l2=0.001,
-                                                     gcn_lr=0.001, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
+                               user_item_params=dict(lr=0.2, epochs=15, batch_size=64, l2=0.001,
+                                                     gcn_lr=0.001, gcn_epochs=25, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=1.0)))
@@ -162,10 +156,10 @@ hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_hybrid_node2vec=h
 
 content_only = False
 svdpp_hybrid = True
-surprise = True
+surprise = False
 gcn_hybrid = True
 gcn_hybrid_node2vec = True
-gcn_hybrid_implicit = True
+gcn_hybrid_implicit = False
 gcn_hybrid_deep = False
 gcn_hybrid_implicit_deep = False
 
@@ -174,7 +168,8 @@ if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2, stratify=[u for u, i, r in user_item_affinities])
     print("Train Length = ", len(train_affinities))
     print("Validation Length =", len(validation_affinities))
-    recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities, user_list, item_list,
+    recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities, list(df_user.user.values),
+                                                         list(df_item.item.values),
                                                          hyperparamters_dict,
                                                          prepare_data_mappers, rating_scale,
                                                          svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
@@ -191,7 +186,7 @@ if not enable_kfold:
     visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
 else:
     X = np.array(user_item_affinities)
-    y = np.array(users_for_each_rating)
+    y = np.array([u for u, i, r in user_item_affinities])
     skf = StratifiedKFold(n_splits=5)
     results = []
     user_rating_count_metrics = pd.DataFrame([],
@@ -202,7 +197,8 @@ else:
         train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
         validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
         #
-        recs, res, ucrms = test_once(train_affinities, validation_affinities, user_list, item_list,
+        recs, res, ucrms = test_once(train_affinities, validation_affinities, list(df_user.user.values),
+                                     list(df_item.item.values),
                                                          hyperparamters_dict,
                                                          prepare_data_mappers, rating_scale,
                                                          svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
