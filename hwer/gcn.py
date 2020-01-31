@@ -37,10 +37,19 @@ class GraphSageConvWithSampling(nn.Module):
             self.W_h = nn.Linear(feature_size, feature_size * 4)
             self.W1 = nn.Linear(feature_size * 8, feature_size * 8)
             self.W = nn.Linear(feature_size * 8, feature_size)
+
+            init_weight(self.W_agg.weight, 'xavier_uniform_', 'leaky_relu')
+            init_bias(self.W_agg.bias)
+            init_weight(self.W_h.weight, 'xavier_uniform_', 'leaky_relu')
+            init_bias(self.W_h.bias)
+            init_weight(self.W1.weight, 'xavier_uniform_', 'leaky_relu')
+            init_bias(self.W1.bias)
+
         else:
             self.W = nn.Linear(feature_size * 2, feature_size)
         self.drop = nn.Dropout(dropout)
         self.activation = activation
+
         if self.activation is not None:
             init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
         else:
@@ -82,11 +91,23 @@ class GraphSageWithSampling(nn.Module):
 
         self.convs = nn.ModuleList(convs)
 
-        w = nn.Linear(n_content_dims, feature_size)
-        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(w.bias)
-        drop = nn.Dropout(dropout)
-        self.proj =nn.Sequential(drop, w, nn.LeakyReLU())
+        if deep_mode:
+            w1 = nn.Linear(n_content_dims, feature_size * 4)
+            init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
+            init_bias(w1.bias)
+
+            w2 = nn.Linear(feature_size * 4, feature_size)
+            init_weight(w2.weight, 'xavier_uniform_', 'leaky_relu')
+            init_bias(w2.bias)
+
+            drop = nn.Dropout(dropout)
+            self.proj = nn.Sequential(w1, nn.LeakyReLU(), drop, w2, nn.LeakyReLU(),)
+        else:
+            w = nn.Linear(n_content_dims, feature_size)
+            init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
+            init_bias(w.bias)
+            drop = nn.Dropout(dropout)
+            self.proj =nn.Sequential(drop, w, nn.LeakyReLU())
 
         self.G = G
 
