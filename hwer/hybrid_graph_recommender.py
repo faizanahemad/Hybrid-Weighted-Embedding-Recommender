@@ -67,9 +67,7 @@ class HybridGCNRec(SVDppHybrid):
         total_items = len(item_ids)
 
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in user_item_affinities]
-        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-        graph = Graph().read_edgelist(affinities)
-        walker = Walker(graph, p=p, q=q)
+        walker = Walker(read_edgelist(affinities), p=p, q=q)
         walker.preprocess_transition_probs()
 
         def sentences_generator():
@@ -100,9 +98,9 @@ class HybridGCNRec(SVDppHybrid):
             np.random.shuffle(sentences)
             w2v.train(sentences, total_examples=len(sentences), epochs=2)
 
-        print(gt, time.time() - start)
         user_vectors = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
+        self.log.debug("Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Wrod2Vec Time = %.1f" % (gt, time.time() - start))
         return user_vectors, item_vectors
 
     def __node2vec_trainer__(self,
@@ -206,7 +204,7 @@ class HybridGCNRec(SVDppHybrid):
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
         gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
-        enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else True
+        enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
         node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
 
         assert np.sum(np.isnan(user_vectors)) == 0

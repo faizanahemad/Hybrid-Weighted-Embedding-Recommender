@@ -13,63 +13,41 @@ from joblib import Parallel, delayed
 import random
 
 
-class Graph(object):
-    def __init__(self):
-        self.G = None
-        self.look_up_dict = {}
-        self.look_back_list = []
-        self.node_size = 0
+def read_edgelist(edge_list, weighted=False):
+    G = nx.DiGraph()
 
-    def encode_node(self):
-        look_up = self.look_up_dict
-        look_back = self.look_back_list
-        for node in self.G.nodes():
-            look_up[node] = self.node_size
-            look_back.append(node)
-            self.node_size += 1
-            self.G.nodes[node]['status'] = ''
+    def read_unweighted(l):
+        src, dst = l[0], l[1]
+        G.add_edge(src, dst)
+        G.add_edge(dst, src)
+        G[src][dst]['weight'] = 1.0
+        G[dst][src]['weight'] = 1.0
 
-    def read_g(self, g):
-        self.G = g
-        self.encode_node()
-        return self
+    def read_weighted(l):
+        src, dst, w = l[0], l[1], l[2]
+        G.add_edge(src, dst)
+        G.add_edge(dst, src)
+        G[src][dst]['weight'] = float(w)
+        G[dst][src]['weight'] = float(w)
 
-    def read_edgelist(self, edge_list, weighted=False):
-        self.G = nx.DiGraph()
+    func = read_unweighted
+    if weighted:
+        func = read_weighted
+    for x in edge_list:
+        func(x)
+    G.add_edges_from(zip(G.nodes(), G.nodes()), weight=1)
 
-        def read_unweighted(l):
-            src, dst = l[0], l[1]
-            self.G.add_edge(src, dst)
-            self.G.add_edge(dst, src)
-            self.G[src][dst]['weight'] = 1.0
-            self.G[dst][src]['weight'] = 1.0
-
-        def read_weighted(l):
-            src, dst, w = l[0], l[1], l[2]
-            self.G.add_edge(src, dst)
-            self.G.add_edge(dst, src)
-            self.G[src][dst]['weight'] = float(w)
-            self.G[dst][src]['weight'] = float(w)
-        func = read_unweighted
-        if weighted:
-            func = read_weighted
-        for x in edge_list:
-            func(x)
-        self.encode_node()
-        return self
+    return G
 
 
 class Walker:
     def __init__(self, G, p, q, workers=None):
-        self.G = G.G
+        assert type(G) == nx.classes.digraph.DiGraph
         self.p = p
         self.q = q
-        self.node_size = G.node_size
-        self.look_up_dict = G.look_up_dict
-        self.adjacency_list = {node: list(self.G.neighbors(node)) for node in self.G.nodes()}
-        self.nodes = list(self.G.nodes())
-        self.edges = list(self.G.edges())
-        self.G = {node: dict(self.G[node]) for node in self.nodes}
+        self.nodes = list(G.nodes())
+        self.edges = list(G.edges())
+        self.G = {node: dict(G[node]) for node in self.nodes}
         self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
     def node2vec_walk(self, walk_length, start_node):
@@ -194,7 +172,7 @@ class Walker:
                 if b1:
                     unnormalized_probs.append(w / p)
                 elif b2:
-                    unnormalized_probs.append(w)
+                    unnormalized_probs.append(1.0)
                 else:
                     unnormalized_probs.append(w / q) # HERE
             #
