@@ -35,7 +35,7 @@ from .logging import getLogger
 from .recommendation_base import EntityType
 from .utils import RatingPredRegularization, get_rng, \
     LRSchedule, resnet_layer_with_content, ScaledGlorotNormal, root_mean_squared_error, mean_absolute_error, \
-    normalize_affinity_scores_by_user_item_bs, get_clipped_rmse, unit_length_violations, UnitLengthRegularization, \
+    normalize_affinity_scores_by_user_item_bs, unit_length_violations, UnitLengthRegularization, \
     unit_length
 
 from .gcn import *
@@ -374,18 +374,7 @@ class HybridGCNRec(SVDppHybrid):
         user_vectors = np.concatenate((np.zeros((1, user_vectors.shape[1])), user_vectors))
         item_vectors = np.concatenate((np.zeros((1, item_vectors.shape[1])), item_vectors))
 
-        mu, user_bias, item_bias, train, \
-        ratings_count_by_user, ratings_count_by_item, \
-        min_affinity, \
-        max_affinity, user_item_list, item_user_list, \
-        gen_fn, prediction_output_shape, prediction_output_types = self.__build_dataset__(user_ids, item_ids,
-                                                                              user_item_affinities,
-                                                                              user_content_vectors,
-                                                                              item_content_vectors,
-                                                                              user_vectors, item_vectors,
-                                                                              user_id_to_index,
-                                                                              item_id_to_index,
-                                                                              rating_scale, hyperparams)
+        mu, user_bias, item_bias = self.__calculate_bias__(user_ids, item_ids, user_item_affinities, rating_scale)
         assert np.sum(np.isnan(user_bias)) == 0
         assert np.sum(np.isnan(item_bias)) == 0
         assert np.sum(np.isnan(user_content_vectors)) == 0
@@ -566,8 +555,6 @@ class HybridGCNRec(SVDppHybrid):
         with torch.no_grad():
             h = []
             for nf in sampler:
-                # import pdb
-                # pdb.set_trace()
                 h.append(model.gcn.forward(nf))
             h = torch.cat(h).numpy()
 

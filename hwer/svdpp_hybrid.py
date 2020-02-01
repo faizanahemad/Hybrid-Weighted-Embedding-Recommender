@@ -19,7 +19,7 @@ from .logging import getLogger
 from .recommendation_base import EntityType
 from .utils import RatingPredRegularization, get_rng, \
     LRSchedule, resnet_layer_with_content, ScaledGlorotNormal, root_mean_squared_error, mean_absolute_error, \
-    normalize_affinity_scores_by_user_item_bs, get_clipped_rmse
+    normalize_affinity_scores_by_user_item_bs
 
 
 class SVDppHybrid(HybridRecommender):
@@ -89,6 +89,17 @@ class SVDppHybrid(HybridRecommender):
             return generator
         return generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list
 
+    def __calculate_bias__(self, user_ids: List[str], item_ids: List[str],
+                           user_item_affinities: List[Tuple[str, str, float]],
+                           rating_scale: Tuple[float, float],):
+        mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item_bs(user_item_affinities, rating_scale)
+
+        user_bias = np.array([user_bias[u] if u in user_bias else 0.0 for u in user_ids])
+        item_bias = np.array([item_bias[i] if i in item_bias else 0.0 for i in item_ids])
+        user_bias = np.concatenate(([0], user_bias))
+        item_bias = np.concatenate(([0], item_bias))
+        return mu, user_bias, item_bias
+
     def __build_dataset__(self, user_ids: List[str], item_ids: List[str],
                           user_item_affinities: List[Tuple[str, str, float]],
                           user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
@@ -102,12 +113,8 @@ class SVDppHybrid(HybridRecommender):
         ratings = np.array([r for u, i, r in user_item_affinities])
         min_affinity = np.min(ratings)
         max_affinity = np.max(ratings)
-        mu, user_bias, item_bias, _, _ = normalize_affinity_scores_by_user_item_bs(user_item_affinities, rating_scale)
+        mu, user_bias, item_bias = self.__calculate_bias__(user_ids, item_ids, user_item_affinities, rating_scale)
 
-        user_bias = np.array([user_bias[u] if u in user_bias else 0.0 for u in user_ids])
-        item_bias = np.array([item_bias[i] if i in item_bias else 0.0 for i in item_ids])
-        user_bias = np.concatenate(([0], user_bias))
-        item_bias = np.concatenate(([0], item_bias))
         self.log.debug("Mu = %.4f, Max User Bias = %.4f, Max Item Bias = %.4f, min-max-affinity = %s",
                        mu, np.abs(np.max(user_bias)),
                        np.abs(np.max(item_bias)), (min_affinity, max_affinity))

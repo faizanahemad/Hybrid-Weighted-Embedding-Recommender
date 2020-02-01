@@ -117,31 +117,14 @@ def average_precision(y_true, y_pred):
     return score / len_y_true
 
 
-def mean_average_precision(y_true: List[List[str]], y_pred: List[List[str]]):
-    sn = []
-    for i in range(len(y_true)):
-        y = y_true[i]
-        yp = y_pred[i]
-        sn.append(average_precision(y, yp))
-    return np.mean(sn)
-
-
 def ndcg(y_true: Dict[str, float], y_pred: List[str]):
-    idcg = 0.0
-    y_true_sorted = sorted(y_true.items(), key=operator.itemgetter(1), reverse=True)
+    y_true_sorted = sorted(y_true.values(), reverse=True)
     y_true_sorted = y_true_sorted[:len(y_pred)]
-    for i, (item, rel) in enumerate(y_true_sorted):
-        pos = i + 1
-        idcg_pos = (2 ** rel - 1)/np.log2(pos + 1)
-        idcg += idcg_pos
+    idcg = np.sum((np.power(2, y_true_sorted) - 1)/(np.log2(np.arange(len(y_true_sorted)) + 2)))
+    y_pred = [y_true[i] if i in y_true else 0 for i in y_pred]
+    dcg = np.sum((np.power(2, y_pred) - 1) / (np.log2(np.arange(len(y_pred)) + 2)))
 
-    dcg = 0.0
-    y_pred = [(i, y_true[i] if i in y_true else 0) for i in y_pred]
-    for i, (item, rel) in enumerate(y_pred):
-        pos = i + 1
-        dcg += (2 ** rel - 1)/np.log2(pos + 1)
-
-    return dcg/idcg
+    return dcg/(idcg + 1e-8)
 
 
 
@@ -319,12 +302,6 @@ def build_item_user_dict(user_item_affinities: List[Tuple[str, str, float]]):
             item_user_dict[item] = {}
         item_user_dict[item][user] = affinity
     return item_user_dict
-
-
-def get_mean_rating(user_item_affinities: List[Tuple[str, str, float]]) -> float:
-    uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
-    mean = uid.rating.mean()
-    return mean
 
 
 def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str, float]], ) \
@@ -565,16 +542,6 @@ def root_mean_squared_error(y_true, y_pred):
     return K.sqrt(K.mean(K.square(y_pred - y_true)))
 
 
-def get_clipped_rmse(margin=0.25, upper=1e8):
-    def rmse(y_true, y_pred):
-        error = K.abs(y_pred - y_true)
-        error = error - margin
-        error = K.clip(error, 0, upper)
-        error = K.square(error)
-        return K.sqrt(K.mean(error))
-
-    return rmse
-
 
 def mean_absolute_error(y_true, y_pred):
     return K.mean(K.abs(y_pred - y_true))
@@ -585,7 +552,4 @@ class UserNotFoundException(Exception):
 
 
 class ItemNotFoundException(Exception):
-    pass
-
-def random_walks_generator(graph, vertices, edges):
     pass

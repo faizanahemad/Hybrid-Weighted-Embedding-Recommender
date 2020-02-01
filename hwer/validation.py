@@ -467,42 +467,42 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.show()
 
     unique_algos = user_rating_count_metrics["algo"].nunique()
-    markers = [".", "o", "v", "^", "<", ">","p", "1", "2", "3","x", "4", "8", "s","D",  "P", "*", "h", "H", "+", "X", "d"] + list(range(11))
-    markers = markers[unique_algos]
+    markers = None
     style = None
     if unique_algos < 6:
-        style='algo'
+        style = 'algo'
+        markers = True
     plt.figure(figsize=(12, 8))
     plt.title("Mean Absolute Error vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="mae", hue="algo", markers=markers, style=style, data=user_rating_count_metrics, dashes=False)
+    sns.lineplot(x="user_rating_count", y="mae", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
     plt.show()
 
     plt.figure(figsize=(12, 8))
     plt.title("Mean Average Precision vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="map", hue="algo", markers=markers, style=style, data=user_rating_count_metrics, dashes=False)
+    sns.lineplot(x="user_rating_count", y="map", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
     plt.show()
 
     plt.figure(figsize=(12, 8))
     plt.title("RMSE vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="rmse", hue="algo", markers=markers, style=style, data=user_rating_count_metrics, dashes=False)
+    sns.lineplot(x="user_rating_count", y="rmse", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
     plt.show()
 
     plt.figure(figsize=(12, 8))
     plt.title("Mean Reciprocal Rank vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="mrr", hue="algo", markers=markers, style=style, data=user_rating_count_metrics, dashes=False)
+    sns.lineplot(x="user_rating_count", y="mrr", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
     plt.show()
 
     plt.figure(figsize=(12, 8))
     plt.title("NDCG vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="ndcg", hue="algo", markers=markers, style=style, data=user_rating_count_metrics, dashes=False)
+    sns.lineplot(x="user_rating_count", y="ndcg", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
     plt.show()
