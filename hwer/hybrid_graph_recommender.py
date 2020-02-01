@@ -67,6 +67,9 @@ class HybridGCNRec(SVDppHybrid):
         total_items = len(item_ids)
 
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in user_item_affinities]
+        _, present_items, _ = zip(*affinities)
+        present_items = set(list(map(str, present_items)))
+        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
         walker = Walker(read_edgelist(affinities), p=p, q=q)
         walker.preprocess_transition_probs()
 
@@ -87,7 +90,7 @@ class HybridGCNRec(SVDppHybrid):
                        size=self.n_collaborative_dims, window=window, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=1)
 
-        for _ in range(iter):
+        for _ in range(0):
             gts = time.time()
             sentences = []
             for w in sentences_generator():
@@ -96,11 +99,17 @@ class HybridGCNRec(SVDppHybrid):
 
             gt += time.time() - gts
             np.random.shuffle(sentences)
-            w2v.train(sentences, total_examples=len(sentences), epochs=2)
+            w2v.train(sentences, total_examples=len(sentences), epochs=1)
 
+        all_words = set(list(flatten(sentences)))
+        nodes = set(walker.nodes)
+        for i in item_ids:
+            itm = str(total_users + self.item_id_to_index[i])
+            if itm not in w2v.wv:
+                print(i, self.item_id_to_index[i], itm, itm in all_words, itm in nodes, itm in present_items)
         user_vectors = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
-        self.log.debug("Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Wrod2Vec Time = %.1f" % (gt, time.time() - start))
+        self.log.info("Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Word2Vec Time = %.1f" % (gt, time.time() - start))
         return user_vectors, item_vectors
 
     def __node2vec_trainer__(self,
@@ -209,7 +218,6 @@ class HybridGCNRec(SVDppHybrid):
 
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
-        # TODO: init user_vectors and item_vectors for triplet training using word2vec/node2vec
         w2v_user_vectors, w2v_item_vectors = user_vectors, item_vectors
         if enable_node2vec:
             w2v_user_vectors, w2v_item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
@@ -231,8 +239,6 @@ class HybridGCNRec(SVDppHybrid):
         triplet_vectors = torch.FloatTensor(triplet_vectors)
 
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i], r) for u, i, r in user_item_affinities]
-
-        # TODO: For content vectors here concat original content vectors with word2vec/node2vec vectors
         graph_user_vectors, graph_item_vectors = user_vectors, item_vectors
         if enable_node2vec:
             graph_user_vectors = np.concatenate((user_vectors, w2v_user_vectors), axis=1)
@@ -241,27 +247,32 @@ class HybridGCNRec(SVDppHybrid):
         g_train.readonly()
         n_content_dims = graph_user_vectors.shape[1]
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims,
-                                                                gcn_layers, gcn_dropout, False, g_train, triplet_vectors), margin)
+                                                                gcn_layers, gcn_dropout, g_train, triplet_vectors), margin)
         opt = torch.optim.Adam(model.parameters(), lr=gcn_lr, weight_decay=gcn_kernel_l2)
         generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
                                                                                               user_id_to_index,
                                                                                               item_id_to_index,
-                                                                                              hyperparams)
+                                                                                             hyperparams)
+
         generator = generate_training_samples(user_item_affinities)
+        start_gen = time.time()
+        src, dst, neg = [], [], []
+        for (u, v, w), r in generator():
+            src.append(u)
+            dst.append(v)
+            neg.append(w)
+        #
+        total_gen = time.time() - start_gen
+        src = torch.LongTensor(src)
+        dst = torch.LongTensor(dst)
+        neg = torch.LongTensor(neg)
+
+
         model.train()
         for epoch in range(gcn_epochs):
             start = time.time()
-            start_gen = time.time()
-            src, dst, neg = [], [], []
-            for (u, v, w), r in generator():
-                src.append(u)
-                dst.append(v)
-                neg.append(w)
-            #
-            total_gen = time.time() - start_gen
-            src = torch.LongTensor(src)
-            dst = torch.LongTensor(dst)
-            neg = torch.LongTensor(neg)
+
+
 
             def train(src, dst, neg):
 
@@ -363,7 +374,6 @@ class HybridGCNRec(SVDppHybrid):
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
-        deep_mode = hyperparams["deep_mode"] if "deep_mode" in hyperparams else False
         enable_implicit = hyperparams["enable_implicit"] if "enable_implicit" in hyperparams else False
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
@@ -397,53 +407,18 @@ class HybridGCNRec(SVDppHybrid):
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
-        model = GraphSAGERecommenderImplicit(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, deep_mode, g_train),
-                                             mu, biases, padding_length=padding_length, zeroed_indices=zeroed_indices, enable_implicit=enable_implicit)
+        model = GraphSAGERecommenderImplicit(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train),
+                                             mu, biases, padding_length=padding_length, zeroed_indices=zeroed_indices)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+        user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1, r) for u, i, r in user_item_affinities]
+        src, dst, rating = zip(*user_item_affinities)
 
-        generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
-            user_ids, item_ids,
-            user_item_affinities,
-            user_content_vectors,
-            item_content_vectors,
-            user_vectors, item_vectors,
-            user_id_to_index,
-            item_id_to_index,
-            rating_scale, batch_size, padding_length,
-            0, False)
-        user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1,
-                                 ratings_count_by_user[user_id_to_index[u] + 1],
-                                 ratings_count_by_item[item_id_to_index[i] + 1], r) for u, i, r in user_item_affinities]
-        generator = generate_training_samples(user_item_affinities)
+        src = torch.LongTensor(src)
+        dst = torch.LongTensor(dst) + total_users
+        rating = torch.DoubleTensor(rating)
 
         for epoch in range(epochs):
             start = time.time()
-
-            src = []
-            dst = []
-            dst_to_srcs = []
-            src_to_dsts = []
-            src_to_dsts_count = []
-            dst_to_srcs_count = []
-            rating = []
-            start_gen = time.time()
-            for (u, i, us, iis, nu, ni), r in generator():
-                src.append(u)
-                dst.append(i)
-                dst_to_srcs.append(us)
-                src_to_dsts.append(iis)
-                src_to_dsts_count.append(nu)
-                dst_to_srcs_count.append(ni)
-                rating.append(r)
-            total_gen = time.time() - start_gen
-
-            src = torch.LongTensor(src)
-            dst = torch.LongTensor(dst) + total_users
-            dst_to_srcs = torch.LongTensor(dst_to_srcs)
-            src_to_dsts = torch.LongTensor(src_to_dsts) + total_users
-            src_to_dsts_count = torch.DoubleTensor(src_to_dsts_count)
-            dst_to_srcs_count = torch.DoubleTensor(dst_to_srcs_count)
-            rating = torch.DoubleTensor(rating)
 
             model.eval()
 
@@ -471,42 +446,25 @@ class HybridGCNRec(SVDppHybrid):
                 for i in range(0, len(src), batch_size):
                     s = src[i:i + batch_size]
                     d = dst[i:i + batch_size]
-                    d2s = dst_to_srcs[i:i + batch_size]
-                    s2d = src_to_dsts[i:i + batch_size]
-                    s2dc = src_to_dsts_count[i:i + batch_size]
-                    d2sc = dst_to_srcs_count[i:i + batch_size]
-                    s2d_imp = h[s2d]
-                    d2s_imp = h[d2s]
                     #
 
-                    res = get_score(s, d, model.mu, model.node_biases,
-                                    h[d], s2d, s2dc, s2d_imp,
-                                    h[s], d2s, d2sc, d2s_imp,
-                                    zeroed_indices, enable_implicit=enable_implicit)
+                    res = get_score(s, d, model.mu, model.node_biases, h[d], h[s])
                     score[i:i + batch_size] = res
                 train_rmse = ((score - rating) ** 2).mean().sqrt()
 
             model.train()
 
-            def train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count):
+            def train(src, dst, rating):
                 shuffle_idx = torch.randperm(len(src))
                 src_shuffled = src[shuffle_idx]
                 dst_shuffled = dst[shuffle_idx]
-                dst_to_srcs_shuffled = dst_to_srcs[shuffle_idx]
-                src_to_dsts_shuffled = src_to_dsts[shuffle_idx]
-                src_to_dsts_count_shuffled = src_to_dsts_count[shuffle_idx]
-                dst_to_srcs_count_shuffled = dst_to_srcs_count[shuffle_idx]
                 rating_shuffled = rating[shuffle_idx]
 
                 src_batches = src_shuffled.split(batch_size)
                 dst_batches = dst_shuffled.split(batch_size)
-                dst_to_srcs_batches = dst_to_srcs_shuffled.split(batch_size)
-                src_to_dsts_batches = src_to_dsts_shuffled.split(batch_size)
-                src_to_dsts_count_batches = src_to_dsts_count_shuffled.split(batch_size)
-                dst_to_srcs_count_batches = dst_to_srcs_count_shuffled.split(batch_size)
                 rating_batches = rating_shuffled.split(batch_size)
 
-                seed_nodes = torch.cat(sum([[s, d,] for s, d in zip(src_batches, dst_batches)], []))
+                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
 
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
@@ -522,22 +480,23 @@ class HybridGCNRec(SVDppHybrid):
 
                 # Training
                 total_loss = 0.0
-                for s, d, d2s, s2d, s2dc, d2sc,  r, nodeflow in zip(src_batches, dst_batches, dst_to_srcs_batches, src_to_dsts_batches, src_to_dsts_count_batches, dst_to_srcs_count_batches, rating_batches, sampler):
-                    score = model.forward(nodeflow, s, d, s2d, s2dc, d2s, d2sc)
+                for s, d,  r, nodeflow in zip(src_batches, dst_batches, rating_batches, sampler):
+                    score = model.forward(nodeflow, s, d)
                     loss = ((score - r) ** 2).mean()
                     total_loss = total_loss + loss
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
                 return total_loss/len(src_batches)
+
             if epoch % 2 == 1:
-                loss = train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count)
+                loss = train(src, dst, rating)
             else:
-                loss = train(dst, src, dst_to_srcs, src_to_dsts, dst_to_srcs_count, src_to_dsts_count)
+                loss = train(dst, src, rating)
 
             total_time = time.time() - start
 
-            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1), epochs) + ' Training loss: %.4f' % loss.item() + ' Train RMSE: %.4f ||' % train_rmse.item() + ' Generator Time: %.1f' % total_gen + '|| Time Taken: %.1f' % total_time)
+            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1), epochs) + ' Training loss: %.4f' % loss.item() + ' Train RMSE: %.4f ||' % train_rmse.item() + '|| Time Taken: %.1f' % total_time)
 
         model.eval()
         sampler = dgl.contrib.sampling.NeighborSampler(
@@ -562,13 +521,10 @@ class HybridGCNRec(SVDppHybrid):
         assert len(bias) == total_users + total_items + 1
         mu = model.mu.detach().numpy()
 
-        prediction_artifacts = {"vectors": h, "user_item_list": user_item_list,
-                                "item_user_list": item_user_list, "mu": mu,
+        prediction_artifacts = {"vectors": h, "mu": mu,
                                 "bias": bias,
                                 "total_users": total_users,
-                                "ratings_count_by_user": ratings_count_by_user, "padding_length": padding_length,
-                                "ratings_count_by_item": ratings_count_by_item, "enable_implicit": enable_implicit,
-                                "batch_size": batch_size, "gen_fn": gen_fn, "zeroed_indices": zeroed_indices}
+                                "batch_size": batch_size}
         model_parameters = filter(lambda p: p.requires_grad, model.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
         self.log.info("Built Prediction Network, model params = %s", params)
@@ -579,24 +535,8 @@ class HybridGCNRec(SVDppHybrid):
         mu = self.prediction_artifacts["mu"]
         bias = self.prediction_artifacts["bias"]
         total_users = self.prediction_artifacts["total_users"]
-        zeroed_indices = self.prediction_artifacts["zeroed_indices"]
-        enable_implicit = self.prediction_artifacts["enable_implicit"]
-
-        ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]
-        ratings_count_by_item = self.prediction_artifacts["ratings_count_by_item"]
         batch_size = self.prediction_artifacts["batch_size"]
-        gen_fn = self.prediction_artifacts["gen_fn"]
         batch_size = max(512, batch_size)
-
-        def generate_prediction_samples(affinities):
-            def generator():
-                for i in range(0, len(affinities), batch_size):
-                    start = i
-                    end = min(i + batch_size, len(affinities))
-                    generated = np.array([gen_fn(u, v, nu, ni) for u, v, nu, ni in affinities[start:end]])
-                    for g in generated:
-                        yield g
-            return generator
 
         if self.fast_inference:
             return self.fast_predict(user_item_pairs)
@@ -605,49 +545,22 @@ class HybridGCNRec(SVDppHybrid):
             return self.super_fast_predict(user_item_pairs)
 
         uip = [(self.user_id_to_index[u] + 1 if u in self.user_id_to_index else 0,
-                self.item_id_to_index[i] + 1 if i in self.item_id_to_index else 0,
-                ratings_count_by_user[self.user_id_to_index[u] + 1 if u in self.user_id_to_index else 1],
-                ratings_count_by_item[self.item_id_to_index[i] + 1 if i in self.item_id_to_index else 1]) for u, i in user_item_pairs]
+                self.item_id_to_index[i] + 1 if i in self.item_id_to_index else 0) for u, i in user_item_pairs]
 
         assert np.sum(np.isnan(uip)) == 0
-        generator = generate_prediction_samples(uip)
 
-        user = []
-        item = []
-        users = []
-        items = []
-        nus = []
-        nis = []
-        for u, i, us, iis, nu, ni in generator():
-            user.append(u)
-            item.append(i)
-            users.append(us)
-            items.append(iis)
-            nus.append(nu)
-            nis.append(ni)
+        user, item = zip(*uip)
 
         user = np.array(user).astype(int)
         item = np.array(item).astype(int) + total_users
-        users = np.array(users).astype(int)
-        items = np.array(items).astype(int) + total_users
-        nus = np.array(nus)
-        nis = np.array(nis)
 
         score = np.zeros(len(user))
         for i in range(0, len(user), batch_size):
             s = user[i:i + batch_size]
             d = item[i:i + batch_size]
-            d2s = users[i:i + batch_size]
-            s2d = items[i:i + batch_size]
-            s2dc = nus[i:i + batch_size]
-            d2sc = nis[i:i + batch_size]
-            s2d_imp = h[s2d]
-            d2s_imp = h[d2s]
 
             res = get_score(s, d, mu, bias,
-                            h[d], s2d, s2dc, s2d_imp,
-                            h[s], d2s, d2sc, d2s_imp,
-                            zeroed_indices, enable_implicit=enable_implicit)
+                            h[d], h[s],)
             score[i:i + batch_size] = res
 
         predictions = score

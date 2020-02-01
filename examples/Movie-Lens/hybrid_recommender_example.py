@@ -36,9 +36,11 @@ test_data_subset = False
 enable_baselines = False
 enable_kfold = False
 enable_error_analysis = False
+n_neighbors=200
 verbose = 2 # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 
 if test_data_subset:
+    n_neighbors = 5
     if True:
         item_counts = ratings.groupby(['item'])['user'].count().reset_index()
         item_counts = item_counts[(item_counts["user"] <= 200) & (item_counts["user"] >= 20)].head(100)
@@ -67,10 +69,10 @@ rating_scale = (np.min([r for u, i, r in user_item_affinities]), np.max([r for u
 print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (ratings.shape[0], len(df_user.user.values), len(df_item.item.values), rating_scale))
 
 hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
-                              knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }))
+                              knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, }))
 
 hyperparameters_svdpp = dict(n_dims=48, combining_factor=0.1,
-                             knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+                             knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, }),
                              collaborative_params=dict(
                                  prediction_network_params=dict(lr=0.5, epochs=25, batch_size=64,
                                                                 network_width=128, padding_length=50,
@@ -82,86 +84,55 @@ hyperparameters_svdpp = dict(n_dims=48, combining_factor=0.1,
                                                        verbose=verbose, margin=1.0)))
 
 hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
-                           knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+                           knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
                                prediction_network_params=dict(lr=0.001, epochs=50, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
-                                                              kernel_l2=2e-4, dropout=0.25, use_content=True, enable_implicit=False),
-                               user_item_params=dict(lr=0.1, epochs=15, batch_size=64, l2=0.0001,
-                                                     gcn_lr=0.00075, gcn_epochs=25, gcn_layers=2, gcn_dropout=0.0,
+                                                              kernel_l2=5e-5, dropout=0.25, use_content=True),
+                               user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
+                                                     gcn_lr=0.00075, gcn_epochs=35, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
                                                      gcn_batch_size=1024,
-                                                     verbose=verbose, margin=1.0)))
+                                                     verbose=verbose, margin=1.0, enable_node2vec=False)))
 
 hyperparameters_gcn_node2vec = dict(n_dims=64, combining_factor=0.1,
-                           knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+                           knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
                                prediction_network_params=dict(lr=0.001, epochs=50, batch_size=1024, padding_length=50,
                                                               network_depth=2, verbose=verbose,
-                                                              kernel_l2=5e-5, dropout=0.25,
-                                                              use_content=True, enable_implicit=False, enable_node2vec=True),
-                               user_item_params=dict(lr=0.1, epochs=25, batch_size=64, l2=0.0001,
-                                                     gcn_lr=0.00075, gcn_epochs=30, gcn_layers=2, gcn_dropout=0.0,
+                                                              kernel_l2=5e-5, dropout=0.25, use_content=True),
+                               user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
+                                                     gcn_lr=0.00075, gcn_epochs=35, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
                                                      gcn_batch_size=1024,
-                                                     verbose=verbose, margin=1.0)))
+                                                     verbose=verbose, margin=1.0, enable_node2vec=True)))
 
-hyperparameters_gcn_implicit = dict(n_dims=64, combining_factor=0.1,
-                           knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
+hyperparameters_gcn_resnet = dict(n_dims=64, combining_factor=0.1,
+                           knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=45, batch_size=1024, padding_length=50,
-                                                              network_depth=2, verbose=verbose,
-                                                              kernel_l2=2e-4, dropout=0.25, use_content=True, enable_implicit=True),
-                               user_item_params=dict(lr=0.1, epochs=25, batch_size=64, l2=0.001,
-                                                     gcn_lr=0.00075, gcn_epochs=30, gcn_layers=2, gcn_dropout=0.0,
+                               prediction_network_params=dict(lr=0.001, epochs=10, batch_size=1024, padding_length=50,
+                                                              network_depth=2, network_width=128, verbose=verbose,
+                                                              kernel_l2=5e-5, dropout=0.25, use_content=True),
+                               user_item_params=dict(lr=0.1, epochs=20, batch_size=64, l2=0.0001,
+                                                     gcn_lr=0.00075, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-6,
                                                      gcn_batch_size=1024,
-                                                     verbose=verbose, margin=1.0)))
-
-
-hyperparameters_gcn_deep = dict(n_dims=48, combining_factor=0.1,
-                           knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
-                           collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=45, batch_size=1024, padding_length=50,
-                                                              network_depth=2, verbose=verbose,
-                                                              kernel_l2=2e-5, dropout=0.25, use_content=True, deep_mode=True),
-                               user_item_params=dict(lr=0.1, epochs=25, batch_size=64, l2=0.001,
-                                                     gcn_lr=0.00075, gcn_epochs=30, gcn_layers=2, gcn_dropout=0.0,
-                                                     gcn_kernel_l2=1e-6,
-                                                     gcn_batch_size=1024,
-                                                     verbose=verbose, margin=0.75)))
-
-hyperparameters_gcn_implicit_deep = dict(n_dims=48, combining_factor=0.1,
-                           knn_params=dict(n_neighbors=200, index_time_params={'M': 15, 'ef_construction': 200, }),
-                           collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=45, batch_size=1024, padding_length=50,
-                                                              network_depth=2, verbose=verbose,
-                                                              kernel_l2=2e-5, dropout=0.25, use_content=True,
-                                                              deep_mode=True, enable_implicit=True),
-                               user_item_params=dict(lr=0.1, epochs=25, batch_size=64, l2=0.001,
-                                                     gcn_lr=0.00075, gcn_epochs=30, gcn_layers=2, gcn_dropout=0.0,
-                                                     gcn_kernel_l2=1e-6,
-                                                     gcn_batch_size=1024,
-                                                     verbose=verbose, margin=0.75)))
+                                                     verbose=verbose, margin=1.0, enable_node2vec=True)))
 
 hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
                             "svd": {"biased": True, "n_factors": 20},
                             "algos": ["baseline", "svd", "svdpp"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_hybrid_node2vec=hyperparameters_gcn_node2vec,
-                           gcn_hybrid_implicit=hyperparameters_gcn_implicit,
-                           gcn_hybrid_deep=hyperparameters_gcn_deep, gcn_hybrid_implicit_deep=hyperparameters_gcn_implicit_deep,
-                           content_only=hyperparameter_content,
-                           svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
+                           content_only=hyperparameter_content, gcn_resnet=hyperparameters_gcn_resnet,
+                           svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise,)
 
 content_only = False
 svdpp_hybrid = False
 surprise = False
-gcn_hybrid = True
-gcn_hybrid_node2vec = True
-gcn_hybrid_implicit = True
-gcn_hybrid_deep = True
-gcn_hybrid_implicit_deep = True
+gcn_hybrid = False
+gcn_hybrid_node2vec = False
+gcn_resnet = True
 
 
 if not enable_kfold:
@@ -173,9 +144,7 @@ if not enable_kfold:
                                                          hyperparamters_dict,
                                                          prepare_data_mappers, rating_scale,
                                                          svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
-                                                         gcn_hybrid_node2vec=gcn_hybrid_node2vec,
-                                                         gcn_hybrid_implicit=gcn_hybrid_implicit,
-                                                         gcn_hybrid_deep=gcn_hybrid_deep, gcn_hybrid_implicit_deep=gcn_hybrid_implicit_deep,
+                                                         gcn_hybrid_node2vec=gcn_hybrid_node2vec, gcn_resnet=gcn_resnet,
                                                          surprise=surprise, content_only=content_only,
                                                          enable_error_analysis=enable_error_analysis, enable_baselines=enable_baselines)
     results = display_results(results)
@@ -202,9 +171,7 @@ else:
                                                          hyperparamters_dict,
                                                          prepare_data_mappers, rating_scale,
                                                          svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
-                                                         gcn_hybrid_node2vec=gcn_hybrid_node2vec,
-                                                         gcn_hybrid_implicit=gcn_hybrid_implicit,
-                                                         gcn_hybrid_deep=gcn_hybrid_deep, gcn_hybrid_implicit_deep=gcn_hybrid_implicit_deep,
+                                                         gcn_hybrid_node2vec=gcn_hybrid_node2vec, gcn_resnet=gcn_resnet,
                                                          surprise=surprise, content_only=content_only,
                                                          enable_error_analysis=False, enable_baselines=False)
 

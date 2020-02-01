@@ -26,27 +26,11 @@ def init_bias(param):
 
 
 class GraphSageConvWithSampling(nn.Module):
-    def __init__(self, feature_size, dropout, activation, deep_mode=False):
+    def __init__(self, feature_size, dropout, activation):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
-
-        self.deep_mode = deep_mode
-        if deep_mode:
-            self.W_agg = nn.Linear(feature_size, feature_size * 4)
-            self.W_h = nn.Linear(feature_size, feature_size * 4)
-            self.W1 = nn.Linear(feature_size * 8, feature_size * 8)
-            self.W = nn.Linear(feature_size * 8, feature_size)
-
-            init_weight(self.W_agg.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(self.W_agg.bias)
-            init_weight(self.W_h.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(self.W_h.bias)
-            init_weight(self.W1.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(self.W1.bias)
-
-        else:
-            self.W = nn.Linear(feature_size * 2, feature_size)
+        self.W = nn.Linear(feature_size * 2, feature_size)
         self.drop = nn.Dropout(dropout)
         self.activation = activation
 
@@ -61,22 +45,16 @@ class GraphSageConvWithSampling(nn.Module):
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
-        if self.deep_mode:
-            h = F.leaky_relu(self.W_h(h))
-            h_agg = F.leaky_relu(self.W_agg(h_agg))
         h_concat = torch.cat([h, h_agg], 1)
-        if self.deep_mode:
-            h_concat = self.drop(h_concat)
-            h_concat = F.leaky_relu(self.W1(h_concat))
         h_concat = self.drop(h_concat)
         h_new = self.W(h_concat)
         if self.activation is not None:
-            h_new = self.activation(h_new)
+            h_new = self.activation(h_new, negative_slope=0.1)
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
 
 class GraphSageWithSampling(nn.Module):
-    def __init__(self, n_content_dims, feature_size, n_layers, dropout, deep_mode, G, init_node_vectors=None):
+    def __init__(self, n_content_dims, feature_size, n_layers, dropout, G, init_node_vectors=None):
         super(GraphSageWithSampling, self).__init__()
 
         self.feature_size = feature_size
@@ -85,29 +63,21 @@ class GraphSageWithSampling(nn.Module):
         convs = []
         for i in range(n_layers):
             if i >= n_layers - 1:
-                convs.append(GraphSageConvWithSampling(feature_size, dropout, None, deep_mode))
+                convs.append(GraphSageConvWithSampling(feature_size, dropout, None))
             else:
-                convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu, deep_mode))
+                convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu))
 
         self.convs = nn.ModuleList(convs)
+        w = nn.Linear(n_content_dims, n_content_dims * 4)
+        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(w.bias)
+        drop = nn.Dropout(dropout)
 
-        if deep_mode:
-            w1 = nn.Linear(n_content_dims, feature_size * 4)
-            init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(w1.bias)
+        w2 = nn.Linear(n_content_dims * 4, feature_size)
+        init_weight(w2.weight, 'xavier_uniform_', 'linear')
+        init_bias(w2.bias)
 
-            w2 = nn.Linear(feature_size * 4, feature_size)
-            init_weight(w2.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(w2.bias)
-
-            drop = nn.Dropout(dropout)
-            self.proj = nn.Sequential(w1, nn.LeakyReLU(), drop, w2, nn.LeakyReLU(),)
-        else:
-            w = nn.Linear(n_content_dims, feature_size)
-            init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(w.bias)
-            drop = nn.Dropout(dropout)
-            self.proj =nn.Sequential(drop, w, nn.LeakyReLU())
+        self.proj = nn.Sequential(w, nn.LeakyReLU(negative_slope=0.1), drop, w2)
 
         self.G = G
 
@@ -116,7 +86,7 @@ class GraphSageWithSampling(nn.Module):
             nn.init.normal_(self.node_emb.weight, std=1 / self.feature_size)
         else:
             # self.node_emb.weight = nn.Parameter(init_node_vectors)
-            self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False, max_norm=1.0)
+            self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -141,37 +111,15 @@ class GraphSageWithSampling(nn.Module):
         return result
 
 
-def implicit_eval(h_dst, s2d, s2dc, s2d_imp,
-                  h_src, d2s, d2sc, d2s_imp,
-                  zeroed_indices, enable_implicit):
-    if enable_implicit:
-        for x in zeroed_indices:
-            s2d_imp[s2d == x] = 0.0
-        s2d_imp = s2dc * s2dc * (h_dst * s2d_imp.sum(1)).sum(1)
-
-        for x in zeroed_indices:
-            d2s_imp[d2s == x] = 0.0
-        d2s_imp = d2sc * d2sc * (h_src * d2s_imp.sum(1)).sum(1)
-        implicit = s2d_imp + d2s_imp
-        return implicit
-    else:
-        return 0.0
-
-
 def get_score(src, dst, mean, node_biases,
-              h_dst, s2d, s2dc, s2d_imp,
-              h_src, d2s, d2sc, d2s_imp,
-              zeroed_indices, enable_implicit):
-    implicit = implicit_eval(h_dst, s2d, s2dc, s2d_imp,
-                             h_src, d2s, d2sc, d2s_imp,
-                             zeroed_indices, enable_implicit=enable_implicit)
+              h_dst, h_src):
 
-    score = mean + (h_src * h_dst).sum(1) + node_biases[src + 1] + node_biases[dst + 1] + implicit
+    score = mean + (h_src * h_dst).sum(1) + node_biases[src + 1] + node_biases[dst + 1]
     return score
 
 
 class GraphSAGERecommenderImplicit(nn.Module):
-    def __init__(self, gcn, mu, node_biases, padding_length, zeroed_indices, enable_implicit):
+    def __init__(self, gcn, mu, node_biases, padding_length, zeroed_indices):
         super(GraphSAGERecommenderImplicit, self).__init__()
 
         self.gcn = gcn
@@ -183,25 +131,14 @@ class GraphSAGERecommenderImplicit(nn.Module):
             self.node_biases = nn.Parameter(torch.zeros(gcn.G.number_of_nodes() + 1))
         self.padding_length = padding_length
         self.zeroed_indices = zeroed_indices
-        self.enable_implicit = enable_implicit
         self.mu = nn.Parameter(torch.tensor(mu), requires_grad=True)
 
-    def forward(self, nf, src, dst, s2d, s2dc, d2s, d2sc):
+    def forward(self, nf, src, dst):
         h_output = self.gcn(nf)
         h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
         h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        s2d_imp = 0.0
-        d2s_imp = 0.0
-        if self.enable_implicit:
-            s2d_imp = h_output[nf.map_from_parent_nid(-1, s2d.flatten(), True)]
-            s2d_imp = s2d_imp.reshape(tuple(s2d.shape)+(s2d_imp.shape[-1],))
-            d2s_imp = h_output[nf.map_from_parent_nid(-1, d2s.flatten(), True)]
-            d2s_imp = d2s_imp.reshape(tuple(d2s.shape) + (d2s_imp.shape[-1],))
-
         score = get_score(src, dst, self.mu, self.node_biases,
-                          h_dst, s2d, s2dc, s2d_imp,
-                          h_src, d2s, d2sc, d2s_imp,
-                          self.zeroed_indices, enable_implicit=self.enable_implicit)
+                          h_dst, h_src)
 
         return score
 

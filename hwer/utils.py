@@ -304,38 +304,6 @@ def build_item_user_dict(user_item_affinities: List[Tuple[str, str, float]]):
     return item_user_dict
 
 
-def normalize_affinity_scores_by_user(user_item_affinities: List[Tuple[str, str, float]], ) \
-        -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
-    log = getLogger("normalize_affinity_scores_by_user")
-    start = time.time()
-    uid = pd.DataFrame(user_item_affinities, columns=["user", "item", "rating"])
-    uid["rating"] = uid["rating"].astype(float)
-    user_item_affinities = uid.values
-    # Calculating Biases
-    mean = uid.rating.mean()
-    uid["rating"] = uid["rating"] - mean
-    bu = uid.groupby(['user'])[["rating"]].agg(['mean', 'min', 'max'])
-    bu.columns = bu.columns.get_level_values(1)
-    bu["spread"] = np.max((bu["max"] - bu["mean"], bu["mean"] - bu["min"]), axis=0)
-    bu = bu.reset_index()
-    uid = uid.merge(bu[["user", "mean"]], on="user")
-    uid["rating"] = uid["rating"] - uid["mean"]
-
-    bu = dict(zip(bu['user'], bu['mean']))
-    bu = defaultdict(float, bu)
-
-    uid = [[u, i, r - (mean + bu[u])] for u, i, r in user_item_affinities]
-    uid = pd.DataFrame(uid, columns=["user", "item", "rating"])
-    bi = defaultdict(float)
-    # Calculating Spreads
-    spread = max(uid["rating"].max(), np.abs(uid["rating"].min()))
-
-    # Making final Dict
-    uid = list(zip(uid['user'], uid['item'], uid['rating']))
-    log.debug("Calculated Biases in time = %.1f, n_sampples = %s" % (time.time() - start, len(user_item_affinities)))
-    return mean, bu, bi, spread, uid
-
-
 def normalize_affinity_scores_by_user_item_bs(user_item_affinities: List[Tuple[str, str, float]], rating_scale=(1, 5)) \
         -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
     train = pd.DataFrame(user_item_affinities)

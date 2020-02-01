@@ -31,8 +31,8 @@ from surprise import Reader
 from ast import literal_eval
 import networkx as nx
 
-from .utils import normalize_affinity_scores_by_user, average_precision, reciprocal_rank, ndcg
-from . import SVDppHybrid, ContentRecommendation, HybridGCNRec
+from .utils import average_precision, reciprocal_rank, ndcg
+from . import SVDppHybrid, ContentRecommendation, HybridGCNRec, HybridGCNRecResnet
 
 
 def surprise_get_topk(model, users, items, k=200) -> Dict[str, List[Tuple[str, float]]]:
@@ -175,8 +175,15 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
                              n_content_dims=hyperparameters["n_dims"],
                              n_collaborative_dims=hyperparameters["n_dims"],
                              fast_inference=False, super_fast_inference=False)
-    elif algo in ["gcn_hybrid", "gcn_hybrid_implicit", "gcn_hybrid_deep", "gcn_hybrid_implicit_deep", "gcn_hybrid_node2vec"]:
+    elif algo in ["gcn_hybrid", "gcn_hybrid_node2vec"]:
         recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
+                              knn_params=hyperparameters["knn_params"],
+                              rating_scale=rating_scale,
+                              n_content_dims=hyperparameters["n_dims"],
+                              n_collaborative_dims=hyperparameters["n_dims"],
+                              fast_inference=False, super_fast_inference=False)
+    elif algo in ["gcn_resnet"]:
+        recsys = HybridGCNRecResnet(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
                               rating_scale=rating_scale,
                               n_content_dims=hyperparameters["n_dims"],
@@ -267,8 +274,7 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
 def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
               get_data_mappers, rating_scale,
               svdpp_hybrid=True, surprise=True,
-              gcn_hybrid=True, gcn_hybrid_node2vec=True, gcn_hybrid_implicit=True,
-              gcn_hybrid_deep=True, gcn_hybrid_implicit_deep=True,
+              gcn_hybrid=True, gcn_hybrid_node2vec=True, gcn_resnet=True,
               content_only=True, enable_error_analysis=False, enable_baselines=False):
     results = []
     recs = []
@@ -324,33 +330,12 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         results.extend(res)
         recs.append(gcn_rec)
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
-    if gcn_hybrid_implicit:
-        hyperparameters = hyperparamters_dict["gcn_hybrid_implicit"]
-        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
-                                                                          items, hyperparameters, get_data_mappers, rating_scale,
-                                                                            algo="gcn_hybrid_implicit",
-                                                                            enable_error_analysis=enable_error_analysis,
-                                                                        enable_baselines=enable_baselines)
-        results.extend(res)
-        recs.append(gcn_rec)
-        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
 
-    if gcn_hybrid_deep:
-        hyperparameters = hyperparamters_dict["gcn_hybrid_deep"]
+    if gcn_resnet:
+        hyperparameters = hyperparamters_dict["gcn_resnet"]
         gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                           items, hyperparameters, get_data_mappers, rating_scale,
-                                                                            algo="gcn_hybrid_deep",
-                                                                            enable_error_analysis=enable_error_analysis,
-                                                                        enable_baselines=enable_baselines)
-        results.extend(res)
-        recs.append(gcn_rec)
-        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
-
-    if gcn_hybrid_implicit_deep:
-        hyperparameters = hyperparamters_dict["gcn_hybrid_implicit_deep"]
-        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
-                                                                          items, hyperparameters, get_data_mappers, rating_scale,
-                                                                            algo="gcn_hybrid_implicit_deep",
+                                                                            algo="gcn_resnet",
                                                                             enable_error_analysis=enable_error_analysis,
                                                                         enable_baselines=enable_baselines)
         results.extend(res)

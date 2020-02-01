@@ -111,20 +111,6 @@ class Walker:
         alias_nodes = self.alias_nodes
         alias_edges = self.alias_edges
 
-        # def build_walk(node):
-        #     node_cur_nbrs = adjacency_list[node]
-        #     cur, back = random.choices(node_cur_nbrs, alias_nodes[node])[0], node
-        #     walk = [back, cur]
-        #     for _ in range(walk_length - 1):
-        #         cur_nbrs = adjacency_list[cur]
-        #         cur, back = random.choices(cur_nbrs, alias_edges[(back, cur)])[0], cur
-        #         walk.append(cur)
-        #     return walk
-
-        # walks = Parallel(n_jobs=4, backend="threading")(delayed(build_walk)(node) for node in nodes * num_walks)
-        # for w in walks:
-        #     yield w
-
         for node in nodes:
             node_cur_nbrs = adjacency_list[node]
             for _ in range(num_walks):

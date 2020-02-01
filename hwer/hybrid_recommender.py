@@ -19,7 +19,7 @@ from .content_recommender import ContentRecommendation
 from .logging import getLogger
 from .recommendation_base import EntityType
 from .recommendation_base import RecommendationBase, FeatureSet
-from .utils import unit_length, normalize_affinity_scores_by_user, UnitLengthRegularization, unit_length_violations, \
+from .utils import unit_length, UnitLengthRegularization, unit_length_violations, \
     LRSchedule, \
     resnet_layer_with_content
 
