@@ -24,14 +24,11 @@ class LinearResnet(nn.Module):
         self.bn1 = torch.nn.BatchNorm1d(output_size)
         self.W2 = nn.Linear(output_size, output_size)
         self.bn2 = torch.nn.BatchNorm1d(output_size)
-        self.out = nn.Linear(output_size, output_size)
 
         init_weight(self.W1.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(self.W1.bias)
         init_weight(self.W2.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(self.W2.bias)
-        init_weight(self.out.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(self.out.bias)
 
     def forward(self, h):
         identity = h
@@ -43,32 +40,38 @@ class LinearResnet(nn.Module):
         return out
 
 
-def mix_embeddings(ndata, projection_content, projection_ndata, combine):
+def mix_embeddings(ndata, projection):
     """Adds external (categorical and numeric) features into node representation G.ndata['h']"""
-    h_concat = torch.cat([projection_ndata(ndata['h']), projection_content(ndata['content'])], 1)
-    ndata['h'] = combine(h_concat)
+    h_concat = torch.cat([ndata['h'], ndata['content']], 1)
+    ndata['h'] = projection(h_concat)
 
 
 class GraphSageConvWithSampling(nn.Module):
-    def __init__(self, feature_size, width, dropout, activation):
+    def __init__(self, feature_size, width, dropout, conv_depth, activation_last_layer):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
 
-        self.W_agg = nn.Sequential(LinearResnet(feature_size, width), LinearResnet(width, width))
-        self.W_h = nn.Sequential(LinearResnet(feature_size, width), LinearResnet(width, width))
-        self.W1 = LinearResnet(width * 2, width)
-        self.W2 = LinearResnet(width, width)
-        self.W = nn.Linear(width, feature_size)
+        w1 = nn.Linear(feature_size * 2, width * 2)
+        init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(w1.bias)
+        self.w1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1))
 
-        self.drop = nn.Dropout(dropout)
-        self.activation = activation
-
-        if self.activation is not None:
-            init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
+        drop = nn.Dropout(dropout)
+        layers = [drop, LinearResnet(width * 2, width)]
+        for _ in range(conv_depth - 1):
+            drop = nn.Dropout(dropout)
+            layers.append(drop)
+            layers.append(LinearResnet(width, width))
+        W = nn.Linear(width, feature_size)
+        layers.append(W)
+        if activation_last_layer:
+            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
+            layers.append(nn.LeakyReLU(negative_slope=0.1))
         else:
-            init_weight(self.W.weight, 'xavier_uniform_', 'linear')
-        init_bias(self.W.bias)
+            init_weight(W.weight, 'xavier_uniform_', 'linear')
+        init_bias(W.bias)
+        self.layers = nn.Sequential(*layers)
 
     def forward(self, nodes):
         h_agg = nodes.data['h_agg']
@@ -76,24 +79,14 @@ class GraphSageConvWithSampling(nn.Module):
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
 
-        h = self.W_h(h)
-        h_agg = self.W_agg(h_agg)
         h_concat = torch.cat([h, h_agg], 1)
-        h_concat = self.drop(h_concat)
-        h_concat = self.W1(h_concat)
-        h_concat = self.drop(h_concat)
-        h_concat = self.W2(h_concat)
-
-        if self.activation is not None:
-            h_concat = self.drop(h_concat)
-        h_new = self.W(h_concat)
-        if self.activation is not None:
-            h_new = self.activation(h_new, negative_slope=0.1)
+        h_concat = self.w1(h_concat)
+        h_new = self.layers(h_concat)
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
 
 class GraphSageWithSampling(nn.Module):
-    def __init__(self, n_content_dims, feature_size, width, n_layers, dropout, G, init_node_vectors=None):
+    def __init__(self, n_content_dims, feature_size, width, n_layers, conv_depth, dropout, G, init_node_vectors=None):
         super(GraphSageWithSampling, self).__init__()
 
         self.feature_size = feature_size
@@ -102,31 +95,18 @@ class GraphSageWithSampling(nn.Module):
         convs = []
         for i in range(n_layers):
             if i >= n_layers - 1:
-                convs.append(GraphSageConvWithSampling(feature_size, width, dropout, None))
+                convs.append(GraphSageConvWithSampling(feature_size, width, dropout, conv_depth, False))
             else:
-                convs.append(GraphSageConvWithSampling(feature_size, width, dropout, F.leaky_relu))
+                convs.append(GraphSageConvWithSampling(feature_size, width, dropout, conv_depth, True))
 
         self.convs = nn.ModuleList(convs)
 
-        wpc1 = nn.Linear(n_content_dims, n_content_dims * 2)
-        init_weight(wpc1.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(wpc1.bias)
-        drop1 = nn.Dropout(dropout)
-        self.projection_content = nn.Sequential(wpc1, nn.LeakyReLU(negative_slope=0.1),
-                                                LinearResnet(n_content_dims * 2, width), drop1,
-                                                LinearResnet(width, width))
-
-        wpc2 = nn.Linear(feature_size, feature_size * 2)
-        init_weight(wpc2.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(wpc2.bias)
-        drop2 = nn.Dropout(dropout)
-        self.projection_ndata = nn.Sequential(wpc2, nn.LeakyReLU(negative_slope=0.1),
-                                              LinearResnet(feature_size * 2, width), drop2, LinearResnet(width, width))
-
-        w1 = nn.Linear(width * 2, feature_size)
-        init_weight(w1.weight, 'xavier_uniform_', 'linear')
+        w1 = nn.Linear(n_content_dims + feature_size, width * 2)
+        init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w1.bias)
-        self.combine = nn.Sequential(LinearResnet(width * 2, width * 2), w1)
+        drop1 = nn.Dropout(dropout)
+        self.projection = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1), drop1,
+                                        LinearResnet(width * 2, feature_size))
         self.G = G
 
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, feature_size)
@@ -148,7 +128,7 @@ class GraphSageWithSampling(nn.Module):
         for i in range(nf.num_layers):
             nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
-            mix_embeddings(nf.layers[i].data, self.projection_content, self.projection_ndata, self.combine)
+            mix_embeddings(nf.layers[i].data, self.projection)
         if self.n_layers == 0:
             return nf.layers[i].data['h']
         for i in range(self.n_layers):
@@ -162,25 +142,24 @@ class GraphSageWithSampling(nn.Module):
 class ResnetScorer(nn.Module):
     def __init__(self, feature_size, width, depth, dropout, n_content_dims, n_collaborative_dims, batch_size):
         super(ResnetScorer, self).__init__()
-        w = nn.Linear(14, width)
-        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(w.bias)
-        drop = nn.Dropout(dropout)
-        bn1 = torch.nn.BatchNorm1d(width, eps=1e-07)
-        self.w1 = nn.Sequential(w, bn1, nn.LeakyReLU(negative_slope=0.1), drop, )
+
+        w1 = nn.Linear(14, 64)
+        init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(w1.bias)
+        self.w1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1))
 
         inw = 2 * (n_content_dims + n_collaborative_dims) + 4 * feature_size
-        wv = nn.Linear(inw, inw * 2)
-        init_weight(wv.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(wv.bias)
-        drop = nn.Dropout(dropout)
-        bn2 = torch.nn.BatchNorm1d(inw * 2, eps=1e-07)
-        self.w2 = nn.Sequential(wv, bn2, nn.LeakyReLU(negative_slope=0.1), drop, )
+        w2 = nn.Linear(inw, width * 2)
+        init_weight(w2.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(w2.bias)
+        self.w2 = nn.Sequential(w2, nn.LeakyReLU(negative_slope=0.1))
 
-        layers = [LinearResnet(inw * 2 + width, width)]
-        for _ in range(depth):
+        drop = nn.Dropout(dropout)
+        layers = [drop, LinearResnet(width * 2 + 64, width)]
+        for _ in range(depth - 1):
             drop = nn.Dropout(dropout)
-            layers.append(nn.Sequential(drop, LinearResnet(width, width)))
+            layers.append(drop)
+            layers.append(LinearResnet(width, width))
         w2 = nn.Linear(width, 1)
         init_weight(w2.weight, 'xavier_uniform_', 'linear')
         init_bias(w2.bias)
@@ -260,7 +239,8 @@ class GraphSAGERecommenderImplicitResnet(nn.Module):
         self.zeroed_indices = zeroed_indices
 
         self.mu = nn.Parameter(torch.tensor(mu), requires_grad=True)
-        self.scorer = ResnetScorer(feature_size, width, depth, dropout, n_content_dims, n_collaborative_dims, batch_size)
+        self.scorer = ResnetScorer(feature_size, width, depth, dropout, n_content_dims, n_collaborative_dims,
+                                   batch_size)
 
     def forward(self, nf, src, dst, s2d, s2dc, d2s, d2sc,
                 user_content_vector, item_content_vector, user_vector, item_vector):
@@ -279,4 +259,22 @@ class GraphSAGERecommenderImplicitResnet(nn.Module):
                             self.zeroed_indices,
                             user_content_vector, item_content_vector, user_vector, item_vector)
 
+        return score
+
+
+class GraphSAGETripletEmbedding(nn.Module):
+    def __init__(self, gcn, margin=0.1):
+        super(GraphSAGETripletEmbedding, self).__init__()
+
+        self.gcn = gcn
+        self.margin = margin
+
+    def forward(self, nf, src, dst, neg):
+        h_output = self.gcn(nf)
+        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
+        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
+        h_neg = h_output[nf.map_from_parent_nid(-1, neg, True)]
+        d_a_b = 1.0 - (h_src * h_dst).sum(1)
+        d_a_c = 1.0 - (h_src * h_neg).sum(1)
+        score = F.relu(d_a_b + self.margin - d_a_c)
         return score

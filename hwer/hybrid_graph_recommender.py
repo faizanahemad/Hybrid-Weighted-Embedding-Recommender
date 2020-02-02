@@ -21,14 +21,12 @@ from .random_walk import *
 import os
 from joblib import Parallel, delayed
 
-
 import networkx as nx
 import tensorflow as tf
 from dgl import DGLGraph
 import dgl.function as fn
 import dgl
 from dgl.data import register_data_args, load_data
-
 
 from .svdpp_hybrid import SVDppHybrid
 from .logging import getLogger
@@ -45,17 +43,18 @@ class HybridGCNRec(SVDppHybrid):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False,
                  super_fast_inference: bool = False):
-        super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims, fast_inference, super_fast_inference)
+        super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims,
+                         fast_inference, super_fast_inference)
         self.log = getLogger(type(self).__name__)
-        self.cpu = int(os.cpu_count()/2)
+        self.cpu = int(os.cpu_count() / 2)
 
     def __word2vec_trainer__(self,
-                                         user_ids: List[str], item_ids: List[str],
-                                         user_item_affinities: List[Tuple[str, str, float]],
-                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                         n_output_dims: int,
-                                         hyperparams: Dict):
+                             user_ids: List[str], item_ids: List[str],
+                             user_item_affinities: List[Tuple[str, str, float]],
+                             user_vectors: np.ndarray, item_vectors: np.ndarray,
+                             user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                             n_output_dims: int,
+                             hyperparams: Dict):
         walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 40
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
         window = hyperparams["window"] if "window" in hyperparams else 4
@@ -109,16 +108,18 @@ class HybridGCNRec(SVDppHybrid):
                 print(i, self.item_id_to_index[i], itm, itm in all_words, itm in nodes, itm in present_items)
         user_vectors = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
-        self.log.info("Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Word2Vec Time = %.1f" % (gt, time.time() - start))
+        self.log.info(
+            "Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Word2Vec Time = %.1f" % (
+            gt, time.time() - start))
         return user_vectors, item_vectors
 
     def __node2vec_trainer__(self,
-                                         user_ids: List[str], item_ids: List[str],
-                                         user_item_affinities: List[Tuple[str, str, float]],
-                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                         n_output_dims: int,
-                                         hyperparams: Dict):
+                             user_ids: List[str], item_ids: List[str],
+                             user_item_affinities: List[Tuple[str, str, float]],
+                             user_vectors: np.ndarray, item_vectors: np.ndarray,
+                             user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                             n_output_dims: int,
+                             hyperparams: Dict):
         walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 60
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 140
         window = hyperparams["window"] if "window" in hyperparams else 4
@@ -135,16 +136,15 @@ class HybridGCNRec(SVDppHybrid):
         node2vec = Node2Vec(graph, dimensions=n_output_dims, p=p, q=q,
                             walk_length=walk_length, num_walks=num_walks, workers=self.cpu)
         n2v = node2vec.fit(window=window, min_count=1, batch_words=1000, iter=iter,
-                           workers=self.cpu, sg=1, negative=10, max_vocab_size=None,)
+                           workers=self.cpu, sg=1, negative=10, max_vocab_size=None, )
         user_vectors = np.array([n2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([n2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
         return user_vectors, item_vectors
 
-
     def __user_item_affinities_ns_data_gen_fn__(self,
-                                                     user_ids: List[str], item_ids: List[str],
-                                                     user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                                     hyperparams: Dict):
+                                                user_ids: List[str], item_ids: List[str],
+                                                user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                                hyperparams: Dict):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         ns = hyperparams["ns"] if "ns" in hyperparams else 50
         total_users = len(user_ids)
@@ -190,17 +190,63 @@ class HybridGCNRec(SVDppHybrid):
                         yield g
 
             return generator
+
         return generate_training_samples
 
+    def __node2vec_triplet_trainer__(self,
+                                     user_ids: List[str], item_ids: List[str],
+                                     user_item_affinities: List[Tuple[str, str, float]],
+                                     user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                     user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                     n_output_dims: int,
+                                     hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        self.log.debug(
+            "Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+            len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
+
+        enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
+        node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
+
+        assert np.sum(np.isnan(user_vectors)) == 0
+        assert np.sum(np.isnan(item_vectors)) == 0
+        w2v_user_vectors, w2v_item_vectors = user_vectors, item_vectors
+        if enable_node2vec:
+            w2v_user_vectors, w2v_item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
+                                                                           user_vectors, item_vectors,
+                                                                           user_id_to_index,
+                                                                           item_id_to_index,
+                                                                           n_output_dims,
+                                                                           node2vec_params)
+        user_triplet_vectors, item_triplet_vectors = super().__user_item_affinities_triplet_trainer__(user_ids,
+                                                                                                      item_ids,
+                                                                                                      user_item_affinities,
+                                                                                                      w2v_user_vectors,
+                                                                                                      w2v_item_vectors,
+                                                                                                      user_id_to_index,
+                                                                                                      item_id_to_index,
+                                                                                                      n_output_dims,
+                                                                                                      hyperparams)
+        return w2v_user_vectors, w2v_item_vectors, user_triplet_vectors, item_triplet_vectors
+
+    def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
+                                  conv_depth, network_width,
+                                  gcn_dropout, g_train, triplet_vectors, margin):
+        self.log.info("Getting Triplet Model for GCN")
+        model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
+                                                                gcn_layers, gcn_dropout, g_train, triplet_vectors),
+                                          margin)
+        return model
+
     def __user_item_affinities_triplet_trainer__(self,
-                                         user_ids: List[str], item_ids: List[str],
-                                         user_item_affinities: List[Tuple[str, str, float]],
-                                         user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                         user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                         n_output_dims: int,
-                                         hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
-        self.log.debug("Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
-                       len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
+                                                 user_ids: List[str], item_ids: List[str],
+                                                 user_item_affinities: List[Tuple[str, str, float]],
+                                                 user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                                 user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                                 n_output_dims: int,
+                                                 hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
+        self.log.debug(
+            "Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+            len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
 
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         gcn_lr = hyperparams["gcn_lr"] if "gcn_lr" in hyperparams else 0.1
@@ -214,64 +260,60 @@ class HybridGCNRec(SVDppHybrid):
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
         gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
         enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
+        conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
+        network_width = hyperparams["network_width"] if "network_width" in hyperparams else 128
         node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
 
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
-        w2v_user_vectors, w2v_item_vectors = user_vectors, item_vectors
-        if enable_node2vec:
-            w2v_user_vectors, w2v_item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
-                                                                   user_vectors, item_vectors,
-                                                                   user_id_to_index,
-                                                                   item_id_to_index,
-                                                                   n_output_dims,
-                                                                   node2vec_params)
-        user_triplet_vectors, item_triplet_vectors = super().__user_item_affinities_triplet_trainer__(user_ids, item_ids, user_item_affinities,
-                              w2v_user_vectors, w2v_item_vectors,
-                              user_id_to_index,
-                              item_id_to_index,
-                              n_output_dims,
-                              hyperparams)
-        total_users = len(user_ids)
-        total_items = len(item_ids)
 
-        triplet_vectors = np.concatenate((np.zeros((1, user_triplet_vectors.shape[1])), user_triplet_vectors, item_triplet_vectors))
+        w2v_user_vectors, w2v_item_vectors, user_triplet_vectors, item_triplet_vectors = self.__node2vec_triplet_trainer__(
+            user_ids, item_ids, user_item_affinities,
+            user_vectors, item_vectors,
+            user_id_to_index,
+            item_id_to_index,
+            n_output_dims,
+            hyperparams)
+
+        triplet_vectors = np.concatenate(
+            (np.zeros((1, user_triplet_vectors.shape[1])), user_triplet_vectors, item_triplet_vectors))
         triplet_vectors = torch.FloatTensor(triplet_vectors)
 
+        total_users = len(user_ids)
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i], r) for u, i, r in user_item_affinities]
         graph_user_vectors, graph_item_vectors = user_vectors, item_vectors
         if enable_node2vec:
             graph_user_vectors = np.concatenate((user_vectors, w2v_user_vectors), axis=1)
             graph_item_vectors = np.concatenate((item_vectors, w2v_item_vectors), axis=1)
-        g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids), np.concatenate((graph_user_vectors, graph_item_vectors)))
+        g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids),
+                                  np.concatenate((graph_user_vectors, graph_item_vectors)))
         g_train.readonly()
         n_content_dims = graph_user_vectors.shape[1]
-        model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims,
-                                                                gcn_layers, gcn_dropout, g_train, triplet_vectors), margin)
+        model = self.__get_triplet_gcn_model__(n_content_dims, self.n_collaborative_dims, gcn_layers,
+                                               conv_depth, network_width,
+                                               gcn_dropout, g_train, triplet_vectors, margin)
         opt = torch.optim.Adam(model.parameters(), lr=gcn_lr, weight_decay=gcn_kernel_l2)
         generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
                                                                                               user_id_to_index,
                                                                                               item_id_to_index,
-                                                                                             hyperparams)
+                                                                                              hyperparams)
 
         generator = generate_training_samples(user_item_affinities)
-        start_gen = time.time()
-        src, dst, neg = [], [], []
-        for (u, v, w), r in generator():
-            src.append(u)
-            dst.append(v)
-            neg.append(w)
-        #
-        total_gen = time.time() - start_gen
-        src = torch.LongTensor(src)
-        dst = torch.LongTensor(dst)
-        neg = torch.LongTensor(neg)
-
-
         model.train()
         for epoch in range(gcn_epochs):
             start = time.time()
 
+            start_gen = time.time()
+            src, dst, neg = [], [], []
+            for (u, v, w), r in generator():
+                src.append(u)
+                dst.append(v)
+                neg.append(w)
+            #
+            total_gen = time.time() - start_gen
+            src = torch.LongTensor(src)
+            dst = torch.LongTensor(dst)
+            neg = torch.LongTensor(neg)
 
 
             def train(src, dst, neg):
@@ -285,8 +327,44 @@ class HybridGCNRec(SVDppHybrid):
                 dst_batches = dst_shuffled.split(gcn_batch_size)
                 neg_batches = neg_shuffled.split(gcn_batch_size)
 
-                seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
+                model.eval()
+                sampler = dgl.contrib.sampling.NeighborSampler(
+                    g_train,
+                    gcn_batch_size,
+                    5,
+                    gcn_layers,
+                    seed_nodes=torch.arange(g_train.number_of_nodes()),
+                    prefetch=True,
+                    add_self_loop=True,
+                    shuffle=False,
+                    num_workers=self.cpu
+                )
 
+                eval_start_time = time.time()
+                with torch.no_grad():
+                    h = []
+                    for nf in sampler:
+                        h.append(model.gcn.forward(nf))
+                    h = torch.cat(h)
+
+                    score = torch.zeros(len(src))
+                    for i in range(0, len(src), batch_size):
+                        s = src[i:i + batch_size]
+                        d = dst[i:i + batch_size]
+                        n = neg[i:i + batch_size]
+
+                        h_src = h[s]
+                        h_dst = h[d]
+                        h_neg = h[n]
+                        d_a_b = 1.0 - (h_src * h_dst).sum(1)
+                        d_a_c = 1.0 - (h_src * h_neg).sum(1)
+                        res = F.relu(d_a_b + margin - d_a_c)
+                        score[i:i + batch_size] = res
+                    train_rmse = (score ** 2).mean().sqrt()
+                eval_total = time.time() - eval_start_time
+
+                model.train()
+                seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
                     gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
@@ -309,16 +387,17 @@ class HybridGCNRec(SVDppHybrid):
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
-                return total_loss/len(src_batches)
+                return total_loss / len(src_batches), train_rmse, eval_total
 
             if epoch % 2 == 1:
-                loss = train(src, dst, neg)
+                loss, train_rmse, eval_total = train(src, dst, neg)
             else:
                 # Reverse Training
-                loss = train(dst, src, neg)
+                loss, train_rmse, eval_total = train(dst, src, neg)
 
             total_time = time.time() - start
-            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1), gcn_epochs) + ' Training loss: %.4f' % loss.item() + ' Generator Time: %.1f' % total_gen + ' Time Taken: %.1f' % total_time)
+            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
+                                               gcn_epochs) + ' Training loss: %.4f' % loss.item() + ' Training RMSE: %.4f' % train_rmse.item() + '|| Generator Time: %.1f' % total_gen + ' Eval Time: %.1f' % eval_total + ' Time Taken: %.1f' % total_time)
 
             #
         model.eval()
@@ -407,10 +486,12 @@ class HybridGCNRec(SVDppHybrid):
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
-        model = GraphSAGERecommenderImplicit(GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train),
-                                             mu, biases, padding_length=padding_length, zeroed_indices=zeroed_indices)
+        model = GraphSAGERecommenderImplicit(
+            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train),
+            mu, biases, padding_length=padding_length, zeroed_indices=zeroed_indices)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
-        user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1, r) for u, i, r in user_item_affinities]
+        user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1, r) for u, i, r in
+                                user_item_affinities]
         src, dst, rating = zip(*user_item_affinities)
 
         src = torch.LongTensor(src)
@@ -434,7 +515,7 @@ class HybridGCNRec(SVDppHybrid):
                 shuffle=False,
                 num_workers=self.cpu
             )
-
+            eval_start_time = time.time()
             with torch.no_grad():
                 h = []
                 for nf in sampler:
@@ -451,6 +532,7 @@ class HybridGCNRec(SVDppHybrid):
                     res = get_score(s, d, model.mu, model.node_biases, h[d], h[s])
                     score[i:i + batch_size] = res
                 train_rmse = ((score - rating) ** 2).mean().sqrt()
+            eval_total = time.time() - eval_start_time
 
             model.train()
 
@@ -480,14 +562,14 @@ class HybridGCNRec(SVDppHybrid):
 
                 # Training
                 total_loss = 0.0
-                for s, d,  r, nodeflow in zip(src_batches, dst_batches, rating_batches, sampler):
+                for s, d, r, nodeflow in zip(src_batches, dst_batches, rating_batches, sampler):
                     score = model.forward(nodeflow, s, d)
                     loss = ((score - r) ** 2).mean()
-                    total_loss = total_loss + loss
+                    total_loss = total_loss + loss.item()
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
-                return total_loss/len(src_batches)
+                return total_loss / len(src_batches)
 
             if epoch % 2 == 1:
                 loss = train(src, dst, rating)
@@ -496,7 +578,8 @@ class HybridGCNRec(SVDppHybrid):
 
             total_time = time.time() - start
 
-            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1), epochs) + ' Training loss: %.4f' % loss.item() + ' Train RMSE: %.4f ||' % train_rmse.item() + '|| Time Taken: %.1f' % total_time)
+            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
+                                               epochs) + ' Training loss: %.4f' % loss + ' Train RMSE: %.4f ||' % train_rmse.item() + ' Eval Time: %.1f ||' % eval_total + '|| Time Taken: %.1f' % total_time)
 
         model.eval()
         sampler = dgl.contrib.sampling.NeighborSampler(
@@ -560,7 +643,7 @@ class HybridGCNRec(SVDppHybrid):
             d = item[i:i + batch_size]
 
             res = get_score(s, d, mu, bias,
-                            h[d], h[s],)
+                            h[d], h[s], )
             score[i:i + batch_size] = res
 
         predictions = score

@@ -49,6 +49,15 @@ class HybridGCNRecResnet(HybridGCNRec):
         self.log = getLogger(type(self).__name__)
         self.cpu = int(os.cpu_count() / 2)
 
+    def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims,
+                                  gcn_layers, conv_depth, network_width,
+                                  gcn_dropout, g_train, triplet_vectors, margin):
+        self.log.info("Getting Triplet Model for GCN RESNET")
+        model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims, network_width,
+                                                                gcn_layers, conv_depth, gcn_dropout, g_train, triplet_vectors),
+                                          margin)
+        return model
+
     def __scorer__(self, h, src, dst, mu, node_biases,
                    src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count,
                    src_content_vectors, src_collaborative_vectors, dst_content_vectors, dst_collaborative_vectors,
@@ -96,6 +105,8 @@ class HybridGCNRecResnet(HybridGCNRec):
         use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
+        conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
+        scorer_depth = hyperparams["scorer_depth"] if "scorer_depth" in hyperparams else 1
         network_width = hyperparams["network_width"] if "network_width" in hyperparams else 128
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
 
@@ -131,10 +142,10 @@ class HybridGCNRecResnet(HybridGCNRec):
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicitResnet(
-            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_width, network_depth, dropout,
+            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_width, network_depth, conv_depth, dropout,
                                   g_train),
             mu, biases, padding_length, zeroed_indices,
-            self.n_collaborative_dims, network_width, network_depth, dropout, n_content_dims, self.n_collaborative_dims, batch_size)
+            self.n_collaborative_dims, network_width, scorer_depth, dropout, n_content_dims, self.n_collaborative_dims, batch_size)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
 
         generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
@@ -212,7 +223,7 @@ class HybridGCNRecResnet(HybridGCNRec):
                 shuffle=False,
                 num_workers=self.cpu
             )
-
+            eval_start_time = time.time()
             with torch.no_grad():
                 h = []
                 for nf in sampler:
@@ -226,6 +237,7 @@ class HybridGCNRecResnet(HybridGCNRec):
                                         zeroed_indices, model.scorer, batch_size)
 
                 train_rmse = ((score - rating) ** 2).mean().sqrt()
+            eval_total = time.time() - eval_start_time
 
             model.train()
 
@@ -287,7 +299,7 @@ class HybridGCNRecResnet(HybridGCNRec):
                                                                                      rating_batches, sampler):
                     score = model.forward(nodeflow, s, d, s2d, s2dc, d2s, d2sc, scv, dcv, sv, dv)
                     loss = ((score - r) ** 2).mean()
-                    total_loss = total_loss + loss
+                    total_loss = total_loss + loss.item()
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
@@ -301,7 +313,7 @@ class HybridGCNRecResnet(HybridGCNRec):
             total_time = time.time() - start
 
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
-                                               epochs) + ' Training loss: %.4f' % loss.item() + ' Train RMSE: %.4f ||' % train_rmse.item() + '|| Time Taken: %.1f' % total_time)
+                                               epochs) + ' Training loss: %.4f' % loss + ' Train RMSE: %.4f ||' % train_rmse.item() + '|| Eval Time: %.1f' % eval_total + '|| Time Taken: %.1f' % total_time)
 
         model.eval()
         sampler = dgl.contrib.sampling.NeighborSampler(

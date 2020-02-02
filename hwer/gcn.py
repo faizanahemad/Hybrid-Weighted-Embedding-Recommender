@@ -68,16 +68,11 @@ class GraphSageWithSampling(nn.Module):
                 convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu))
 
         self.convs = nn.ModuleList(convs)
-        w = nn.Linear(n_content_dims, n_content_dims * 4)
+        w = nn.Linear(n_content_dims, feature_size)
         init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w.bias)
-        drop = nn.Dropout(dropout)
 
-        w2 = nn.Linear(n_content_dims * 4, feature_size)
-        init_weight(w2.weight, 'xavier_uniform_', 'linear')
-        init_bias(w2.bias)
-
-        self.proj = nn.Sequential(w, nn.LeakyReLU(negative_slope=0.1), drop, w2)
+        self.proj = nn.Sequential(w, nn.LeakyReLU(negative_slope=0.1))
 
         self.G = G
 

@@ -91,7 +91,7 @@ hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
                                                               kernel_l2=5e-5, dropout=0.25, use_content=True),
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
                                                      gcn_lr=0.00075, gcn_epochs=35, gcn_layers=2, gcn_dropout=0.0,
-                                                     gcn_kernel_l2=1e-6,
+                                                     gcn_kernel_l2=1e-7,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=1.0, enable_node2vec=False)))
 
@@ -103,19 +103,21 @@ hyperparameters_gcn_node2vec = dict(n_dims=64, combining_factor=0.1,
                                                               kernel_l2=5e-5, dropout=0.25, use_content=True),
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
                                                      gcn_lr=0.00075, gcn_epochs=35, gcn_layers=2, gcn_dropout=0.0,
-                                                     gcn_kernel_l2=1e-6,
+                                                     gcn_kernel_l2=1e-7,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=1.0, enable_node2vec=True)))
 
 hyperparameters_gcn_resnet = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=10, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.01, epochs=20, batch_size=512, padding_length=50,
+                                                              conv_depth=1, scorer_depth=1,
                                                               network_depth=2, network_width=128, verbose=verbose,
-                                                              kernel_l2=5e-5, dropout=0.25, use_content=True),
-                               user_item_params=dict(lr=0.1, epochs=20, batch_size=64, l2=0.0001,
-                                                     gcn_lr=0.00075, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
-                                                     gcn_kernel_l2=1e-6,
+                                                              kernel_l2=1e-9, dropout=0.5, use_content=True),
+                               user_item_params=dict(lr=0.1, epochs=10, batch_size=64, l2=0.0001,
+                                                     conv_depth=1, network_width=128,
+                                                     gcn_lr=0.01, gcn_epochs=5, gcn_layers=2, gcn_dropout=0.1,
+                                                     gcn_kernel_l2=1e-9,
                                                      gcn_batch_size=1024,
                                                      verbose=verbose, margin=1.0, enable_node2vec=True)))
 
