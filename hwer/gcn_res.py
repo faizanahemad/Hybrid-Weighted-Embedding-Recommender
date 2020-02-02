@@ -20,22 +20,23 @@ class LinearResnet(nn.Module):
             self.iscale = nn.Linear(input_size, output_size)
             init_weight(self.iscale.weight, 'xavier_uniform_', 'linear')
             init_bias(self.iscale.bias)
-        self.W1 = nn.Linear(input_size, output_size)
-        self.bn1 = torch.nn.BatchNorm1d(output_size)
-        self.W2 = nn.Linear(output_size, output_size)
-        self.bn2 = torch.nn.BatchNorm1d(output_size)
+        W1 = nn.Linear(input_size, output_size)
+        bn1 = torch.nn.BatchNorm1d(output_size)
+        W2 = nn.Linear(output_size, output_size)
+        bn2 = torch.nn.BatchNorm1d(output_size)
 
-        init_weight(self.W1.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(self.W1.bias)
-        init_weight(self.W2.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(self.W2.bias)
+        init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(W1.bias)
+        init_weight(W2.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(W2.bias)
+
+        self.W = nn.Sequential(W1, nn.LeakyReLU(negative_slope=0.1), W2, nn.LeakyReLU(negative_slope=0.1),)
 
     def forward(self, h):
         identity = h
         if self.scaling:
             identity = self.iscale(identity)
-        out = F.leaky_relu(self.bn1(self.W1(h)), negative_slope=0.1)
-        out = F.leaky_relu(self.bn2(self.W2(out)), negative_slope=0.1)
+        out = self.W(h)
         out = out + identity
         return out
 
@@ -43,7 +44,7 @@ class LinearResnet(nn.Module):
 def mix_embeddings(ndata, projection):
     """Adds external (categorical and numeric) features into node representation G.ndata['h']"""
     h_concat = torch.cat([ndata['h'], ndata['content']], 1)
-    ndata['h'] = projection(h_concat)
+    ndata['h'] = ndata['h'] + projection(h_concat)
 
 
 class GraphSageConvWithSampling(nn.Module):
@@ -51,18 +52,13 @@ class GraphSageConvWithSampling(nn.Module):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
-
-        w1 = nn.Linear(feature_size * 2, width * 2)
-        init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(w1.bias)
-        self.w1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1))
-
-        drop = nn.Dropout(dropout)
-        layers = [drop, LinearResnet(width * 2, width)]
+        layers = [LinearResnet(feature_size * 2, width)]
         for _ in range(conv_depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
             layers.append(LinearResnet(width, width))
+        drop = nn.Dropout(dropout)
+        layers.append(drop)
         W = nn.Linear(width, feature_size)
         layers.append(W)
         if activation_last_layer:
@@ -80,7 +76,6 @@ class GraphSageConvWithSampling(nn.Module):
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
 
         h_concat = torch.cat([h, h_agg], 1)
-        h_concat = self.w1(h_concat)
         h_new = self.layers(h_concat)
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
@@ -101,12 +96,12 @@ class GraphSageWithSampling(nn.Module):
 
         self.convs = nn.ModuleList(convs)
 
-        w1 = nn.Linear(n_content_dims + feature_size, width * 2)
+        w1 = nn.Linear(n_content_dims + feature_size, width)
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w1.bias)
         drop1 = nn.Dropout(dropout)
         self.projection = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1), drop1,
-                                        LinearResnet(width * 2, feature_size))
+                                        LinearResnet(width, feature_size))
         self.G = G
 
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, feature_size)
@@ -143,19 +138,13 @@ class ResnetScorer(nn.Module):
     def __init__(self, feature_size, width, depth, dropout, n_content_dims, n_collaborative_dims, batch_size):
         super(ResnetScorer, self).__init__()
 
-        w1 = nn.Linear(14, 64)
+        w1 = nn.Linear(12 + 2 * n_content_dims, width * 2)
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w1.bias)
         self.w1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1))
 
-        inw = 2 * (n_content_dims + n_collaborative_dims) + 4 * feature_size
-        w2 = nn.Linear(inw, width * 2)
-        init_weight(w2.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(w2.bias)
-        self.w2 = nn.Sequential(w2, nn.LeakyReLU(negative_slope=0.1))
-
         drop = nn.Dropout(dropout)
-        layers = [drop, LinearResnet(width * 2 + 64, width)]
+        layers = [drop, LinearResnet(width * 2 + 4 * feature_size, width)]
         for _ in range(depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
@@ -175,7 +164,7 @@ class ResnetScorer(nn.Module):
     def forward(self, src, dst, mean, node_biases,
                 h_dst, s2d, s2dc, s2d_imp,
                 h_src, d2s, d2sc, d2s_imp,
-                zeroed_indices, user_content_vector, item_content_vector, user_vector, item_vector):
+                zeroed_indices, user_vector, item_vector):
         user_item_vec_dot = (h_src * h_dst).sum(1)
         user_bias = node_biases[src + 1]
         item_bias = node_biases[dst + 1]
@@ -194,31 +183,21 @@ class ResnetScorer(nn.Module):
         implicit = s2d_imp + d2s_imp
         implicit_rating = biased_rating + implicit
 
-        user_item_content_similarity = (user_content_vector * item_content_vector).sum(1)
         user_item_vec_similarity = (user_vector * item_vector).sum(1)
-
-        uv = torch.cat([user_content_vector, user_vector], 1)
-        iv = torch.cat([item_content_vector, item_vector], 1)
-
-        uv_iv_sim = (uv * iv).sum(1)
 
         meta = torch.cat([user_item_vec_dot.reshape((-1, 1)), user_bias.reshape(-1, 1),
                           mean.expand(user_item_vec_dot.shape).reshape(-1, 1),
                           item_bias.reshape(-1, 1), biased_rating.reshape(-1, 1),
-                          uv_iv_sim.reshape(-1, 1),
                           s2d_imp.float().reshape(-1, 1), d2s_imp.float().reshape(-1, 1),
                           s2dc.float().reshape(-1, 1),
                           d2sc.float().reshape(-1, 1), implicit.float().reshape(-1, 1),
                           implicit_rating.float().reshape(-1, 1),
-                          user_item_content_similarity.reshape(-1, 1),
-                          user_item_vec_similarity.reshape(-1, 1)
+                          user_item_vec_similarity.reshape(-1, 1),
+                          user_vector, item_vector,
                           ], 1)
 
-        vectors = torch.cat([uv, iv, h_src, h_dst, s2d_imp_vec, d2s_imp_vec], 1)
-
         meta = self.w1(meta)
-        vectors = self.w2(vectors)
-        h = torch.cat([meta, vectors], 1)
+        h = torch.cat([meta, h_src, h_dst, s2d_imp_vec, d2s_imp_vec], 1)
         h = self.layers(h)
         rating = h.flatten() + implicit_rating
         return rating
@@ -243,7 +222,7 @@ class GraphSAGERecommenderImplicitResnet(nn.Module):
                                    batch_size)
 
     def forward(self, nf, src, dst, s2d, s2dc, d2s, d2sc,
-                user_content_vector, item_content_vector, user_vector, item_vector):
+                user_vector, item_vector):
         h_output = self.gcn(nf)
         h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
         h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
@@ -256,8 +235,7 @@ class GraphSAGERecommenderImplicitResnet(nn.Module):
         score = self.scorer(src, dst, self.mu, self.node_biases,
                             h_dst, s2d, s2dc, s2d_imp,
                             h_src, d2s, d2sc, d2s_imp,
-                            self.zeroed_indices,
-                            user_content_vector, item_content_vector, user_vector, item_vector)
+                            self.zeroed_indices, user_vector, item_vector)
 
         return score
 

@@ -60,7 +60,7 @@ class HybridGCNRecResnet(HybridGCNRec):
 
     def __scorer__(self, h, src, dst, mu, node_biases,
                    src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count,
-                   src_content_vectors, src_collaborative_vectors, dst_content_vectors, dst_collaborative_vectors,
+                   src_collaborative_vectors, dst_collaborative_vectors,
                    zeroed_indices, scorer, batch_size):
         with torch.no_grad():
             # Compute Train RMSE
@@ -75,16 +75,14 @@ class HybridGCNRecResnet(HybridGCNRec):
                 s2d_imp = h[s2d]
                 d2s_imp = h[d2s]
 
-                scv = src_content_vectors[i:i + batch_size]
                 sv = src_collaborative_vectors[i:i + batch_size]
-                dcv = dst_content_vectors[i:i + batch_size]
                 dv = dst_collaborative_vectors[i:i + batch_size]
                 #
 
                 res = scorer(s, d, mu, node_biases,
                              h[d], s2d, s2dc, s2d_imp,
                              h[s], d2s, d2sc, d2s_imp,
-                             zeroed_indices, scv, dcv, sv, dv)
+                             zeroed_indices, sv, dv)
                 score[i:i + batch_size] = res
         return score
 
@@ -147,6 +145,9 @@ class HybridGCNRecResnet(HybridGCNRec):
             mu, biases, padding_length, zeroed_indices,
             self.n_collaborative_dims, network_width, scorer_depth, dropout, n_content_dims, self.n_collaborative_dims, batch_size)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
+                                                        steps_per_epoch=int(np.ceil(len(user_item_affinities)/batch_size)),
+                                                        div_factor=20, final_div_factor=20)
 
         generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
             user_ids, item_ids,
@@ -170,10 +171,8 @@ class HybridGCNRecResnet(HybridGCNRec):
         src_to_dsts_count = []
         dst_to_srcs_count = []
 
-        src_content_vectors = []
-        src_collaborative_vectors = []
-        dst_content_vectors = []
-        dst_collaborative_vectors = []
+        src_vectors = []
+        dst_vectors = []
 
         rating = []
         start_gen = time.time()
@@ -184,10 +183,8 @@ class HybridGCNRecResnet(HybridGCNRec):
             src_to_dsts.append(iis)
             src_to_dsts_count.append(nu)
             dst_to_srcs_count.append(ni)
-            src_content_vectors.append(ucv)
-            src_collaborative_vectors.append(uv)
-            dst_content_vectors.append(icv)
-            dst_collaborative_vectors.append(iv)
+            src_vectors.append(uv)
+            dst_vectors.append(iv)
 
             rating.append(r)
         total_gen = time.time() - start_gen
@@ -199,10 +196,8 @@ class HybridGCNRecResnet(HybridGCNRec):
         src_to_dsts_count = torch.FloatTensor(src_to_dsts_count)
         dst_to_srcs_count = torch.FloatTensor(dst_to_srcs_count)
 
-        src_content_vectors = torch.FloatTensor(src_content_vectors)
-        src_collaborative_vectors = torch.FloatTensor(src_collaborative_vectors)
-        dst_content_vectors = torch.FloatTensor(dst_content_vectors)
-        dst_collaborative_vectors = torch.FloatTensor(dst_collaborative_vectors)
+        src_vectors = torch.FloatTensor(src_vectors)
+        dst_vectors = torch.FloatTensor(dst_vectors)
 
         rating = torch.DoubleTensor(rating)
 
@@ -232,8 +227,7 @@ class HybridGCNRecResnet(HybridGCNRec):
 
                 score = self.__scorer__(h, src, dst, model.mu, model.node_biases,
                                         src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count,
-                                        src_content_vectors, src_collaborative_vectors, dst_content_vectors,
-                                        dst_collaborative_vectors,
+                                        src_vectors, dst_vectors,
                                         zeroed_indices, model.scorer, batch_size)
 
                 train_rmse = ((score - rating) ** 2).mean().sqrt()
@@ -241,7 +235,7 @@ class HybridGCNRecResnet(HybridGCNRec):
 
             model.train()
 
-            def train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count):
+            def train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count, src_vectors, dst_vectors):
                 shuffle_idx = torch.randperm(len(src))
                 src_shuffled = src[shuffle_idx]
                 dst_shuffled = dst[shuffle_idx]
@@ -250,10 +244,8 @@ class HybridGCNRecResnet(HybridGCNRec):
                 src_to_dsts_count_shuffled = src_to_dsts_count[shuffle_idx]
                 dst_to_srcs_count_shuffled = dst_to_srcs_count[shuffle_idx]
 
-                src_content_vectors_shuffled = src_content_vectors[shuffle_idx]
-                src_collaborative_vectors_shuffled = src_collaborative_vectors[shuffle_idx]
-                dst_content_vectors_shuffled = dst_content_vectors[shuffle_idx]
-                dst_collaborative_vectors_shuffled = dst_collaborative_vectors[shuffle_idx]
+                src_vectors_shuffled = src_vectors[shuffle_idx]
+                dst_vectors_shuffled = dst_vectors[shuffle_idx]
 
                 rating_shuffled = rating[shuffle_idx]
 
@@ -264,10 +256,8 @@ class HybridGCNRecResnet(HybridGCNRec):
                 src_to_dsts_count_batches = src_to_dsts_count_shuffled.split(batch_size)
                 dst_to_srcs_count_batches = dst_to_srcs_count_shuffled.split(batch_size)
 
-                src_content_vectors_batches = src_content_vectors_shuffled.split(batch_size)
-                src_collaborative_vectors_batches = src_collaborative_vectors_shuffled.split(batch_size)
-                dst_content_vectors_batches = dst_content_vectors_shuffled.split(batch_size)
-                dst_collaborative_vectors_batches = dst_collaborative_vectors_shuffled.split(batch_size)
+                src_vectors_batches = src_vectors_shuffled.split(batch_size)
+                dst_vectors_batches = dst_vectors_shuffled.split(batch_size)
 
                 rating_batches = rating_shuffled.split(batch_size)
 
@@ -287,28 +277,27 @@ class HybridGCNRecResnet(HybridGCNRec):
 
                 # Training
                 total_loss = 0.0
-                for s, d, d2s, s2d, s2dc, d2sc, scv, sv, dcv, dv, r, nodeflow in zip(src_batches, dst_batches,
+                for s, d, d2s, s2d, s2dc, d2sc, sv, dv, r, nodeflow in zip(src_batches, dst_batches,
                                                                                      dst_to_srcs_batches,
                                                                                      src_to_dsts_batches,
                                                                                      src_to_dsts_count_batches,
                                                                                      dst_to_srcs_count_batches,
-                                                                                     src_content_vectors_batches,
-                                                                                     src_collaborative_vectors_batches,
-                                                                                     dst_content_vectors_batches,
-                                                                                     dst_collaborative_vectors_batches,
+                                                                                     src_vectors_batches,
+                                                                                     dst_vectors_batches,
                                                                                      rating_batches, sampler):
-                    score = model.forward(nodeflow, s, d, s2d, s2dc, d2s, d2sc, scv, dcv, sv, dv)
+                    score = model.forward(nodeflow, s, d, s2d, s2dc, d2s, d2sc, sv, dv)
                     loss = ((score - r) ** 2).mean()
                     total_loss = total_loss + loss.item()
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
+                    scheduler.step()
                 return total_loss / len(src_batches)
 
             if epoch % 2 == 1:
-                loss = train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count)
+                loss = train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count, src_vectors, dst_vectors)
             else:
-                loss = train(dst, src, dst_to_srcs, src_to_dsts, dst_to_srcs_count, src_to_dsts_count)
+                loss = train(dst, src, dst_to_srcs, src_to_dsts, dst_to_srcs_count, src_to_dsts_count, dst_vectors, src_vectors)
 
             total_time = time.time() - start
 
@@ -397,10 +386,8 @@ class HybridGCNRecResnet(HybridGCNRec):
         src_to_dsts_count = []
         dst_to_srcs_count = []
 
-        src_content_vectors = []
-        src_collaborative_vectors = []
-        dst_content_vectors = []
-        dst_collaborative_vectors = []
+        src_vectors = []
+        dst_vectors = []
 
         for u, i, us, iis, nu, ni, ucv, uv, icv, iv in generator():
             src.append(u)
@@ -409,10 +396,8 @@ class HybridGCNRecResnet(HybridGCNRec):
             src_to_dsts.append(iis)
             src_to_dsts_count.append(nu)
             dst_to_srcs_count.append(ni)
-            src_content_vectors.append(ucv)
-            src_collaborative_vectors.append(uv)
-            dst_content_vectors.append(icv)
-            dst_collaborative_vectors.append(iv)
+            src_vectors.append(uv)
+            dst_vectors.append(iv)
 
         src = torch.LongTensor(src)
         dst = torch.LongTensor(dst) + total_users
@@ -421,15 +406,12 @@ class HybridGCNRecResnet(HybridGCNRec):
         src_to_dsts_count = torch.FloatTensor(src_to_dsts_count)
         dst_to_srcs_count = torch.FloatTensor(dst_to_srcs_count)
 
-        src_content_vectors = torch.FloatTensor(src_content_vectors)
-        src_collaborative_vectors = torch.FloatTensor(src_collaborative_vectors)
-        dst_content_vectors = torch.FloatTensor(dst_content_vectors)
-        dst_collaborative_vectors = torch.FloatTensor(dst_collaborative_vectors)
+        src_vectors = torch.FloatTensor(src_vectors)
+        dst_vectors = torch.FloatTensor(dst_vectors)
 
         score = self.__scorer__(h, src, dst, mu, bias,
                                 src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count,
-                                src_content_vectors, src_collaborative_vectors, dst_content_vectors,
-                                dst_collaborative_vectors,
+                                src_vectors, dst_vectors,
                                 zeroed_indices, scorer, batch_size)
 
         predictions = score.detach().numpy()
