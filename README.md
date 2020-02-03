@@ -125,6 +125,7 @@ pip install -r requirements.txt
 
 ### Misc References
 - http://stevehanov.ca/blog/?id=145
+- https://towardsdatascience.com/lossless-triplet-loss-7e932f990b24
 
 ### Triplet Loss
 - https://www.tensorflow.org/addons/tutorials/losses_triplet
@@ -148,4 +149,7 @@ pip install -r requirements.txt
 
 ### Trouble-Shooting
 - https://medium.com/@HojjatA/could-not-find-valid-device-for-node-while-eagerly-executing-8f2ff588d1e
+
+### Tools
+- https://docs.aws.amazon.com/codecommit/latest/userguide/setting-up-gc.html
 

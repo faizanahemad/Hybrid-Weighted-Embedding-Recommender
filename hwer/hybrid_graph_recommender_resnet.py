@@ -144,10 +144,12 @@ class HybridGCNRecResnet(HybridGCNRec):
                                   g_train),
             mu, biases, padding_length, zeroed_indices,
             self.n_collaborative_dims, network_width, scorer_depth, dropout, n_content_dims, self.n_collaborative_dims, batch_size)
-        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+        # opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+
+        opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=True, nesterov=True)
         scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
                                                         steps_per_epoch=int(np.ceil(len(user_item_affinities)/batch_size)),
-                                                        div_factor=20, final_div_factor=20)
+                                                        div_factor=50, final_div_factor=100)
 
         generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
             user_ids, item_ids,

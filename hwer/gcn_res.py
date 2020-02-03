@@ -43,8 +43,43 @@ class LinearResnet(nn.Module):
 
 def mix_embeddings(ndata, projection):
     """Adds external (categorical and numeric) features into node representation G.ndata['h']"""
-    h_concat = torch.cat([ndata['h'], ndata['content']], 1)
-    ndata['h'] = ndata['h'] + projection(h_concat)
+    return projection(ndata)
+
+
+class NodeContentMixer(nn.Module):
+    def __init__(self, n_content_dims, feature_size, width, dropout, depth):
+        super(NodeContentMixer, self).__init__()
+        W = nn.Linear(n_content_dims, width)
+        init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(W.bias)
+        self.w1 = nn.Sequential(W, nn.LeakyReLU(negative_slope=0.1))
+
+        W = nn.Linear(feature_size, width)
+        init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(W.bias)
+        self.w2 = nn.Sequential(W, nn.LeakyReLU(negative_slope=0.1))
+
+        drop = nn.Dropout(dropout)
+        layers = [drop, LinearResnet(width * 2, width)]
+        for _ in range(depth - 1):
+            drop = nn.Dropout(dropout)
+            layers.append(drop)
+            layers.append(LinearResnet(width, width))
+        W = nn.Linear(width, feature_size)
+        init_weight(W.weight, 'xavier_uniform_', 'linear')
+        init_bias(W.bias)
+        drop = nn.Dropout(dropout)
+        layers.append(drop)
+        layers.append(W)
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, ndata):
+        c = ndata['content']
+        h = ndata['h']
+        c = self.w1(c)
+        h = self.w2(h)
+        h_concat = torch.cat([c, h], 1)
+        return self.layers(h_concat)
 
 
 class GraphSageConvWithSampling(nn.Module):
@@ -95,13 +130,7 @@ class GraphSageWithSampling(nn.Module):
                 convs.append(GraphSageConvWithSampling(feature_size, width, dropout, conv_depth, True))
 
         self.convs = nn.ModuleList(convs)
-
-        w1 = nn.Linear(n_content_dims + feature_size, width)
-        init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(w1.bias)
-        drop1 = nn.Dropout(dropout)
-        self.projection = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1), drop1,
-                                        LinearResnet(width, feature_size))
+        self.projection = NodeContentMixer(n_content_dims, feature_size, width, dropout, 2)
         self.G = G
 
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, feature_size)
@@ -138,13 +167,13 @@ class ResnetScorer(nn.Module):
     def __init__(self, feature_size, width, depth, dropout, n_content_dims, n_collaborative_dims, batch_size):
         super(ResnetScorer, self).__init__()
 
-        w1 = nn.Linear(12 + 2 * n_content_dims, width * 2)
+        w1 = nn.Linear(12 + 2 * n_content_dims, width + 2 * n_content_dims)
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w1.bias)
         self.w1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1))
 
         drop = nn.Dropout(dropout)
-        layers = [drop, LinearResnet(width * 2 + 4 * feature_size, width)]
+        layers = [drop, LinearResnet(width + 2 * n_content_dims, width)]
         for _ in range(depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
@@ -197,9 +226,15 @@ class ResnetScorer(nn.Module):
                           ], 1)
 
         meta = self.w1(meta)
-        h = torch.cat([meta, h_src, h_dst, s2d_imp_vec, d2s_imp_vec], 1)
-        h = self.layers(h)
-        rating = h.flatten() + implicit_rating
+        # h = torch.cat([meta, h_src, h_dst, s2d_imp_vec, d2s_imp_vec], 1)
+        h = meta
+        h = self.layers(h).flatten()
+        rating = h + biased_rating + implicit
+
+        bias_loss = (user_bias ** 2).mean() + (item_bias ** 2).mean()
+        residual_loss = (h ** 2).mean()
+        implicit_loss = (implicit ** 2).mean()
+        rating = biased_rating + h
         return rating
 
 

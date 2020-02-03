@@ -205,6 +205,7 @@ class HybridGCNRec(SVDppHybrid):
             len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
 
         enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
+        enable_triplet_loss = hyperparams["enable_triplet_loss"] if "enable_triplet_loss" in hyperparams else False
         node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
 
         assert np.sum(np.isnan(user_vectors)) == 0
@@ -217,15 +218,18 @@ class HybridGCNRec(SVDppHybrid):
                                                                            item_id_to_index,
                                                                            n_output_dims,
                                                                            node2vec_params)
-        user_triplet_vectors, item_triplet_vectors = super().__user_item_affinities_triplet_trainer__(user_ids,
-                                                                                                      item_ids,
-                                                                                                      user_item_affinities,
-                                                                                                      w2v_user_vectors,
-                                                                                                      w2v_item_vectors,
-                                                                                                      user_id_to_index,
-                                                                                                      item_id_to_index,
-                                                                                                      n_output_dims,
-                                                                                                      hyperparams)
+        user_triplet_vectors, item_triplet_vectors = w2v_user_vectors, w2v_item_vectors
+
+        if enable_triplet_loss:
+            user_triplet_vectors, item_triplet_vectors = super().__user_item_affinities_triplet_trainer__(user_ids,
+                                                                                                          item_ids,
+                                                                                                          user_item_affinities,
+                                                                                                          w2v_user_vectors,
+                                                                                                          w2v_item_vectors,
+                                                                                                          user_id_to_index,
+                                                                                                          item_id_to_index,
+                                                                                                          n_output_dims,
+                                                                                                          hyperparams)
         return w2v_user_vectors, w2v_item_vectors, user_triplet_vectors, item_triplet_vectors
 
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
@@ -260,6 +264,7 @@ class HybridGCNRec(SVDppHybrid):
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.5
         gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
         enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
+        enable_gcn = hyperparams["enable_gcn"] if "enable_gcn" in hyperparams else False
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         network_width = hyperparams["network_width"] if "network_width" in hyperparams else 128
         node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
@@ -274,6 +279,9 @@ class HybridGCNRec(SVDppHybrid):
             item_id_to_index,
             n_output_dims,
             hyperparams)
+
+        if not enable_gcn:
+            return user_triplet_vectors, item_triplet_vectors
 
         triplet_vectors = np.concatenate(
             (np.zeros((1, user_triplet_vectors.shape[1])), user_triplet_vectors, item_triplet_vectors))
@@ -424,13 +432,6 @@ class HybridGCNRec(SVDppHybrid):
             "End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s, margin = %.4f",
             unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
 
-        #
-        # user_vectors, item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
-        #                                                        user_vectors, item_vectors,
-        #                                                        user_id_to_index,
-        #                                                        item_id_to_index,
-        #                                                        n_output_dims,
-        #                                                        hyperparams)
         return user_vectors, item_vectors
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
