@@ -54,7 +54,8 @@ class HybridGCNRecResnet(HybridGCNRec):
                                   gcn_dropout, g_train, triplet_vectors, margin):
         self.log.info("Getting Triplet Model for GCN RESNET")
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims, network_width,
-                                                                gcn_layers, conv_depth, gcn_dropout, g_train, triplet_vectors),
+                                                                gcn_layers, conv_depth, gcn_dropout, g_train,
+                                                                triplet_vectors),
                                           margin)
         return model
 
@@ -79,10 +80,10 @@ class HybridGCNRecResnet(HybridGCNRec):
                 dv = dst_collaborative_vectors[i:i + batch_size]
                 #
 
-                res = scorer(s, d, mu, node_biases,
-                             h[d], s2d, s2dc, s2d_imp,
-                             h[s], d2s, d2sc, d2s_imp,
-                             zeroed_indices, sv, dv)
+                res, _, _, _ = scorer(s, d, mu, node_biases,
+                                      h[d], s2d, s2dc, s2d_imp,
+                                      h[s], d2s, d2sc, d2s_imp,
+                                      zeroed_indices, sv, dv)
                 score[i:i + batch_size] = res
         return score
 
@@ -107,6 +108,9 @@ class HybridGCNRecResnet(HybridGCNRec):
         scorer_depth = hyperparams["scorer_depth"] if "scorer_depth" in hyperparams else 1
         network_width = hyperparams["network_width"] if "network_width" in hyperparams else 128
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
+        implicit_reg = hyperparams["implicit_reg"] if "implicit_reg" in hyperparams else 0.0
+        residual_reg = hyperparams["residual_reg"] if "residual_reg" in hyperparams else 0.0
+        bias_reg = hyperparams["bias_reg"] if "bias_reg" in hyperparams else 0.0
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
@@ -140,16 +144,19 @@ class HybridGCNRecResnet(HybridGCNRec):
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicitResnet(
-            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_width, network_depth, conv_depth, dropout,
+            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_width, network_depth, conv_depth,
+                                  dropout,
                                   g_train),
             mu, biases, padding_length, zeroed_indices,
-            self.n_collaborative_dims, network_width, scorer_depth, dropout, n_content_dims, self.n_collaborative_dims, batch_size)
-        # opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+            self.n_collaborative_dims, network_width, scorer_depth, dropout, n_content_dims, self.n_collaborative_dims,
+            batch_size)
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
 
-        opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=True, nesterov=True)
-        scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
-                                                        steps_per_epoch=int(np.ceil(len(user_item_affinities)/batch_size)),
-                                                        div_factor=50, final_div_factor=100)
+        # opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
+        # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
+        #                                                 steps_per_epoch=int(
+        #                                                     np.ceil(len(user_item_affinities) / batch_size)),
+        #                                                 div_factor=50, final_div_factor=100)
 
         generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
             user_ids, item_ids,
@@ -237,7 +244,8 @@ class HybridGCNRecResnet(HybridGCNRec):
 
             model.train()
 
-            def train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count, src_vectors, dst_vectors):
+            def train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count, src_vectors,
+                      dst_vectors):
                 shuffle_idx = torch.randperm(len(src))
                 src_shuffled = src[shuffle_idx]
                 dst_shuffled = dst[shuffle_idx]
@@ -280,26 +288,30 @@ class HybridGCNRecResnet(HybridGCNRec):
                 # Training
                 total_loss = 0.0
                 for s, d, d2s, s2d, s2dc, d2sc, sv, dv, r, nodeflow in zip(src_batches, dst_batches,
-                                                                                     dst_to_srcs_batches,
-                                                                                     src_to_dsts_batches,
-                                                                                     src_to_dsts_count_batches,
-                                                                                     dst_to_srcs_count_batches,
-                                                                                     src_vectors_batches,
-                                                                                     dst_vectors_batches,
-                                                                                     rating_batches, sampler):
-                    score = model.forward(nodeflow, s, d, s2d, s2dc, d2s, d2sc, sv, dv)
+                                                                           dst_to_srcs_batches,
+                                                                           src_to_dsts_batches,
+                                                                           src_to_dsts_count_batches,
+                                                                           dst_to_srcs_count_batches,
+                                                                           src_vectors_batches,
+                                                                           dst_vectors_batches,
+                                                                           rating_batches, sampler):
+                    score, bias_loss, residual_loss, implicit_loss = model.forward(nodeflow, s, d, s2d, s2dc, d2s, d2sc,
+                                                                                   sv, dv)
                     loss = ((score - r) ** 2).mean()
-                    total_loss = total_loss + loss.item()
+                    loss += residual_reg * residual_loss + bias_reg * bias_loss + implicit_reg * implicit_loss
                     opt.zero_grad()
                     loss.backward()
+                    total_loss = total_loss + loss.item()
                     opt.step()
-                    scheduler.step()
+                    # scheduler.step()
                 return total_loss / len(src_batches)
 
             if epoch % 2 == 1:
-                loss = train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count, src_vectors, dst_vectors)
+                loss = train(src, dst, src_to_dsts, dst_to_srcs, src_to_dsts_count, dst_to_srcs_count, src_vectors,
+                             dst_vectors)
             else:
-                loss = train(dst, src, dst_to_srcs, src_to_dsts, dst_to_srcs_count, src_to_dsts_count, dst_vectors, src_vectors)
+                loss = train(dst, src, dst_to_srcs, src_to_dsts, dst_to_srcs_count, src_to_dsts_count, dst_vectors,
+                             src_vectors)
 
             total_time = time.time() - start
 

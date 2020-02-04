@@ -30,7 +30,7 @@ class LinearResnet(nn.Module):
         init_weight(W2.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W2.bias)
 
-        self.W = nn.Sequential(W1, nn.LeakyReLU(negative_slope=0.1), W2, nn.LeakyReLU(negative_slope=0.1),)
+        self.W = nn.Sequential(W1, nn.LeakyReLU(negative_slope=0.1), W2, nn.LeakyReLU(negative_slope=0.1), )
 
     def forward(self, h):
         identity = h
@@ -167,13 +167,18 @@ class ResnetScorer(nn.Module):
     def __init__(self, feature_size, width, depth, dropout, n_content_dims, n_collaborative_dims, batch_size):
         super(ResnetScorer, self).__init__()
 
-        w1 = nn.Linear(12 + 2 * n_content_dims, width + 2 * n_content_dims)
+        w1 = nn.Linear(10, width)
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w1.bias)
         self.w1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1))
 
+        w2 = nn.Linear(2 * n_content_dims, width)
+        init_weight(w2.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(w2.bias)
+        self.w2 = nn.Sequential(w2, nn.LeakyReLU(negative_slope=0.1))
+
         drop = nn.Dropout(dropout)
-        layers = [drop, LinearResnet(width + 2 * n_content_dims, width)]
+        layers = [drop, LinearResnet(width * 2, width)]
         for _ in range(depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
@@ -214,28 +219,26 @@ class ResnetScorer(nn.Module):
 
         user_item_vec_similarity = (user_vector * item_vector).sum(1)
 
-        meta = torch.cat([user_item_vec_dot.reshape((-1, 1)), user_bias.reshape(-1, 1),
-                          mean.expand(user_item_vec_dot.shape).reshape(-1, 1),
-                          item_bias.reshape(-1, 1), biased_rating.reshape(-1, 1),
-                          s2d_imp.float().reshape(-1, 1), d2s_imp.float().reshape(-1, 1),
-                          s2dc.float().reshape(-1, 1),
-                          d2sc.float().reshape(-1, 1), implicit.float().reshape(-1, 1),
-                          implicit_rating.float().reshape(-1, 1),
-                          user_item_vec_similarity.reshape(-1, 1),
-                          user_vector, item_vector,
-                          ], 1)
+        meta = self.w1(torch.cat([user_item_vec_dot.reshape((-1, 1)), user_bias.reshape(-1, 1),
+                                  mean.expand(user_item_vec_dot.shape).reshape(-1, 1),
+                                  item_bias.reshape(-1, 1),
+                                  s2d_imp.float().reshape(-1, 1), d2s_imp.float().reshape(-1, 1),
+                                  s2dc.float().reshape(-1, 1),
+                                  d2sc.float().reshape(-1, 1), implicit.float().reshape(-1, 1),
+                                  user_item_vec_similarity.reshape(-1, 1),
+                                  ], 1))
+        v = self.w2(torch.cat([user_vector, item_vector, ], 1))
 
-        meta = self.w1(meta)
-        # h = torch.cat([meta, h_src, h_dst, s2d_imp_vec, d2s_imp_vec], 1)
-        h = meta
+        h = torch.cat([meta, v], 1)
+        # h = meta
         h = self.layers(h).flatten()
-        rating = h + biased_rating + implicit
+        # rating = h + biased_rating + implicit
 
-        bias_loss = (user_bias ** 2).mean() + (item_bias ** 2).mean()
-        residual_loss = (h ** 2).mean()
-        implicit_loss = (implicit ** 2).mean()
-        rating = biased_rating + h
-        return rating
+        bias_loss = 100.0 * ((user_bias ** 2).mean() + (item_bias ** 2).mean())
+        residual_loss = 100.0 * (h ** 2).mean()
+        implicit_loss = 100.0 * (implicit ** 2).mean()
+        rating = biased_rating + implicit
+        return rating, bias_loss, residual_loss, implicit_loss
 
 
 class GraphSAGERecommenderImplicitResnet(nn.Module):
@@ -267,12 +270,12 @@ class GraphSAGERecommenderImplicitResnet(nn.Module):
         d2s_imp = h_output[nf.map_from_parent_nid(-1, d2s.flatten(), True)]
         d2s_imp = d2s_imp.reshape(tuple(d2s.shape) + (d2s_imp.shape[-1],))
 
-        score = self.scorer(src, dst, self.mu, self.node_biases,
-                            h_dst, s2d, s2dc, s2d_imp,
-                            h_src, d2s, d2sc, d2s_imp,
-                            self.zeroed_indices, user_vector, item_vector)
+        score, bias_loss, residual_loss, implicit_loss = self.scorer(src, dst, self.mu, self.node_biases,
+                                                                     h_dst, s2d, s2dc, s2d_imp,
+                                                                     h_src, d2s, d2sc, d2s_imp,
+                                                                     self.zeroed_indices, user_vector, item_vector)
 
-        return score
+        return score, bias_loss, residual_loss, implicit_loss
 
 
 class GraphSAGETripletEmbedding(nn.Module):

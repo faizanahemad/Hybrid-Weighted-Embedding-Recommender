@@ -90,8 +90,6 @@ class MovieLens(object):
         self.split_by_time = split_by_time
         if dataset == 'ml-100k':
             users, products, ratings, genres = ml100k_default_reader(directory)
-        elif dataset == 'ml-100k_enhanced':
-            users, products, ratings, genres = ml100k_enhanced_reader(directory)
 
         self.genres = genres
         self.products = products

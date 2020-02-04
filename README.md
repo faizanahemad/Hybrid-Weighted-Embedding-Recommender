@@ -152,4 +152,5 @@ pip install -r requirements.txt
 
 ### Tools
 - https://docs.aws.amazon.com/codecommit/latest/userguide/setting-up-gc.html
+- https://github.com/eliorc/node2vec
 
