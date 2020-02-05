@@ -184,10 +184,11 @@ class ResnetScorer(nn.Module):
             layers.append(drop)
             layers.append(LinearResnet(width, width))
         w2 = nn.Linear(width, 1)
-        init_weight(w2.weight, 'xavier_uniform_', 'linear')
+        init_weight(w2.weight, 'xavier_uniform_', 'Tanh')
         init_bias(w2.bias)
 
         layers.append(w2)
+        layers.append(nn.Tanh())
         self.layers = nn.Sequential(*layers)
         self.batch_size = batch_size
         self.feature_size = feature_size
@@ -204,41 +205,41 @@ class ResnetScorer(nn.Module):
         item_bias = node_biases[dst + 1]
         biased_rating = mean + user_item_vec_dot + user_bias + item_bias
 
-        for x in zeroed_indices:
-            s2d_imp[s2d == x] = 0.0
-
-        for x in zeroed_indices:
-            d2s_imp[d2s == x] = 0.0
-
-        s2d_imp_vec = s2d_imp.mean(1)
-        d2s_imp_vec = d2s_imp.mean(1)
-        s2d_imp = s2dc * (h_dst * s2d_imp_vec).sum(1)
-        d2s_imp = d2sc * (h_src * d2s_imp_vec).sum(1)
-        implicit = s2d_imp + d2s_imp
-        implicit_rating = biased_rating + implicit
-
-        user_item_vec_similarity = (user_vector * item_vector).sum(1)
-
-        meta = self.w1(torch.cat([user_item_vec_dot.reshape((-1, 1)), user_bias.reshape(-1, 1),
-                                  mean.expand(user_item_vec_dot.shape).reshape(-1, 1),
-                                  item_bias.reshape(-1, 1),
-                                  s2d_imp.float().reshape(-1, 1), d2s_imp.float().reshape(-1, 1),
-                                  s2dc.float().reshape(-1, 1),
-                                  d2sc.float().reshape(-1, 1), implicit.float().reshape(-1, 1),
-                                  user_item_vec_similarity.reshape(-1, 1),
-                                  ], 1))
-        v = self.w2(torch.cat([user_vector, item_vector, ], 1))
-
-        h = torch.cat([meta, v], 1)
-        # h = meta
-        h = self.layers(h).flatten()
-        # rating = h + biased_rating + implicit
-
-        bias_loss = 100.0 * ((user_bias ** 2).mean() + (item_bias ** 2).mean())
-        residual_loss = 100.0 * (h ** 2).mean()
-        implicit_loss = 100.0 * (implicit ** 2).mean()
-        rating = biased_rating + implicit
-        return rating, bias_loss, residual_loss, implicit_loss
+        # for x in zeroed_indices:
+        #     s2d_imp[s2d == x] = 0.0
+        #
+        # for x in zeroed_indices:
+        #     d2s_imp[d2s == x] = 0.0
+        #
+        # s2d_imp_vec = s2d_imp.mean(1)
+        # d2s_imp_vec = d2s_imp.mean(1)
+        # s2d_imp = s2dc * (h_dst * s2d_imp_vec).sum(1)
+        # d2s_imp = d2sc * (h_src * d2s_imp_vec).sum(1)
+        # implicit = s2d_imp + d2s_imp
+        #
+        # user_item_vec_similarity = (user_vector * item_vector).sum(1)
+        #
+        # meta = self.w1(torch.cat([user_item_vec_dot.reshape((-1, 1)), user_bias.reshape(-1, 1),
+        #                           mean.expand(user_item_vec_dot.shape).reshape(-1, 1),
+        #                           item_bias.reshape(-1, 1),
+        #                           s2d_imp.float().reshape(-1, 1), d2s_imp.float().reshape(-1, 1),
+        #                           s2dc.float().reshape(-1, 1),
+        #                           d2sc.float().reshape(-1, 1), implicit.float().reshape(-1, 1),
+        #                           user_item_vec_similarity.reshape(-1, 1),
+        #                           ], 1))
+        # v = self.w2(torch.cat([user_vector, item_vector, ], 1))
+        #
+        # h = torch.cat([meta, v], 1)
+        # # h = meta
+        # h = self.layers(h).flatten()
+        # # rating = h + biased_rating + implicit
+        #
+        # bias_loss = 100.0 * ((user_bias ** 2).mean() + (item_bias ** 2).mean())
+        # residual_loss = 100.0 * (h ** 2).mean()
+        # implicit_loss = 100.0 * (implicit ** 2).mean()
+        # rating = biased_rating + 0.1 * h
+        rating = biased_rating
+        return rating, 0.0, 0.0, 0.0
 
 
 class GraphSAGERecommenderImplicitResnet(nn.Module):

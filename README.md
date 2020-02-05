@@ -126,6 +126,7 @@ pip install -r requirements.txt
 ### Misc References
 - http://stevehanov.ca/blog/?id=145
 - https://towardsdatascience.com/lossless-triplet-loss-7e932f990b24
+- http://fastml.com/evaluating-recommender-systems/
 
 ### Triplet Loss
 - https://www.tensorflow.org/addons/tutorials/losses_triplet

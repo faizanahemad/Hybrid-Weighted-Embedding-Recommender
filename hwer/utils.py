@@ -237,6 +237,8 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
     encoder = tf.keras.Model(input_layer, encoded)
     adam = tf.keras.optimizers.Adam(lr=0.01, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
     autoencoder.compile(optimizer=adam, loss=loss, metrics=["mean_squared_error"])
+    Inputs = Inputs.astype(float)
+    Outputs = Outputs.astype(float)
     X1, X2, Y1, Y2 = train_test_split(Inputs, Outputs, test_size=0.5)
     autoencoder.fit(X1, Y1,
                     epochs=epochs,

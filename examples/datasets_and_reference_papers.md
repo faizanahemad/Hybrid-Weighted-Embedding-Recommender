@@ -5,6 +5,7 @@
     - Paper \<Placeholder>
 
 ## DataSets and Papers
+- [Netflix Dataset](https://www.kaggle.com/netflix-inc/netflix-prize-data)
 - [Yelp Recsys 2013](https://www.kaggle.com/c/yelp-recsys-2013/data)
     - [Addressing Item-Cold Start Problem in
 Recommendation Systems using Model Based
