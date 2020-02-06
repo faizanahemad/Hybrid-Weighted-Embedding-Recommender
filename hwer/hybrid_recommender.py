@@ -461,7 +461,7 @@ class HybridRecommender(RecommendationBase):
         user_vectors, item_vectors = self.prepare_for_knn(alpha, content_data_used,
                                                           user_content_vectors, item_content_vectors,
                                                           user_vectors, item_vectors)
-        _, _ = self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
+        self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
         self.fit_done = True
         self.log.info("End Fitting Recommender, user_vectors shape = %s, item_vectors shape = %s, Time to fit = %.1f",
                       user_vectors.shape, item_vectors.shape, time.time() - start_time)

@@ -227,6 +227,7 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
     encoded = tf.keras.layers.Dense(n_dims * 8, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(input_layer)
     encoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(encoded)
     encoded = tf.keras.layers.Dense(n_dims, activation='elu')(encoded)
+    encoded = K.l2_normalize(encoded, axis=-1)
 
     decoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(encoded)
     decoded = tf.keras.layers.Dense(n_dims * 8, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(decoded)

@@ -29,6 +29,7 @@ class ContentRecommendation(RecommendationBase):
                 if np.sum(np.isnan(embedding)) != 0:
                     self.log.info("User Only Embedding: Feature = %s, Nan Users = %s", feature_name, get_nan_rows(embedding))
                 assert np.sum(np.isnan(embedding)) == 0
+                embedding = unit_length(embedding, axis=1)
                 user_embeddings[feature_name] = embedding
 
         return user_embeddings
@@ -48,6 +49,7 @@ class ContentRecommendation(RecommendationBase):
                 self.log.info("Item Embedding: Feature = %s, Nan Items = %s", feature_name,
                               get_nan_rows(embedding))
             assert np.sum(np.isnan(embedding)) == 0
+            embedding = unit_length(embedding, axis=1)
             item_embeddings[feature_name] = embedding
 
         item_user_dict: Dict[str, Dict[str, float]] = build_item_user_dict(user_item_affinities)
@@ -72,6 +74,7 @@ class ContentRecommendation(RecommendationBase):
                 self.log.info("Item Embedding:user_only_features: Feature = %s, Nan Items = %s", feature_name,
                               get_nan_rows(item_embedding))
             assert np.sum(np.isnan(item_embedding)) == 0
+            item_embedding = unit_length(item_embedding, axis=1)
             item_embeddings[feature_name] = item_embedding
         return item_embeddings
 
@@ -106,6 +109,9 @@ class ContentRecommendation(RecommendationBase):
             feature_name = feature.feature_name
             user_embedding = user_embeddings[feature_name]
             item_embedding = item_embeddings[feature_name]
+            user_embedding = unit_length(user_embedding, axis=1)
+            item_embedding = unit_length(item_embedding, axis=1)
+
             if np.sum(np.isnan(user_embedding)) != 0:
                 self.log.info("User Embedding: Feature = %s, Nan Users = %s", feature_name,
                               get_nan_rows(user_embedding))
@@ -128,6 +134,8 @@ class ContentRecommendation(RecommendationBase):
                 item_em = np.average(item_ems, axis=0, weights=weights)
                 final_embedding = (embedding + item_em) / 2.0
                 user_embedding[i] = final_embedding
+            user_embedding = unit_length(user_embedding, axis=1)
+            user_embeddings[feature_name] = user_embedding
             processed_features.append(feature_name)
 
         # for item_only_features
@@ -136,6 +144,7 @@ class ContentRecommendation(RecommendationBase):
                 continue
             feature_name = feature.feature_name
             item_embedding = item_embeddings[feature_name]
+            item_embedding = unit_length(item_embedding, axis=1)
             user_embedding = np.zeros(shape=(len(user_ids), item_embedding.shape[1]))
             average_embedding = np.mean(item_embedding, axis=0)
             for i, user in enumerate(user_ids):
@@ -151,6 +160,7 @@ class ContentRecommendation(RecommendationBase):
                     user_embedding[i] = item_em
                 else:
                     user_embedding[i] = average_embedding.copy()
+            user_embedding = unit_length(user_embedding, axis=1)
             user_embeddings[feature_name] = user_embedding
             processed_features.append(feature_name)
         return user_embeddings, processed_features
@@ -185,15 +195,14 @@ class ContentRecommendation(RecommendationBase):
             pca = PCA(n_components=n_output_dims, )
             all_vectors = pca.fit_transform(all_vectors)
             all_vectors = StandardScaler().fit_transform(all_vectors)
-            self.log.debug("Content Recommender::__concat_feature_vectors__, PCA explained variance:  %.4f, explained variance ratio: %.4f",
+            self.log.info("Content Recommender::__concat_feature_vectors__, PCA explained variance:  %.4f, explained variance ratio: %.4f",
                            np.sum(pca.explained_variance_), np.sum(pca.explained_variance_ratio_))
 
         if n_output_dims > all_vectors.shape[1]:
             raise AssertionError("Output Dims are higher than Total Feature Dims.")
+        all_vectors = unit_length(all_vectors, axis=1)
         user_vectors = all_vectors[:user_vectors_length]
         item_vectors = all_vectors[user_vectors_length:]
-        user_vectors = unit_length(user_vectors, axis=1)
-        item_vectors = unit_length(item_vectors, axis=1)
 
         return user_vectors, item_vectors
 
@@ -239,7 +248,7 @@ class ContentRecommendation(RecommendationBase):
                                                                        user_data, item_data, user_item_affinities,
                                                                        self.n_output_dims)
 
-        _, _ = self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
+        self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
 
         # AutoEncoder them so that error is minimised and distance is maintained
         # https://stats.stackexchange.com/questions/351212/do-autoencoders-preserve-distances

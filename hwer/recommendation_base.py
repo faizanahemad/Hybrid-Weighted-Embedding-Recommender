@@ -152,7 +152,6 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.log.info("Built KNN, user vectors shape = %s, item vectors shape = %s, n_neighbors = %s",
                       user_vectors.shape,
                       item_vectors.shape, n_neighbors)
-        return user_knn, item_knn
 
     def add_user(self, user_id: str, features: FeatureSet, user_item_affinities: List[Tuple[str, str, float]]):
         assert self.fit_done

@@ -331,3 +331,20 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
 
 class MixedTypeContentEmbedding(ContentEmbeddingBase):
     pass
+
+
+class IdentityEmbedding(ContentEmbeddingBase):
+    def __init__(self, n_dims, make_unit_length=True, **kwargs):
+        super().__init__(n_dims, make_unit_length, **kwargs)
+        self.log = getLogger(type(self).__name__)
+        self.columns = None
+
+    def fit(self, feature: Feature, **kwargs):
+        super().fit(feature, **kwargs)
+
+    def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+        self.log.debug("Start Transform CategoricalEmbedding for feature name %s", feature.feature_name)
+        assert type(feature.values) == np.ndarray
+        outputs = feature.values
+        self.log.debug("End Transform CategoricalEmbedding for feature name %s", feature.feature_name)
+        return self.check_output_dims(outputs, feature)
