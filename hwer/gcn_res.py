@@ -25,12 +25,17 @@ class LinearResnet(nn.Module):
         W2 = nn.Linear(output_size, output_size)
         bn2 = torch.nn.BatchNorm1d(output_size)
 
+        W3 = nn.Linear(output_size, output_size)
+
         init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W1.bias)
         init_weight(W2.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W2.bias)
 
-        self.W = nn.Sequential(W1, nn.LeakyReLU(negative_slope=0.1), W2, nn.LeakyReLU(negative_slope=0.1), )
+        init_weight(W3.weight, 'xavier_uniform_', 'linear')
+        init_bias(W3.bias)
+
+        self.W = nn.Sequential(W1, nn.LeakyReLU(negative_slope=0.1), W2, nn.LeakyReLU(negative_slope=0.1), W3)
 
     def forward(self, h):
         identity = h
@@ -49,37 +54,25 @@ def mix_embeddings(ndata, projection):
 class NodeContentMixer(nn.Module):
     def __init__(self, n_content_dims, feature_size, width, dropout, depth):
         super(NodeContentMixer, self).__init__()
-        W = nn.Linear(n_content_dims, width)
+        W = nn.Linear(n_content_dims, feature_size)
         init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W.bias)
-        self.w1 = nn.Sequential(W, nn.LeakyReLU(negative_slope=0.1))
-
-        W = nn.Linear(feature_size, width)
-        init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(W.bias)
-        self.w2 = nn.Sequential(W, nn.LeakyReLU(negative_slope=0.1))
+        w1 = nn.Sequential(W, nn.LeakyReLU(negative_slope=0.1))
 
         drop = nn.Dropout(dropout)
-        layers = [drop, LinearResnet(width * 2, width)]
+        layers = [w1, drop, LinearResnet(feature_size, feature_size)]
         for _ in range(depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
-            layers.append(LinearResnet(width, width))
-        W = nn.Linear(width, feature_size)
-        init_weight(W.weight, 'xavier_uniform_', 'linear')
-        init_bias(W.bias)
-        drop = nn.Dropout(dropout)
-        layers.append(drop)
-        layers.append(W)
+            layers.append(LinearResnet(feature_size, feature_size))
         self.layers = nn.Sequential(*layers)
 
     def forward(self, ndata):
         c = ndata['content']
         h = ndata['h']
-        c = self.w1(c)
-        h = self.w2(h)
-        h_concat = torch.cat([c, h], 1)
-        return self.layers(h_concat)
+        c = self.layers(c)
+        h = h + c
+        return h
 
 
 class GraphSageConvWithSampling(nn.Module):
@@ -87,7 +80,9 @@ class GraphSageConvWithSampling(nn.Module):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
-        layers = [LinearResnet(feature_size * 2, width)]
+        drop = nn.Dropout(dropout)
+        W1 = nn.Linear(feature_size * 2, width)
+        layers = [W1, drop, nn.LeakyReLU(negative_slope=0.1), LinearResnet(width, width)]
         for _ in range(conv_depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
