@@ -38,6 +38,7 @@ class HybridRecommender(RecommendationBase):
         self.log = getLogger(type(self).__name__)
         self.fast_inference = fast_inference
         self.super_fast_inference = super_fast_inference
+        self.prediction_artifacts = dict()
 
     def __entity_entity_affinities_triplet_trainer__(self,
                                              entity_ids: List[str],
@@ -365,7 +366,8 @@ class HybridRecommender(RecommendationBase):
         svd_model.fit(train)
         svdpp_model = SVDpp(n_factors=n_factors, n_epochs=n_epochs)
         svdpp_model.fit(train)
-        return svdpp_model, svd_model
+        self.prediction_artifacts["svdpp_model"] = svdpp_model
+        self.prediction_artifacts["svd_model"] = svd_model
 
     @abc.abstractmethod
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
@@ -448,12 +450,9 @@ class HybridRecommender(RecommendationBase):
                                                                      user_vectors, item_vectors,
                                                                      self.user_id_to_index, self.item_id_to_index,
                                                                      self.rating_scale, prediction_network_params)
-        self.prediction_artifacts = prediction_artifacts
-        svdpp_model, svd_model = self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
+        self.prediction_artifacts.update(dict(prediction_artifacts))
+        self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
                                              self.user_id_to_index, self.item_id_to_index, self.rating_scale, **svd_params)
-        self.prediction_artifacts["svdpp_model"] = svdpp_model
-        self.prediction_artifacts["svd_model"] = svd_model
-
 
         self.log.debug("Fit Method, Before KNN, Unit Length Violations:: user = %s, item = %s",
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
