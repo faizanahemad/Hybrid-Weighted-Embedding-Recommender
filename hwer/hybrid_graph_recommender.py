@@ -1,13 +1,9 @@
-import os
 import time
 from typing import List, Dict, Tuple, Optional
 
-import networkx as nx
-from gensim.models import Word2Vec
+import numpy as np
 from more_itertools import flatten
-from node2vec import Node2Vec
 
-from .gcn import *
 from .logging import getLogger
 from .random_walk import *
 from .svdpp_hybrid import SVDppHybrid
@@ -30,6 +26,7 @@ class HybridGCNRec(SVDppHybrid):
                              user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                              n_output_dims: int,
                              hyperparams: Dict):
+        from gensim.models import Word2Vec
         walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 40
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
         window = hyperparams["window"] if "window" in hyperparams else 4
@@ -95,6 +92,8 @@ class HybridGCNRec(SVDppHybrid):
                              user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                              n_output_dims: int,
                              hyperparams: Dict):
+        import networkx as nx
+        from node2vec import Node2Vec
         walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 60
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 140
         window = hyperparams["window"] if "window" in hyperparams else 4
@@ -115,58 +114,6 @@ class HybridGCNRec(SVDppHybrid):
         user_vectors = np.array([n2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([n2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
         return user_vectors, item_vectors
-
-    def __user_item_affinities_ns_data_gen_fn__(self,
-                                                user_ids: List[str], item_ids: List[str],
-                                                user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                                hyperparams: Dict):
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        ns = hyperparams["ns"] if "ns" in hyperparams else 50
-        total_users = len(user_ids)
-        total_items = len(item_ids)
-
-        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
-            graph = Graph().read_edgelist(affinities)
-            walker = Walker(graph, p=2, q=4)
-            walker.preprocess_transition_probs()
-            randomstate = np.random.default_rng(np.random.randint(0, 1000000))
-            total_entities = total_users + total_items
-
-            def get_one_example(i, j):
-                user = i
-                second_item = j
-                negs = randomstate.choice(total_entities, 100, replace=False, shuffle=True)
-                return (user, second_item, negs), 0
-
-            def generator1():
-                for walk in walker.simulate_walks_generator(5, walk_length=3):
-                    nodes = list(set(walk))
-                    combinations = [(x, y) for i, x in enumerate(nodes) for y in nodes[i + 1:]]
-                    generated = [get_one_example(u, v) for u, v in combinations]
-                    for g in generated:
-                        yield g
-
-            def generator():
-                for i in range(0, len(affinities), batch_size):
-                    start = i
-                    end = min(i + batch_size, len(affinities))
-                    combinations = []
-                    for u, v, r in affinities[start:end]:
-                        w1 = walker.node2vec_walk(3, u)
-                        w2 = walker.node2vec_walk(3, v)
-                        c1 = [(x, y) for i, x in enumerate(w1) for y in w1[i + 1:]]
-                        c2 = [(x, y) for i, x in enumerate(w2) for y in w2[i + 1:]]
-                        c = [(u, v)] + c1 + c2
-                        combinations.extend(c)
-
-                    generated = [get_one_example(u, v) for u, v in combinations]
-                    for g in generated:
-                        yield g
-
-            return generator
-
-        return generate_training_samples
 
     def __node2vec_triplet_trainer__(self,
                                      user_ids: List[str], item_ids: List[str],
@@ -210,6 +157,7 @@ class HybridGCNRec(SVDppHybrid):
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
                                   conv_depth, network_width,
                                   gcn_dropout, g_train, triplet_vectors, margin):
+        from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling
         self.log.info("Getting Triplet Model for GCN")
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
                                                                 gcn_layers, gcn_dropout, False, g_train, triplet_vectors),
@@ -260,6 +208,10 @@ class HybridGCNRec(SVDppHybrid):
 
         triplet_vectors = np.concatenate(
             (np.zeros((1, user_triplet_vectors.shape[1])), user_triplet_vectors, item_triplet_vectors))
+        from .gcn import build_dgl_graph
+        import torch
+        import torch.nn.functional as F
+        import dgl
         triplet_vectors = torch.FloatTensor(triplet_vectors)
 
         total_users = len(user_ids)
@@ -415,6 +367,9 @@ class HybridGCNRec(SVDppHybrid):
                                      user_vectors: np.ndarray, item_vectors: np.ndarray,
                                      user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
+        from .gcn import build_dgl_graph, GraphSageWithSampling, GraphSAGERecommenderImplicit, get_score
+        import torch
+        import dgl
         self.log.debug(
             "Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
             (user_vectors.shape, item_vectors.shape), (user_content_vectors.shape, item_content_vectors.shape))
@@ -590,6 +545,7 @@ class HybridGCNRec(SVDppHybrid):
         return prediction_artifacts
 
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+        from .gcn import get_score
         h = self.prediction_artifacts["vectors"]
         mu = self.prediction_artifacts["mu"]
         bias = self.prediction_artifacts["bias"]

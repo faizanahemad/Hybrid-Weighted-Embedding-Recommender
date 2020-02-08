@@ -1,9 +1,9 @@
 import os
 import time
 from typing import List, Dict, Tuple, Optional
+import torch
+import numpy as np
 
-from .gcn import build_dgl_graph
-from .gcn_res import *
 from .hybrid_graph_recommender import HybridGCNRec
 from .logging import getLogger
 
@@ -20,6 +20,7 @@ class HybridGCNRecResnet(HybridGCNRec):
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims,
                                   gcn_layers, conv_depth, network_width,
                                   gcn_dropout, g_train, triplet_vectors, margin):
+        from .gcn_res import GraphSAGETripletEmbedding, GraphSageWithSampling
         self.log.info("Getting Triplet Model for GCN RESNET")
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims, network_width,
                                                                 gcn_layers, conv_depth, gcn_dropout, g_train,
@@ -61,6 +62,9 @@ class HybridGCNRecResnet(HybridGCNRec):
                                      user_vectors: np.ndarray, item_vectors: np.ndarray,
                                      user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
+        from .gcn_res import GraphSAGERecommenderImplicitResnet, GraphSageWithSampling
+        from .gcn import build_dgl_graph
+        import dgl
         self.log.debug(
             "Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
             (user_vectors.shape, item_vectors.shape), (user_content_vectors.shape, item_content_vectors.shape))
