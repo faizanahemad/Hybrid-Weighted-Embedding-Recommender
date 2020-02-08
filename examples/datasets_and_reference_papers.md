@@ -26,3 +26,7 @@ Interactions Modeling](https://arxiv.org/pdf/1810.12027.pdf)
     - https://www.researchgate.net/publication/318763945_AutoSVD_An_Efficient_Hybrid_Collaborative_Filtering_Model_via_Contractive_Auto-encoders/figures?lo=1 and https://www.researchgate.net/publication/318763945_AutoSVD_An_Efficient_Hybrid_Collaborative_Filtering_Model_via_Contractive_Auto-encoders
     - https://www.librec.net/release/v1.3/example.html
     - https://paperswithcode.com/sota/collaborative-filtering-on-movielens-100k
+- ML-1M
+    - https://www.researchgate.net/publication/303698729_A_Neural_Autoregressive_Approach_to_Collaborative_Filtering/figures?lo=1
+    - https://github.com/microsoft/recommenders/blob/master/benchmarks/movielens.ipynb
+    - https://paperswithcode.com/sota/collaborative-filtering-on-movielens-1m

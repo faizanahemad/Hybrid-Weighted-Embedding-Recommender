@@ -1,16 +1,12 @@
 
 import pandas as pd
 from bidict import bidict
-from sklearn.model_selection import StratifiedKFold
-from sklearn.model_selection import train_test_split
-from surprise.prediction_algorithms.co_clustering import CoClustering
 
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
 pd.options.display.width = 0
 import warnings
-import os
 import copy
 from collections import defaultdict
 import operator
@@ -23,16 +19,9 @@ import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import describe
-from surprise import SVD, SVDpp, NormalPredictor
-from surprise import accuracy
-from surprise import BaselineOnly
-from surprise import Dataset
-from surprise import Reader
-from ast import literal_eval
-import networkx as nx
 
 from .utils import average_precision, reciprocal_rank, ndcg
-from . import SVDppHybrid, ContentRecommendation, HybridGCNRec, HybridGCNRecResnet
+
 
 
 def surprise_get_topk(model, users, items, k=200) -> Dict[str, List[Tuple[str, float]]]:
@@ -112,6 +101,12 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
 
 
 def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}, rating_scale=(1, 5)):
+    from surprise import SVD, SVDpp, NormalPredictor
+    from surprise import accuracy
+    from surprise import BaselineOnly
+    from surprise import Dataset
+    from surprise import Reader
+    from surprise.prediction_algorithms.co_clustering import CoClustering
     train_affinities = train
     validation_affinities = test
     items = list(set([i for u, i, r in train]))
@@ -166,6 +161,7 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
 def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
                       get_data_mappers, rating_scale, algo,
                       enable_error_analysis=False, enable_baselines=False):
+    from . import SVDppHybrid, HybridGCNRec, HybridGCNRecResnet
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
     if algo == "svdpp_hybrid":
@@ -245,6 +241,7 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
 
 def test_content_only(train_affinities, validation_affinities, users, items, hyperparameters,
                       get_data_mappers, rating_scale, enable_error_analysis=False):
+    from . import ContentRecommendation
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
     recsys = ContentRecommendation(embedding_mapper=embedding_mapper,
@@ -558,6 +555,7 @@ def error_analysis(train_affinities, validation_affinities, error_df, title):
 
 def get_small_subset(df_user, df_item, ratings,
                      cores):
+    import networkx as nx
     users = list(set([u for u, i, r in ratings.values]))
     items = list(set([i for u, i, r in ratings.values]))
     user_id_to_index = bidict(zip(users, list(range(len(users)))))

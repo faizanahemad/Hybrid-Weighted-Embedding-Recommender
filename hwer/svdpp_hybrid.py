@@ -1,25 +1,14 @@
 import time
 from collections import Counter
-from typing import List, Dict, Tuple, Optional
 from collections import defaultdict
+from typing import List, Dict, Tuple, Optional
+
 import numpy as np
-import pandas as pd
-import tensorflow as tf
-import tensorflow.keras.backend as K
-from bidict import bidict
 from more_itertools import flatten
-from sklearn.model_selection import StratifiedKFold
-from surprise import Dataset
-from surprise import Reader
-from surprise import SVDpp
-from tensorflow import keras
 
 from .hybrid_recommender import HybridRecommender
 from .logging import getLogger
-from .recommendation_base import EntityType
-from .utils import RatingPredRegularization, get_rng, \
-    LRSchedule, resnet_layer_with_content, ScaledGlorotNormal, root_mean_squared_error, mean_absolute_error, \
-    normalize_affinity_scores_by_user_item_bs
+from .utils import get_rng, normalize_affinity_scores_by_user_item_bs
 
 
 class SVDppHybrid(HybridRecommender):
@@ -106,6 +95,7 @@ class SVDppHybrid(HybridRecommender):
                           user_vectors: np.ndarray, item_vectors: np.ndarray,
                           user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                           rating_scale: Tuple[float, float], hyperparams: Dict):
+        import tensorflow as tf
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
         noise_augmentation = hyperparams["noise_augmentation"] if "noise_augmentation" in hyperparams else 0
@@ -155,6 +145,10 @@ class SVDppHybrid(HybridRecommender):
                                      user_vectors: np.ndarray, item_vectors: np.ndarray,
                                      user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
+        from tensorflow import keras
+        import tensorflow as tf
+        import tensorflow.keras.backend as K
+        from .tf_utils import LRSchedule, resnet_layer_with_content, root_mean_squared_error, mean_absolute_error
         self.log.debug(
             "Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
             (user_vectors.shape, item_vectors.shape), (user_content_vectors.shape, item_content_vectors.shape))
@@ -312,6 +306,7 @@ class SVDppHybrid(HybridRecommender):
         return prediction_artifacts
 
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
+        import tensorflow as tf
         start = time.time()
         model = self.prediction_artifacts["model"]
         ratings_count_by_user = self.prediction_artifacts["ratings_count_by_user"]

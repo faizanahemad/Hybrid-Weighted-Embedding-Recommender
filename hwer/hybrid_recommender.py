@@ -1,27 +1,18 @@
 import abc
 import operator
 import time
-from collections import defaultdict
 from typing import List, Dict, Tuple, Optional
 
 import numpy as np
-import tensorflow as tf
-import tensorflow.keras.backend as K
-from sklearn.preprocessing import StandardScaler
-from tensorflow import keras
-
-from surprise import Dataset
-from surprise import Reader
-from surprise import SVDpp, SVD
 import pandas as pd
+
 
 from .content_recommender import ContentRecommendation
 from .logging import getLogger
 from .recommendation_base import EntityType
 from .recommendation_base import RecommendationBase, FeatureSet
-from .utils import unit_length, UnitLengthRegularization, unit_length_violations, \
-    LRSchedule, \
-    resnet_layer_with_content
+from .utils import unit_length, unit_length_violations
+
 
 
 class HybridRecommender(RecommendationBase):
@@ -40,146 +31,6 @@ class HybridRecommender(RecommendationBase):
         self.super_fast_inference = super_fast_inference
         self.prediction_artifacts = dict()
 
-    def __entity_entity_affinities_triplet_trainer__(self,
-                                             entity_ids: List[str],
-                                             entity_entity_affinities: List[Tuple[str, str, float]],
-                                             entity_id_to_index: Dict[str, int],
-                                             vectors: np.ndarray,
-                                             n_output_dims: int,
-                                             hyperparams: Dict) -> np.ndarray:
-        self.log.debug("Start Training Entity Affinities, n_entities = %s, n_samples = %s, in_dims = %s, out_dims = %s",
-                       len(entity_ids), len(entity_entity_affinities), vectors.shape, n_output_dims)
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
-        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
-        random_pair_proba = hyperparams["random_pair_proba"] if "random_pair_proba" in hyperparams else 0.2
-        random_positive_weight = hyperparams[
-            "random_positive_weight"] if "random_positive_weight" in hyperparams else 0.1
-        random_negative_weight = hyperparams[
-            "random_negative_weight"] if "random_negative_weight" in hyperparams else 0.25
-        margin = hyperparams["margin"] if "margin" in hyperparams else 0.1
-
-        total_items = len(entity_ids)
-        aff_range = np.max([r for u1, u2, r in entity_entity_affinities]) - np.min([r for u1, u2, r in entity_entity_affinities])
-        random_positive_weight = random_positive_weight * aff_range
-        random_negative_weight = random_negative_weight * aff_range
-
-        assert np.sum(np.isnan(vectors)) == 0
-
-        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            item_close_dict = defaultdict(list)
-            item_far_dict = defaultdict(list)
-            affinities = [(entity_id_to_index[i], entity_id_to_index[j], r) for i, j, r in affinities]
-            for i, j, r in affinities:
-                if r > 0:
-                    item_close_dict[i].append((j, r))
-                    item_close_dict[j].append((i, r))
-
-                if r <= 0:
-                    item_far_dict[i].append((j, r))
-                    item_far_dict[j].append((i, r))
-
-            def triplet_wt_fn(x): return 1 + np.log1p(np.abs(x / aff_range))
-
-            def get_one_example(i, j, r):
-                first_item = i
-                second_item = j
-                random_item = np.random.randint(0, total_items)
-                choose_random_pair = np.random.rand() < (random_pair_proba if r > 0 else random_pair_proba / 100)
-                if r < 0:
-                    distant_item = second_item
-                    distant_item_weight = r
-
-                    if choose_random_pair or i not in item_close_dict:
-                        second_item, close_item_weight = random_item, random_positive_weight
-
-                    else:
-                        second_item, close_item_weight = item_close_dict[i][
-                            np.random.randint(0, len(item_close_dict[i]))]
-                else:
-                    close_item_weight = r
-                    if choose_random_pair or i not in item_far_dict:
-                        distant_item, distant_item_weight = random_item, random_negative_weight
-
-                    else:
-                        distant_item, distant_item_weight = item_far_dict[i][
-                            np.random.randint(0, len(item_far_dict[i]))]
-
-                close_item_weight = triplet_wt_fn(close_item_weight)
-                distant_item_weight = triplet_wt_fn(distant_item_weight)
-                return (first_item, second_item, distant_item, close_item_weight, distant_item_weight), 0
-
-            def generator():
-                for i in range(0, len(affinities), batch_size*4):
-                    start = i
-                    end = min(i + batch_size*4, len(affinities))
-                    generated = [get_one_example(u, v, w) for u, v, w in affinities[start:end]]
-                    for g in generated:
-                        yield g
-            return generator
-
-        output_shapes = (((), (), (), (), ()), ())
-        output_types = ((tf.int64, tf.int64, tf.int64, tf.float32, tf.float32), tf.float32)
-
-        train = tf.data.Dataset.from_generator(generate_training_samples(entity_entity_affinities),
-                                               output_types=output_types, output_shapes=output_shapes, )
-        train = train.shuffle(batch_size*10).batch(batch_size).prefetch(32)
-
-        input_1 = keras.Input(shape=(1,))
-        input_2 = keras.Input(shape=(1,))
-        input_3 = keras.Input(shape=(1,))
-
-        close_weight = keras.Input(shape=(1,))
-        far_weight = keras.Input(shape=(1,))
-
-        def build_base_network(embedding_size, vectors):
-            i1 = keras.Input(shape=(1,))
-
-            embeddings_initializer = tf.keras.initializers.Constant(vectors)
-            embeddings = keras.layers.Embedding(len(entity_ids), embedding_size, input_length=1,
-                                                embeddings_initializer=embeddings_initializer)
-            item = embeddings(i1)
-            item = tf.keras.layers.Flatten()(item)
-            dense = keras.layers.Dense(embedding_size, activation="tanh", use_bias=False, kernel_initializer="glorot_uniform")
-            item = dense(item)
-            item = UnitLengthRegularization(l1=0.1)(item)
-            # item = tf.keras.layers.Lambda(lambda x: tf.math.l2_normalize(x, axis=-1))(item)
-            item = K.l2_normalize(item, axis=-1)
-            base_network = keras.Model(inputs=i1, outputs=item)
-            return base_network
-
-        bn = build_base_network(n_output_dims, vectors)
-
-        item_1 = bn(input_1)
-        item_2 = bn(input_2)
-        item_3 = bn(input_3)
-
-        i1_i2_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_2])
-        i1_i2_dist = 1 - i1_i2_dist
-        i1_i2_dist = close_weight * i1_i2_dist
-
-        i1_i3_dist = tf.keras.layers.Dot(axes=1, normalize=True)([item_1, item_3])
-        i1_i3_dist = 1 - i1_i3_dist
-        i1_i3_dist = i1_i3_dist / K.abs(far_weight)
-
-        loss = K.relu(i1_i2_dist - i1_i3_dist + margin)
-        model = keras.Model(inputs=[input_1, input_2, input_3, close_weight, far_weight],
-                            outputs=[loss])
-        encoder = bn
-        learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(entity_entity_affinities))
-        sgd = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9, nesterov=True)
-        model.compile(optimizer=sgd,
-                      loss=['mean_squared_error'], metrics=["mean_squared_error"])
-
-        model.fit(train, epochs=epochs, callbacks=[], verbose=verbose)
-
-        vectors = encoder.predict(
-            tf.data.Dataset.from_tensor_slices([entity_id_to_index[i] for i in entity_ids]).batch(batch_size).prefetch(
-                16))
-        self.log.debug("End Training Entity Affinities, Unit Length Violations = %s", unit_length_violations(vectors, axis=1))
-        return vectors
-
     def __build_collaborative_embeddings__(self, user_item_affinities: List[Tuple[str, str, float]],
                                            item_item_affinities: List[Tuple[str, str, bool]],
                                            user_user_affinities: List[Tuple[str, str, bool]],
@@ -187,7 +38,7 @@ class HybridRecommender(RecommendationBase):
                                            user_vectors: np.ndarray, item_vectors: np.ndarray,
                                            hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
 
-        entity_affiity_fn = self.__entity_entity_affinities_triplet_trainer__
+        entity_affiity_fn = None
         user_item_affinity_fn = self.__user_item_affinities_triplet_trainer__
 
         if len(item_item_affinities) > 0:
@@ -258,6 +109,8 @@ class HybridRecommender(RecommendationBase):
                                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                                  hyperparams: Dict):
 
+        import tensorflow as tf
+        import tensorflow.keras.backend as K
         output_shapes = (((), (), ()), ())
         output_types = ((tf.int64, tf.int64, tf.int64), tf.float32)
         generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
@@ -275,6 +128,9 @@ class HybridRecommender(RecommendationBase):
                                          n_output_dims: int,
                                          hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
 
+        import tensorflow as tf
+        import tensorflow.keras.backend as K
+        from tensorflow import keras
         self.log.debug("Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
                        len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
@@ -338,6 +194,7 @@ class HybridRecommender(RecommendationBase):
                             outputs=[loss])
 
         encoder = bn
+        from .tf_utils import LRSchedule
         learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
         sgd = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
         model.compile(optimizer=sgd,
@@ -357,6 +214,9 @@ class HybridRecommender(RecommendationBase):
                                  user_item_affinities: List[Tuple[str, str, float]],
                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                  rating_scale: Tuple[float, float], **svd_params):
+        from surprise import Dataset
+        from surprise import Reader
+        from surprise import SVDpp, SVD
         reader = Reader(rating_scale=rating_scale)
         train = pd.DataFrame(user_item_affinities)
         train = Dataset.load_from_df(train, reader).build_full_trainset()

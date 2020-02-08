@@ -2,7 +2,7 @@ from typing import List, Dict, Tuple, Optional
 
 import numpy as np
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import RobustScaler, StandardScaler
+from sklearn.preprocessing import StandardScaler
 
 from .content_embedders import ContentEmbeddingBase
 from .logging import getLogger

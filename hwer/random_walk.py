@@ -1,19 +1,13 @@
 from __future__ import print_function
+
+import os
 import random
-import numpy as np
-import multiprocessing
 
 # from time import time
-import networkx as nx
-import pickle as pkl
-import numpy as np
-import scipy.sparse as sp
-import os
-from joblib import Parallel, delayed
-import random
 
 
 def read_edgelist(edge_list, weighted=False):
+    import networkx as nx
     G = nx.DiGraph()
 
     def read_unweighted(l):
@@ -42,6 +36,7 @@ def read_edgelist(edge_list, weighted=False):
 
 class Walker:
     def __init__(self, G, p, q, workers=None):
+        import networkx as nx
         assert type(G) == nx.classes.digraph.DiGraph
         self.p = p
         self.q = q

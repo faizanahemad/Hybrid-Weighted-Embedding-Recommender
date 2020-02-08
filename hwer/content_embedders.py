@@ -2,10 +2,8 @@ import abc
 import os
 from typing import Union
 
-import fasttext
 import numpy as np
 import pandas as pd
-from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings
 from scipy.stats.mstats import rankdata
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.preprocessing import MinMaxScaler
@@ -165,12 +163,14 @@ class FasttextEmbedding(ContentEmbeddingBase):
         self.log = getLogger(type(self).__name__)
 
     def get_sentence_vector(self, text):
+        import fasttext
         result = self.text_model.get_sentence_vector(text)
         if np.sum(result[0:5]) == 0:
             result = np.random.randn(self.n_dims)
         return result
 
     def fit(self, feature: Feature, **kwargs):
+        import fasttext
         super().fit(feature, **kwargs)
         assert feature.feature_type == FeatureType.STR
         if self.fasttext_file is None:
@@ -267,12 +267,14 @@ class NumericEmbedding(ContentEmbeddingBase):
 
 class FlairGlove100Embedding(ContentEmbeddingBase):
     def __init__(self, make_unit_length=True):
+        from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings
         super().__init__(n_dims=100, make_unit_length=make_unit_length)
         embeddings = [WordEmbeddings('glove')]
         self.embeddings = DocumentPoolEmbeddings(embeddings)
         self.log = getLogger(type(self).__name__)
 
     def get_sentence_vector(self, text):
+        from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings
         sentence = Sentence(clean_text(text))
         # noinspection PyUnresolvedReferences
         _ = self.embeddings.embed(sentence)
@@ -299,6 +301,7 @@ class FlairGlove100Embedding(ContentEmbeddingBase):
 
 class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
     def __init__(self, make_unit_length=True):
+        from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings
         super().__init__(n_dims=200, make_unit_length=make_unit_length)
         embeddings = [WordEmbeddings('glove'), BytePairEmbeddings('en')]
         self.embeddings = DocumentPoolEmbeddings(embeddings)
@@ -306,6 +309,7 @@ class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
 
     # noinspection PyUnresolvedReferences
     def get_sentence_vector(self, text):
+        from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings
         sentence = Sentence(clean_text(text))
         _ = self.embeddings.embed(sentence)
         a = sentence.get_embedding()

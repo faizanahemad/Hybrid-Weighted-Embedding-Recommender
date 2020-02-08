@@ -1,24 +1,17 @@
 import re
-import time
 from collections import defaultdict
 from typing import List, Dict, Tuple
-from surprise import BaselineOnly
-from surprise import Dataset
-from surprise import Reader
-import nmslib
+
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-import tensorflow.keras.backend as K
 from numpy import dot
 from numpy.linalg import norm
 from scipy.special import comb
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
-from tensorflow import keras
-import operator
-
-from .logging import getLogger
+from surprise import BaselineOnly
+from surprise import Dataset
+from surprise import Reader
 
 
 def locality_preserving_dimensionality_reduction(data: np.ndarray, n_neighbors=100, max_similarity=0.1, ):
@@ -33,22 +26,6 @@ def locality_preserving_dimensionality_reduction(data: np.ndarray, n_neighbors=1
     # Anchor,
     num_points = data.shape[0]
     n_init_dims = data.shape[1]
-
-
-def get_nms_query_method(data, k=1000,
-                         index_time_params={'M': 15, 'indexThreadQty': 16, 'efConstruction': 200, 'post': 0,
-                                            'delaunay_type': 1}):
-    query_time_params = {'efSearch': k}
-    nms_index = nmslib.init(method='hnsw', space='cosinesimil')
-    nms_index.addDataPointBatch(data)
-    nms_index.createIndex(index_time_params, print_progress=True)
-    nms_index.setQueryTimeParams(query_time_params)
-
-    def query_method(v):
-        neighbors, dist = nms_index.knnQuery(v, k=k)
-        return dist, neighbors
-
-    return query_method, nms_index
 
 
 def cos_sim(a, b):
@@ -219,6 +196,9 @@ def compare_embedding_global_distance_mismatches(high_dim_embeddigs, low_dim_emb
 
 
 def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
+    import tensorflow as tf
+    import tensorflow.keras.backend as K
+    from tensorflow import keras
     loss = "mean_squared_error"
     es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=5, verbose=0, )
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=4, min_lr=0.0001)
@@ -351,119 +331,6 @@ unit_length = repeat_args_wrapper(unit_length)
 unit_length_violations = repeat_args_wrapper(unit_length_violations)
 
 
-class UnitLengthRegularizer(keras.regularizers.Regularizer):
-    """Regularizer for Making Vectors Unit Length.
-    Arguments:
-      l1: Float; L1 regularization factor.
-      l2: Float; L2 regularization factor.
-    """
-
-    def __init__(self, l1=0., l2=0.):  # pylint: disable=redefined-outer-name
-        self.l1 = K.cast_to_floatx(l1)
-        self.l2 = K.cast_to_floatx(l2)
-
-    def __call__(self, x):
-        if not self.l1 and not self.l2:
-            return K.constant(0.)
-        regularization = 0.
-        vl = K.sqrt(K.sum(K.square(x), axis=1))
-        x = K.sum(K.exp(K.abs(K.log(vl))))
-        if self.l1:
-            regularization += self.l1 * x
-        if self.l2:
-            regularization += self.l2 * K.square(x)
-        return regularization
-
-    def get_config(self):
-        return {'l1': float(self.l1), 'l2': float(self.l2)}
-
-
-class UnitLengthRegularization(keras.layers.Layer):
-    def __init__(self, l1=0., l2=0., **kwargs):
-        super(UnitLengthRegularization, self).__init__(
-            activity_regularizer=UnitLengthRegularizer(l1=l1, l2=l2), **kwargs)
-        self.supports_masking = True
-        self.l1 = l1
-        self.l2 = l2
-
-    def compute_output_shape(self, input_shape):
-        return input_shape
-
-
-class RatingPredRegularizer(keras.regularizers.Regularizer):
-    def __init__(self, max_r=1.0, min_r=-1.0, l1=0., l2=0.):  # pylint: disable=redefined-outer-name
-        """
-        Regularize Predictions for keeping in a specific range
-
-        :param max_r:
-        :param min_r:
-        :param l1:
-        :param l2:
-        """
-        self.l1 = K.cast_to_floatx(l1)
-        self.l2 = K.cast_to_floatx(l2)
-        self.max_r = max_r
-        self.min_r = min_r
-
-    def __call__(self, x):
-        if not self.l1 and not self.l2:
-            return K.constant(0.)
-        regularization = 0.
-        x1 = K.clip(x, np.NINF, self.min_r)
-        x2 = K.clip(x, self.max_r, np.Inf)
-        x = K.sum(K.square(x2 - self.max_r)) + K.sum(K.square(x1 - self.min_r))
-        if self.l1:
-            regularization += self.l1 * K.abs(x)
-        if self.l2:
-            regularization += self.l2 * K.square(x)
-        return regularization
-
-
-class RatingPredRegularization(keras.layers.Layer):
-    def __init__(self, max_r=1.0, min_r=-1.0, l1=0., l2=0., **kwargs):
-        super(RatingPredRegularization, self).__init__(
-            activity_regularizer=RatingPredRegularizer(max_r=max_r, min_r=min_r, l1=l1, l2=l2), **kwargs)
-        self.supports_masking = True
-        self.l1 = l1
-        self.l2 = l2
-
-    def compute_output_shape(self, input_shape):
-        return input_shape
-
-    def get_config(self):
-        config = {'l1': self.l1, 'l2': self.l2}
-        base_config = super(RatingPredRegularization, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
-
-class LRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
-    def __init__(self, lr, epochs, batch_size, n_examples, divisor=10):
-        super(LRSchedule, self).__init__()
-        self.start_lr = lr
-        self.lrs = []
-        self.log = getLogger(type(self).__name__)
-        self.step = 0
-        self.dtype = tf.float64
-        self.epochs = epochs
-        self.batch_size = batch_size
-        self.n_examples = n_examples
-        self.lr = lr
-        self.divisor = divisor
-
-    def __call__(self, step):
-        steps_per_epoch = int(np.ceil(self.n_examples / self.batch_size))
-        total_steps = steps_per_epoch * self.epochs
-        lr = self.start_lr
-        step = self.step
-        div = self.divisor
-        new_lr = np.interp(float(K.eval(step)), [0, total_steps / 3, 0.8 * total_steps, total_steps],
-                           [lr / div, lr, lr / div, lr / (2*div)])
-        self.lrs.append(new_lr)
-        self.step += 1
-        self.lr = new_lr
-        return new_lr
-
-
 def get_rng(noise_augmentation):
     if noise_augmentation:
         def rng(dims):
@@ -472,50 +339,6 @@ def get_rng(noise_augmentation):
 
         return rng
     return lambda dims: np.zeros(dims) if dims > 1 else 0
-
-
-def resnet_layer_with_content(n_dims, n_out_dims, dropout, kernel_l2, depth=2):
-    assert n_dims >= n_out_dims
-
-    def layer(x, content=None):
-        if content is not None:
-            h = K.concatenate([x, content])
-        else:
-            h = x
-        for i in range(1, depth + 1):
-            dims = n_dims if i < depth else n_out_dims
-            h = keras.layers.Dense(dims, activation="linear", kernel_initializer=ScaledGlorotNormal(),
-                                   use_bias=False,
-                                   kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(h)
-            h = tf.keras.activations.relu(h, alpha=0.1)
-            # h = tf.keras.layers.BatchNormalization()(h)
-        if x.shape[1] != n_out_dims:
-            x = keras.layers.Dense(n_out_dims, activation="linear", kernel_initializer=ScaledGlorotNormal(),
-                                   use_bias=False,
-                                   kernel_regularizer=keras.regularizers.l1_l2(l2=kernel_l2))(x)
-        x = h + x
-        x = tf.keras.layers.Dropout(dropout)(x)
-        return x
-
-    return layer
-
-
-class ScaledGlorotNormal(tf.keras.initializers.VarianceScaling):
-    def __init__(self, scale=1.0, seed=None):
-        super(ScaledGlorotNormal, self).__init__(
-            scale=scale,
-            mode="fan_avg",
-            distribution="truncated_normal",
-            seed=seed)
-
-
-def root_mean_squared_error(y_true, y_pred):
-    return K.sqrt(K.mean(K.square(y_pred - y_true)))
-
-
-
-def mean_absolute_error(y_true, y_pred):
-    return K.mean(K.abs(y_pred - y_true))
 
 
 class UserNotFoundException(Exception):
