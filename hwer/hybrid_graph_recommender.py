@@ -237,7 +237,7 @@ class HybridGCNRec(SVDppHybrid):
                                   gcn_dropout, g_train, triplet_vectors, margin):
         self.log.info("Getting Triplet Model for GCN")
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
-                                                                gcn_layers, gcn_dropout, g_train, triplet_vectors),
+                                                                gcn_layers, gcn_dropout, False, g_train, triplet_vectors),
                                           margin)
         return model
 
@@ -449,7 +449,6 @@ class HybridGCNRec(SVDppHybrid):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 2
         bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.0
-        padding_length = hyperparams["padding_length"] if "padding_length" in hyperparams else 100
         use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
@@ -488,8 +487,8 @@ class HybridGCNRec(SVDppHybrid):
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicit(
-            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, g_train),
-            mu, biases, padding_length=padding_length, zeroed_indices=zeroed_indices)
+            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, True, g_train),
+            mu, biases, zeroed_indices=zeroed_indices)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
         user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1, r) for u, i, r in
                                 user_item_affinities]
@@ -565,6 +564,7 @@ class HybridGCNRec(SVDppHybrid):
                 total_loss = 0.0
                 for s, d, r, nodeflow in zip(src_batches, dst_batches, rating_batches, sampler):
                     score = model.forward(nodeflow, s, d)
+                    # r = r + torch.randn(r.shape)
                     loss = ((score - r) ** 2).mean()
                     total_loss = total_loss + loss.item()
                     opt.zero_grad()

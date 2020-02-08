@@ -21,7 +21,7 @@ class LinearResnet(nn.Module):
             init_weight(self.iscale.weight, 'xavier_uniform_', 'linear')
             init_bias(self.iscale.bias)
         W1 = nn.Linear(input_size, output_size)
-        bn1 = torch.nn.BatchNorm1d(output_size)
+        self.bn1 = torch.nn.BatchNorm1d(output_size)
         W2 = nn.Linear(output_size, output_size)
         bn2 = torch.nn.BatchNorm1d(output_size)
 
@@ -38,6 +38,7 @@ class LinearResnet(nn.Module):
         self.W = nn.Sequential(W1, nn.LeakyReLU(negative_slope=0.1), W2, nn.LeakyReLU(negative_slope=0.1), W3)
 
     def forward(self, h):
+        h = self.bn1(h)
         identity = h
         if self.scaling:
             identity = self.iscale(identity)
@@ -54,10 +55,11 @@ def mix_embeddings(ndata, projection):
 class NodeContentMixer(nn.Module):
     def __init__(self, n_content_dims, feature_size, width, dropout, depth):
         super(NodeContentMixer, self).__init__()
+        drop = nn.Dropout(dropout)
         W = nn.Linear(n_content_dims, feature_size)
         init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W.bias)
-        w1 = nn.Sequential(W, nn.LeakyReLU(negative_slope=0.1))
+        w1 = nn.Sequential(drop, W, nn.LeakyReLU(negative_slope=0.1))
 
         drop = nn.Dropout(dropout)
         layers = [w1, drop, LinearResnet(feature_size, feature_size)]
@@ -87,8 +89,6 @@ class GraphSageConvWithSampling(nn.Module):
             drop = nn.Dropout(dropout)
             layers.append(drop)
             layers.append(LinearResnet(width, width))
-        drop = nn.Dropout(dropout)
-        layers.append(drop)
         W = nn.Linear(width, feature_size)
         layers.append(W)
         if activation_last_layer:

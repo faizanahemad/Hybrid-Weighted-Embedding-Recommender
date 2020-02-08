@@ -95,6 +95,7 @@ class ContentRecommendation(RecommendationBase):
                 if np.sum(np.isnan(embedding)) != 0:
                     self.log.info("User Embedding for Item Feature: Feature = %s, Nan Users = %s", feature_name, get_nan_rows(embedding))
                 assert np.sum(np.isnan(embedding)) == 0
+                embedding = unit_length(embedding, axis=1)
                 user_embeddings[feature_name] = embedding
 
         # For features which are not in user_data take average of item_features, while for ones present follow above method

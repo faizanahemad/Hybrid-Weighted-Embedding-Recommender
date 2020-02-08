@@ -6,7 +6,8 @@ logging.basicConfig(
     datefmt='%Y-%m-%d %H:%M:%S')
 
 
-def getLogger(name, level=os.environ.get("LOGLEVEL", "INFO")):
+def getLogger(name, level=None):
+    level = os.environ.get("LOGLEVEL", "INFO") if level is None else level
     log = logging.getLogger(name)
     log.setLevel(level)
     return log

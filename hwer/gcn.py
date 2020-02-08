@@ -8,6 +8,34 @@ import numpy as np
 dgl.load_backend('pytorch')
 
 
+class GaussianNoise(nn.Module):
+    """Gaussian noise regularizer.
+
+    Args:
+        sigma (float, optional): relative standard deviation used to generate the
+            noise. Relative means that it will be multiplied by the magnitude of
+            the value your are adding the noise to. This means that sigma can be
+            the same regardless of the scale of the vector.
+        is_relative_detach (bool, optional): whether to detach the variable before
+            computing the scale of the noise. If `False` then the scale of the noise
+            won't be seen as a constant but something to optimize: this will bias the
+            network to generate vectors with smaller values.
+    """
+
+    def __init__(self, sigma=0.1, is_relative_detach=True):
+        super().__init__()
+        self.sigma = sigma
+        self.is_relative_detach = is_relative_detach
+        self.noise = torch.tensor(0.0)
+
+    def forward(self, x):
+        if self.training and self.sigma != 0:
+            scale = self.sigma * x.detach() if self.is_relative_detach else self.sigma * x
+            sampled_noise = self.noise.repeat(*x.size()).normal_() * scale
+            x = x + sampled_noise
+        return x
+
+
 def mix_embeddings(ndata, proj):
     """Adds external (categorical and numeric) features into node representation G.ndata['h']"""
     ndata['h'] = ndata['h'] + proj(ndata['content'])
@@ -26,13 +54,15 @@ def init_bias(param):
 
 
 class GraphSageConvWithSampling(nn.Module):
-    def __init__(self, feature_size, dropout, activation):
+    def __init__(self, feature_size, dropout, activation, prediction_layer):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
         self.W = nn.Linear(feature_size * 2, feature_size)
         self.drop = nn.Dropout(dropout)
         self.activation = activation
+        self.prediction_layer = prediction_layer
+        self.noise = GaussianNoise(0.4)
 
         if self.activation is not None:
             init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
@@ -48,13 +78,16 @@ class GraphSageConvWithSampling(nn.Module):
         h_concat = torch.cat([h, h_agg], 1)
         h_concat = self.drop(h_concat)
         h_new = self.W(h_concat)
+        h_new = self.noise(h_new)
         if self.activation is not None:
             h_new = self.activation(h_new, negative_slope=0.1)
+        # if self.prediction_layer:
+        #     return {'h': h_new}
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
 
 class GraphSageWithSampling(nn.Module):
-    def __init__(self, n_content_dims, feature_size, n_layers, dropout, G, init_node_vectors=None):
+    def __init__(self, n_content_dims, feature_size, n_layers, dropout, prediction_layer, G, init_node_vectors=None,):
         super(GraphSageWithSampling, self).__init__()
 
         self.feature_size = feature_size
@@ -63,16 +96,18 @@ class GraphSageWithSampling(nn.Module):
         convs = []
         for i in range(n_layers):
             if i >= n_layers - 1:
-                convs.append(GraphSageConvWithSampling(feature_size, dropout, None))
+                convs.append(GraphSageConvWithSampling(feature_size, dropout, None, prediction_layer))
             else:
-                convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu))
+                convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu, False))
 
         self.convs = nn.ModuleList(convs)
         w = nn.Linear(n_content_dims, feature_size)
         init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w.bias)
 
-        self.proj = nn.Sequential(w, nn.LeakyReLU(negative_slope=0.1))
+        drop = nn.Dropout(dropout)
+        noise = GaussianNoise(0.4)
+        self.proj = nn.Sequential(drop, w, nn.LeakyReLU(negative_slope=0.1), noise)
 
         self.G = G
 
@@ -114,7 +149,7 @@ def get_score(src, dst, mean, node_biases,
 
 
 class GraphSAGERecommenderImplicit(nn.Module):
-    def __init__(self, gcn, mu, node_biases, padding_length, zeroed_indices):
+    def __init__(self, gcn, mu, node_biases, zeroed_indices):
         super(GraphSAGERecommenderImplicit, self).__init__()
 
         self.gcn = gcn
@@ -124,7 +159,6 @@ class GraphSAGERecommenderImplicit(nn.Module):
             self.node_biases = nn.Parameter(torch.FloatTensor(node_biases))
         else:
             self.node_biases = nn.Parameter(torch.zeros(gcn.G.number_of_nodes() + 1))
-        self.padding_length = padding_length
         self.zeroed_indices = zeroed_indices
         self.mu = nn.Parameter(torch.tensor(mu), requires_grad=True)
 

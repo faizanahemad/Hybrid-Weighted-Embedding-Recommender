@@ -86,9 +86,9 @@ hyperparameters_svdpp = dict(n_dims=48, combining_factor=0.1,
 hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=50, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.001, epochs=50, batch_size=1024,
                                                               network_depth=3, verbose=verbose,
-                                                              kernel_l2=5e-5, dropout=0.5, use_content=True),
+                                                              kernel_l2=1e-7, dropout=0.05, use_content=True),
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
                                                      gcn_lr=0.00075, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-8, gcn_batch_size=1024, verbose=verbose, margin=1.0,
@@ -97,7 +97,7 @@ hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
 hyperparameters_gcn_node2vec = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.001, epochs=50, batch_size=1024, padding_length=50,
+                               prediction_network_params=dict(lr=0.001, epochs=50, batch_size=1024,
                                                               network_depth=2, verbose=verbose,
                                                               kernel_l2=5e-5, dropout=0.25, use_content=True),
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
@@ -105,16 +105,16 @@ hyperparameters_gcn_node2vec = dict(n_dims=64, combining_factor=0.1,
                                                      gcn_kernel_l2=1e-7, gcn_batch_size=1024, verbose=verbose, margin=1.0,
                                                      enable_gcn=True, enable_node2vec=True, enable_triplet_loss=True)))
 
-hyperparameters_gcn_resnet = dict(n_dims=48, combining_factor=0.1,
+hyperparameters_gcn_resnet = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
                                prediction_network_params=dict(lr=0.001, epochs=50, batch_size=512, padding_length=50,
                                                               conv_depth=2, scorer_depth=2,
-                                                              network_depth=2, network_width=96, verbose=verbose,
+                                                              network_depth=3, network_width=128, verbose=verbose,
                                                               bias_reg=1e-8, residual_reg=1e-5, implicit_reg=0.0,
-                                                              kernel_l2=1e-5, dropout=0.2, use_content=True),
+                                                              kernel_l2=1e-7, dropout=0.1, use_content=True),
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
-                                                     conv_depth=2, network_width=96,
+                                                     conv_depth=2, network_width=128,
                                                      gcn_lr=0.00075, gcn_epochs=40, gcn_layers=2, gcn_dropout=0.05,
                                                      gcn_kernel_l2=1e-7, gcn_batch_size=1024, verbose=verbose, margin=1.0,
                                                      enable_gcn=True, enable_node2vec=True, enable_triplet_loss=True)))
@@ -134,7 +134,8 @@ gcn_hybrid = True
 gcn_hybrid_node2vec = False
 gcn_resnet = False
 
-print(hyperparameters_gcn_resnet)
+from pprint import pprint
+pprint(hyperparamters_dict)
 
 if not enable_kfold:
     train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2, stratify=[u for u, i, r in user_item_affinities])
