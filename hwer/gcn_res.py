@@ -8,7 +8,7 @@ import numpy as np
 
 dgl.load_backend('pytorch')
 
-from .gcn import init_bias, init_weight
+from .gcn import init_bias, init_weight, GaussianNoise
 
 
 class LinearResnet(nn.Module):
@@ -23,22 +23,17 @@ class LinearResnet(nn.Module):
         W1 = nn.Linear(input_size, output_size)
         self.bn1 = torch.nn.BatchNorm1d(output_size)
         W2 = nn.Linear(output_size, output_size)
-        bn2 = torch.nn.BatchNorm1d(output_size)
-
-        W3 = nn.Linear(output_size, output_size)
 
         init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W1.bias)
         init_weight(W2.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W2.bias)
 
-        init_weight(W3.weight, 'xavier_uniform_', 'linear')
-        init_bias(W3.bias)
+        noise = GaussianNoise(0.3)
 
-        self.W = nn.Sequential(W1, nn.LeakyReLU(negative_slope=0.1), W2, nn.LeakyReLU(negative_slope=0.1), W3)
+        self.W = nn.Sequential(noise, W1, nn.LeakyReLU(negative_slope=0.1), noise, W2, nn.LeakyReLU(negative_slope=0.1))
 
     def forward(self, h):
-        h = self.bn1(h)
         identity = h
         if self.scaling:
             identity = self.iscale(identity)

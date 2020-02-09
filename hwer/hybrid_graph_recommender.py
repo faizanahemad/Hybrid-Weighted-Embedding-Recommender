@@ -177,8 +177,8 @@ class HybridGCNRec(SVDppHybrid):
 
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         gcn_lr = hyperparams["gcn_lr"] if "gcn_lr" in hyperparams else 0.1
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
-        gcn_epochs = hyperparams["gcn_epochs"] if "gcn_epochs" in hyperparams else 5
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 1
+        gcn_epochs = hyperparams["gcn_epochs"] if "gcn_epochs" in hyperparams else 1
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 5
         gcn_dropout = hyperparams["gcn_dropout"] if "gcn_dropout" in hyperparams else 0.0
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
