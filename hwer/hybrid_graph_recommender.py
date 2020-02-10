@@ -384,6 +384,7 @@ class HybridGCNRec(SVDppHybrid):
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
         enable_implicit = hyperparams["enable_implicit"] if "enable_implicit" in hyperparams else False
+        # sage_conv_version = 1
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
@@ -417,9 +418,14 @@ class HybridGCNRec(SVDppHybrid):
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicit(
-            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, True, g_train),
+            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, False, g_train),
             mu, biases, zeroed_indices=zeroed_indices)
-        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+        opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
+                                                        steps_per_epoch=int(
+                                                            np.ceil(len(user_item_affinities) / batch_size)),
+                                                        div_factor=50, final_div_factor=50)
+        # opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
         user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1, r) for u, i, r in
                                 user_item_affinities]
         src, dst, rating = zip(*user_item_affinities)
@@ -500,6 +506,7 @@ class HybridGCNRec(SVDppHybrid):
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
+                    scheduler.step()
                 return total_loss / len(src_batches)
 
             if epoch % 2 == 1:

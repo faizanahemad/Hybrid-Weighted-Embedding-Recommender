@@ -1,10 +1,8 @@
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import dgl
 import dgl.function as FN
-import numpy as np
 dgl.load_backend('pytorch')
 
 
@@ -53,16 +51,59 @@ def init_bias(param):
     nn.init.constant_(param, 0)
 
 
-class GraphSageConvWithSampling(nn.Module):
+class GraphSageConvWithSamplingV2(nn.Module):
     def __init__(self, feature_size, dropout, activation, prediction_layer):
-        super(GraphSageConvWithSampling, self).__init__()
+        super(GraphSageConvWithSamplingV2, self).__init__()
+
+        self.feature_size = feature_size
+
+        #
+        self.Wagg = nn.Linear(feature_size, feature_size)
+
+        #
+        self.W = nn.Linear(feature_size * 2, feature_size)
+        self.drop = nn.Dropout(dropout)
+        self.activation = activation
+        self.prediction_layer = prediction_layer
+        self.noise = GaussianNoise(0.1)
+
+        if self.activation is not None:
+            init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
+        else:
+            init_weight(self.W.weight, 'xavier_uniform_', 'linear')
+        init_bias(self.W.bias)
+
+    def forward(self, nodes):
+        h_agg = nodes.data['h_agg']
+        h = nodes.data['h']
+        w = nodes.data['w'][:, None]
+        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+        h_agg = self.drop(h_agg)
+        h = self.drop(h)
+        h_concat = torch.cat([h, h_agg], 1)
+        h_new = self.W(h_concat)
+        h_agg = self.Wagg(h_agg)
+        if self.activation is not None:
+            h_new = self.activation(h_new, negative_slope=0.1)
+            h_agg = self.activation(h_agg, negative_slope=0.1)
+
+        h_new = h_new + h_agg
+        h_new = self.noise(h_new)
+        if self.prediction_layer:
+            return {'h': h_new}
+        return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
+
+
+class GraphSageConvWithSamplingV1(nn.Module):
+    def __init__(self, feature_size, dropout, activation, prediction_layer):
+        super(GraphSageConvWithSamplingV1, self).__init__()
 
         self.feature_size = feature_size
         self.W = nn.Linear(feature_size * 2, feature_size)
         self.drop = nn.Dropout(dropout)
         self.activation = activation
         self.prediction_layer = prediction_layer
-        self.noise = GaussianNoise(0.4)
+        self.noise = GaussianNoise(0.2)
 
         if self.activation is not None:
             init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
@@ -81,9 +122,12 @@ class GraphSageConvWithSampling(nn.Module):
         h_new = self.noise(h_new)
         if self.activation is not None:
             h_new = self.activation(h_new, negative_slope=0.1)
-        # if self.prediction_layer:
-        #     return {'h': h_new}
+        if self.prediction_layer:
+            return {'h': h_new}
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
+
+
+GraphSageConvWithSampling = GraphSageConvWithSamplingV2
 
 
 class GraphSageWithSampling(nn.Module):
@@ -106,7 +150,7 @@ class GraphSageWithSampling(nn.Module):
         init_bias(w.bias)
 
         drop = nn.Dropout(dropout)
-        noise = GaussianNoise(0.4)
+        noise = GaussianNoise(0.2)
         self.proj = nn.Sequential(drop, w, nn.LeakyReLU(negative_slope=0.1), noise)
 
         self.G = G
@@ -170,6 +214,13 @@ class GraphSAGERecommenderImplicit(nn.Module):
                           h_dst, h_src)
 
         return score
+
+
+class NCFScorer(nn.Module):
+    pass
+
+class GraphSAGERecommenderNCF(nn.Module):
+    pass
 
 
 class GraphSAGETripletEmbedding(nn.Module):
