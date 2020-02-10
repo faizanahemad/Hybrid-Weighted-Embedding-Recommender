@@ -52,7 +52,7 @@ def init_bias(param):
 
 
 class GraphSageConvWithSamplingV2(nn.Module):
-    def __init__(self, feature_size, dropout, activation, prediction_layer):
+    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise):
         super(GraphSageConvWithSamplingV2, self).__init__()
 
         self.feature_size = feature_size
@@ -65,12 +65,14 @@ class GraphSageConvWithSamplingV2(nn.Module):
         self.drop = nn.Dropout(dropout)
         self.activation = activation
         self.prediction_layer = prediction_layer
-        self.noise = GaussianNoise(0.1)
+        self.noise = GaussianNoise(gaussian_noise)
 
         if self.activation is not None:
             init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
+            init_weight(self.Wagg.weight, 'xavier_uniform_', 'leaky_relu')
         else:
             init_weight(self.W.weight, 'xavier_uniform_', 'linear')
+            init_weight(self.Wagg.weight, 'xavier_uniform_', 'linear')
         init_bias(self.W.bias)
 
     def forward(self, nodes):
@@ -95,7 +97,7 @@ class GraphSageConvWithSamplingV2(nn.Module):
 
 
 class GraphSageConvWithSamplingV1(nn.Module):
-    def __init__(self, feature_size, dropout, activation, prediction_layer):
+    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise):
         super(GraphSageConvWithSamplingV1, self).__init__()
 
         self.feature_size = feature_size
@@ -103,7 +105,7 @@ class GraphSageConvWithSamplingV1(nn.Module):
         self.drop = nn.Dropout(dropout)
         self.activation = activation
         self.prediction_layer = prediction_layer
-        self.noise = GaussianNoise(0.2)
+        self.noise = GaussianNoise(gaussian_noise)
 
         if self.activation is not None:
             init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
@@ -127,22 +129,25 @@ class GraphSageConvWithSamplingV1(nn.Module):
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
 
-GraphSageConvWithSampling = GraphSageConvWithSamplingV2
-
-
 class GraphSageWithSampling(nn.Module):
-    def __init__(self, n_content_dims, feature_size, n_layers, dropout, prediction_layer, G, init_node_vectors=None,):
+    def __init__(self, n_content_dims, feature_size, n_layers, dropout, prediction_layer, G,
+                 conv_arch, gaussian_noise,
+                 init_node_vectors=None,):
         super(GraphSageWithSampling, self).__init__()
 
         self.feature_size = feature_size
         self.n_layers = n_layers
+        if conv_arch == 2:
+            GraphSageConvWithSampling = GraphSageConvWithSamplingV2
+        else:
+            GraphSageConvWithSampling = GraphSageConvWithSamplingV1
 
         convs = []
         for i in range(n_layers):
             if i >= n_layers - 1:
-                convs.append(GraphSageConvWithSampling(feature_size, dropout, None, prediction_layer))
+                convs.append(GraphSageConvWithSampling(feature_size, dropout, None, prediction_layer, gaussian_noise))
             else:
-                convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu, False))
+                convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu, False, gaussian_noise))
 
         self.convs = nn.ModuleList(convs)
         w = nn.Linear(n_content_dims, feature_size)
@@ -150,7 +155,7 @@ class GraphSageWithSampling(nn.Module):
         init_bias(w.bias)
 
         drop = nn.Dropout(dropout)
-        noise = GaussianNoise(0.2)
+        noise = GaussianNoise(gaussian_noise)
         self.proj = nn.Sequential(drop, w, nn.LeakyReLU(negative_slope=0.1), noise)
 
         self.G = G

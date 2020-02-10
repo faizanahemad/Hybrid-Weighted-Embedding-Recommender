@@ -384,7 +384,8 @@ class HybridGCNRec(SVDppHybrid):
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
         enable_implicit = hyperparams["enable_implicit"] if "enable_implicit" in hyperparams else False
-        # sage_conv_version = 1
+        conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
+        gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
