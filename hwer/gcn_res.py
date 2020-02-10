@@ -56,13 +56,11 @@ class NodeContentMixer(nn.Module):
         init_bias(W.bias)
         w1 = nn.Sequential(drop, W, nn.LeakyReLU(negative_slope=0.1), noise)
 
-        drop = nn.Dropout(dropout)
-        layers = [w1, drop, LinearResnet(feature_size, feature_size, gaussian_noise)]
+        layers = [w1, LinearResnet(feature_size, feature_size, gaussian_noise)]
         for _ in range(depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
             layers.append(LinearResnet(feature_size, feature_size, gaussian_noise))
-        layers.append(noise)
         self.layers = nn.Sequential(*layers)
 
     def forward(self, ndata):
@@ -78,7 +76,7 @@ class GraphSageConvWithSampling(nn.Module):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
-        self.Wagg = nn.Linear(feature_size, feature_size)
+        Wagg = nn.Linear(feature_size, feature_size)
         noise = GaussianNoise(gaussian_noise)
         W1 = nn.Linear(feature_size * 2, width)
         layers = [noise, W1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(width, width, gaussian_noise)]
@@ -86,16 +84,17 @@ class GraphSageConvWithSampling(nn.Module):
             drop = nn.Dropout(dropout)
             layers.append(drop)
             layers.append(LinearResnet(width, width, gaussian_noise))
-        layers.append(noise)
         W = nn.Linear(width, feature_size)
         layers.append(W)
         if activation_last_layer:
             init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
-            init_weight(self.Wagg.weight, 'xavier_uniform_', 'leaky_relu')
+            init_weight(Wagg.weight, 'xavier_uniform_', 'leaky_relu')
             layers.append(nn.LeakyReLU(negative_slope=0.1))
+            self.Wagg = nn.Sequential(Wagg, nn.LeakyReLU(negative_slope=0.1))
         else:
             init_weight(W.weight, 'xavier_uniform_', 'linear')
-            init_weight(self.Wagg.weight, 'xavier_uniform_', 'linear')
+            init_weight(Wagg.weight, 'xavier_uniform_', 'linear')
+            self.Wagg = Wagg
         layers.append(noise)
         init_bias(W.bias)
         self.layers = nn.Sequential(*layers)
@@ -108,8 +107,6 @@ class GraphSageConvWithSampling(nn.Module):
 
         h_concat = torch.cat([h, h_agg], 1)
         h_agg = self.Wagg(h_agg)
-        if self.activation is not None:
-            h_agg = self.activation(h_agg, negative_slope=0.1)
         h_new = self.layers(h_concat)
         h_new = h_agg + h_new
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
