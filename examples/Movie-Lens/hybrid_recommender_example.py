@@ -150,8 +150,8 @@ hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_hybrid_node2vec=h
 content_only = False
 svdpp_hybrid = False
 surprise = False
-gcn_hybrid = True
-gcn_hybrid_node2vec = True
+gcn_hybrid = False
+gcn_hybrid_node2vec = False
 gcn_resnet = True
 
 from pprint import pprint
