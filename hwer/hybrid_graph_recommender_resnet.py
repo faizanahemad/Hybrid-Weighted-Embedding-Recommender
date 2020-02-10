@@ -19,11 +19,12 @@ class HybridGCNRecResnet(HybridGCNRec):
 
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims,
                                   gcn_layers, conv_depth, network_width,
-                                  gcn_dropout, g_train, triplet_vectors, margin):
+                                  gcn_dropout, g_train, triplet_vectors, margin,
+                                  conv_arch, gaussian_noise):
         from .gcn_res import GraphSAGETripletEmbedding, GraphSageWithSampling
         self.log.info("Getting Triplet Model for GCN RESNET")
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims, network_width,
-                                                                gcn_layers, conv_depth, gcn_dropout, g_train,
+                                                                gcn_layers, conv_depth, gcn_dropout, g_train, gaussian_noise,
                                                                 triplet_vectors),
                                           margin)
         return model
@@ -83,6 +84,8 @@ class HybridGCNRecResnet(HybridGCNRec):
         implicit_reg = hyperparams["implicit_reg"] if "implicit_reg" in hyperparams else 0.0
         residual_reg = hyperparams["residual_reg"] if "residual_reg" in hyperparams else 0.0
         bias_reg = hyperparams["bias_reg"] if "bias_reg" in hyperparams else 0.0
+        conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
+        gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
@@ -117,18 +120,17 @@ class HybridGCNRecResnet(HybridGCNRec):
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicitResnet(
             GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_width, network_depth, conv_depth,
-                                  dropout,
-                                  g_train),
+                                  dropout, g_train, gaussian_noise),
             mu, biases, padding_length, zeroed_indices,
             self.n_collaborative_dims, network_width, scorer_depth, dropout, n_content_dims, self.n_collaborative_dims,
             batch_size)
-        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+        # opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
 
-        # opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
-        # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
-        #                                                 steps_per_epoch=int(
-        #                                                     np.ceil(len(user_item_affinities) / batch_size)),
-        #                                                 div_factor=50, final_div_factor=100)
+        opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
+                                                        steps_per_epoch=int(
+                                                            np.ceil(len(user_item_affinities) / batch_size)),
+                                                        div_factor=50, final_div_factor=50)
 
         generate_training_samples, gen_fn, ratings_count_by_user, ratings_count_by_item, user_item_list, item_user_list = self.__prediction_network_datagen__(
             user_ids, item_ids,
@@ -275,7 +277,7 @@ class HybridGCNRecResnet(HybridGCNRec):
                     loss.backward()
                     total_loss = total_loss + loss.item()
                     opt.step()
-                    # scheduler.step()
+                    scheduler.step()
                 return total_loss / len(src_batches)
 
             if epoch % 2 == 1:

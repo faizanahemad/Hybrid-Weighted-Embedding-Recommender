@@ -224,7 +224,16 @@ class GraphSAGERecommenderImplicit(nn.Module):
 class NCFScorer(nn.Module):
     pass
 
+
 class GraphSAGERecommenderNCF(nn.Module):
+    pass
+
+
+class VAENCFScorer(nn.Module):
+    pass
+
+
+class GraphSAGERecommenderVAENCF(nn.Module):
     pass
 
 

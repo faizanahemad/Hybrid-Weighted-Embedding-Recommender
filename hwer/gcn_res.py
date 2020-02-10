@@ -12,7 +12,7 @@ from .gcn import init_bias, init_weight, GaussianNoise
 
 
 class LinearResnet(nn.Module):
-    def __init__(self, input_size, output_size):
+    def __init__(self, input_size, output_size, gaussian_noise):
         super(LinearResnet, self).__init__()
         self.scaling = False
         if input_size != output_size:
@@ -23,13 +23,12 @@ class LinearResnet(nn.Module):
         W1 = nn.Linear(input_size, output_size)
         self.bn1 = torch.nn.BatchNorm1d(output_size)
         W2 = nn.Linear(output_size, output_size)
+        noise = GaussianNoise(gaussian_noise)
 
         init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W1.bias)
         init_weight(W2.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W2.bias)
-
-        noise = GaussianNoise(0.3)
 
         self.W = nn.Sequential(noise, W1, nn.LeakyReLU(negative_slope=0.1), noise, W2, nn.LeakyReLU(negative_slope=0.1))
 
@@ -48,13 +47,14 @@ def mix_embeddings(ndata, projection):
 
 
 class NodeContentMixer(nn.Module):
-    def __init__(self, n_content_dims, feature_size, width, dropout, depth):
+    def __init__(self, n_content_dims, feature_size, width, dropout, depth, gaussian_noise):
         super(NodeContentMixer, self).__init__()
         drop = nn.Dropout(dropout)
+        noise = GaussianNoise(gaussian_noise)
         W = nn.Linear(n_content_dims, feature_size)
         init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(W.bias)
-        w1 = nn.Sequential(drop, W, nn.LeakyReLU(negative_slope=0.1))
+        w1 = nn.Sequential(drop, W, nn.LeakyReLU(negative_slope=0.1), noise)
 
         drop = nn.Dropout(dropout)
         layers = [w1, drop, LinearResnet(feature_size, feature_size)]
@@ -62,6 +62,7 @@ class NodeContentMixer(nn.Module):
             drop = nn.Dropout(dropout)
             layers.append(drop)
             layers.append(LinearResnet(feature_size, feature_size))
+        layers.append(noise)
         self.layers = nn.Sequential(*layers)
 
     def forward(self, ndata):
@@ -73,24 +74,29 @@ class NodeContentMixer(nn.Module):
 
 
 class GraphSageConvWithSampling(nn.Module):
-    def __init__(self, feature_size, width, dropout, conv_depth, activation_last_layer):
+    def __init__(self, feature_size, width, dropout, conv_depth, activation_last_layer, gaussian_noise):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
-        drop = nn.Dropout(dropout)
+        self.Wagg = nn.Linear(feature_size, feature_size)
+        noise = GaussianNoise(gaussian_noise)
         W1 = nn.Linear(feature_size * 2, width)
-        layers = [W1, drop, nn.LeakyReLU(negative_slope=0.1), LinearResnet(width, width)]
+        layers = [noise, W1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(width, width)]
         for _ in range(conv_depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
             layers.append(LinearResnet(width, width))
+        layers.append(noise)
         W = nn.Linear(width, feature_size)
         layers.append(W)
         if activation_last_layer:
             init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
+            init_weight(self.Wagg.weight, 'xavier_uniform_', 'leaky_relu')
             layers.append(nn.LeakyReLU(negative_slope=0.1))
         else:
             init_weight(W.weight, 'xavier_uniform_', 'linear')
+            init_weight(self.Wagg.weight, 'xavier_uniform_', 'linear')
+        layers.append(noise)
         init_bias(W.bias)
         self.layers = nn.Sequential(*layers)
 
@@ -101,12 +107,17 @@ class GraphSageConvWithSampling(nn.Module):
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
 
         h_concat = torch.cat([h, h_agg], 1)
+        h_agg = self.Wagg(h_agg)
+        if self.activation is not None:
+            h_agg = self.activation(h_agg, negative_slope=0.1)
         h_new = self.layers(h_concat)
+        h_new = h_agg + h_new
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
 
 class GraphSageWithSampling(nn.Module):
-    def __init__(self, n_content_dims, feature_size, width, n_layers, conv_depth, dropout, G, init_node_vectors=None):
+    def __init__(self, n_content_dims, feature_size, width, n_layers, conv_depth, dropout, G,
+                 gaussian_noise, init_node_vectors=None):
         super(GraphSageWithSampling, self).__init__()
 
         self.feature_size = feature_size
@@ -115,12 +126,12 @@ class GraphSageWithSampling(nn.Module):
         convs = []
         for i in range(n_layers):
             if i >= n_layers - 1:
-                convs.append(GraphSageConvWithSampling(feature_size, width, dropout, conv_depth, False))
+                convs.append(GraphSageConvWithSampling(feature_size, width, dropout, conv_depth, False, gaussian_noise))
             else:
-                convs.append(GraphSageConvWithSampling(feature_size, width, dropout, conv_depth, True))
+                convs.append(GraphSageConvWithSampling(feature_size, width, dropout, conv_depth, True, gaussian_noise))
 
         self.convs = nn.ModuleList(convs)
-        self.projection = NodeContentMixer(n_content_dims, feature_size, width, dropout, 2)
+        self.projection = NodeContentMixer(n_content_dims, feature_size, width, dropout, 2, gaussian_noise)
         self.G = G
 
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, feature_size)
