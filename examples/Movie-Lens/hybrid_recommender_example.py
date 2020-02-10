@@ -93,6 +93,7 @@ hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
                                                      gcn_lr=0.00075, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-8, gcn_batch_size=1024, verbose=verbose, margin=1.0,
+                                                     gaussian_noise=0.15, conv_arch=2,
                                                      enable_gcn=True, enable_node2vec=False, enable_triplet_loss=False)))
 
 hyperparameters_gcn_node2vec = dict(n_dims=64, combining_factor=0.1,
@@ -105,6 +106,7 @@ hyperparameters_gcn_node2vec = dict(n_dims=64, combining_factor=0.1,
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
                                                      gcn_lr=0.00075, gcn_epochs=40, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-7, gcn_batch_size=1024, verbose=verbose, margin=1.0,
+                                                     gaussian_noise=0.15, conv_arch=2,
                                                      enable_gcn=True, enable_node2vec=True, enable_triplet_loss=True)))
 
 hyperparameters_gcn_resnet = dict(n_dims=64, combining_factor=0.1,
