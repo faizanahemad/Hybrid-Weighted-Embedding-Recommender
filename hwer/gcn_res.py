@@ -57,11 +57,11 @@ class NodeContentMixer(nn.Module):
         w1 = nn.Sequential(drop, W, nn.LeakyReLU(negative_slope=0.1), noise)
 
         drop = nn.Dropout(dropout)
-        layers = [w1, drop, LinearResnet(feature_size, feature_size)]
+        layers = [w1, drop, LinearResnet(feature_size, feature_size, gaussian_noise)]
         for _ in range(depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
-            layers.append(LinearResnet(feature_size, feature_size))
+            layers.append(LinearResnet(feature_size, feature_size, gaussian_noise))
         layers.append(noise)
         self.layers = nn.Sequential(*layers)
 
@@ -81,11 +81,11 @@ class GraphSageConvWithSampling(nn.Module):
         self.Wagg = nn.Linear(feature_size, feature_size)
         noise = GaussianNoise(gaussian_noise)
         W1 = nn.Linear(feature_size * 2, width)
-        layers = [noise, W1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(width, width)]
+        layers = [noise, W1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(width, width, gaussian_noise)]
         for _ in range(conv_depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
-            layers.append(LinearResnet(width, width))
+            layers.append(LinearResnet(width, width, gaussian_noise))
         layers.append(noise)
         W = nn.Linear(width, feature_size)
         layers.append(W)
@@ -179,11 +179,11 @@ class ResnetScorer(nn.Module):
         self.w2 = nn.Sequential(w2, nn.LeakyReLU(negative_slope=0.1))
 
         drop = nn.Dropout(dropout)
-        layers = [drop, LinearResnet(width * 2, width)]
+        layers = [drop, LinearResnet(width * 2, width, 0.0)]
         for _ in range(depth - 1):
             drop = nn.Dropout(dropout)
             layers.append(drop)
-            layers.append(LinearResnet(width, width))
+            layers.append(LinearResnet(width, width, 0.0))
         w2 = nn.Linear(width, 1)
         init_weight(w2.weight, 'xavier_uniform_', 'Tanh')
         init_bias(w2.bias)
