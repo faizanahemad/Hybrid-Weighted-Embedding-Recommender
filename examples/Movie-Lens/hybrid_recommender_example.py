@@ -1,29 +1,15 @@
-import pandas as pd
+from hwer.validation import *
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
-from hwer.validation import *
-from hwer.utils import average_precision
 
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
 pd.options.display.width = 0
 import warnings
-import os
-import copy
-from collections import defaultdict
-import operator
 
 warnings.filterwarnings('ignore')
-from typing import List, Dict, Any, Tuple
 import numpy as np
-import time
-from ast import literal_eval
-
-from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding
-from hwer import Feature, FeatureSet, FeatureType
-from hwer import SVDppHybrid
-from hwer import FasttextEmbedding
 
 import movielens_data_reader as mdr
 
@@ -143,9 +129,9 @@ hyperparameters_gcn_ncf = dict(n_dims=64, combining_factor=0.1,
                            knn_params=dict(n_neighbors=n_neighbors,
                                            index_time_params={'M': 15, 'ef_construction': 200, }),
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.01, epochs=75, batch_size=1024,
+                               prediction_network_params=dict(lr=0.01, epochs=60, batch_size=1024,
                                                               network_depth=2, verbose=verbose,
-                                                              gaussian_noise=0.15, conv_arch=2,
+                                                              gaussian_noise=0.15, conv_arch=4,
                                                               kernel_l2=1e-9, dropout=0.0, use_content=True),
                                user_item_params=dict(lr=0.1, epochs=20, batch_size=64, l2=0.0001,
                                                      gcn_lr=0.00075, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
