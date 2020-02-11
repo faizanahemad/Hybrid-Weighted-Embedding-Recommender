@@ -51,9 +51,9 @@ def init_bias(param):
     nn.init.constant_(param, 0)
 
 
-class GraphSageConvWithSamplingV5(nn.Module):
+class GraphSageConvWithSamplingV2(nn.Module):
     def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise):
-        super(GraphSageConvWithSamplingV5, self).__init__()
+        super(GraphSageConvWithSamplingV2, self).__init__()
         self.feature_size = feature_size
 
         #
@@ -138,9 +138,9 @@ class GraphSageConvWithSamplingV4(nn.Module):
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
 
-class GraphSageConvWithSamplingV3(nn.Module):
+class GraphSageConvWithSamplingV5(nn.Module):
     def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise):
-        super(GraphSageConvWithSamplingV3, self).__init__()
+        super(GraphSageConvWithSamplingV5, self).__init__()
 
         self.feature_size = feature_size
 
@@ -193,9 +193,9 @@ class GraphSageConvWithSamplingV3(nn.Module):
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
 
-class GraphSageConvWithSamplingV2(nn.Module):
+class GraphSageConvWithSamplingV3(nn.Module):
     def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise):
-        super(GraphSageConvWithSamplingV2, self).__init__()
+        super(GraphSageConvWithSamplingV3, self).__init__()
         self.feature_size = feature_size
 
         #
@@ -258,6 +258,7 @@ class GraphSageConvWithSamplingV1(nn.Module):
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         h_concat = torch.cat([h, h_agg], 1)
         h_concat = self.drop(h_concat)
+        h_concat = self.noise(h_concat)
         h_new = self.W(h_concat)
         h_new = self.noise(h_new)
         if self.activation is not None:
