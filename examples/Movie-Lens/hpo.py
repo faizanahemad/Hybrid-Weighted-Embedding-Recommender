@@ -186,12 +186,12 @@ def rmse_objective(trial):
 def map_objective(trial):
     pass
 
-
-storage = 'sqlite:///gcn.db'
-study = optuna.create_study(study_name=algo, storage='sqlite:///%s.db' % algo, load_if_exists=True)
-study.optimize(rmse_objective, n_trials=5)
-print(study.best_params)
-print(study.best_value)
-print(study.best_trial)
-df = study.trials_dataframe(attrs=('number', 'value', 'params', 'state'))
-print(df)
+if __name__ == '__main__':
+    storage = 'sqlite:///gcn.db'
+    study = optuna.create_study(study_name=algo, storage='sqlite:///%s.db' % algo, load_if_exists=True)
+    study.optimize(rmse_objective, n_trials=10)
+    print(study.best_params)
+    print(study.best_value)
+    print(study.best_trial)
+    df = study.trials_dataframe(attrs=('number', 'value', 'params', 'state'))
+    print(df)
