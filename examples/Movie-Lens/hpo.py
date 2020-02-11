@@ -196,7 +196,7 @@ def rmse_objective(trial):
     params["collaborative_params"]["prediction_network_params"]["kernel_l2"] = kernel_l2
     params["collaborative_params"]["prediction_network_params"]["dropout"] = dropout
     params["collaborative_params"]["prediction_network_params"]["batch_size"] = int(batch_size)
-    rmse, _ = optimisation_objective(params, algo)
+    rmse, _ = optimisation_objective(params, algo, trial)
     return rmse
 
 
@@ -221,7 +221,7 @@ def ndcg_objective(trial):
     params["collaborative_params"]["user_item_params"]["gaussian_noise"] = gaussian_noise
     params["collaborative_params"]["user_item_params"]["margin"] = margin
 
-    _, ndcg = optimisation_objective(params, algo)
+    _, ndcg = optimisation_objective(params, algo, trial)
     return 1 - ndcg
 
 
