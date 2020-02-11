@@ -139,20 +139,38 @@ hyperparameters_gcn_resnet = dict(n_dims=64, combining_factor=0.1,
                                                             enable_gcn=True, enable_node2vec=True,
                                                             enable_triplet_loss=True)))
 
+hyperparameters_gcn_ncf = dict(n_dims=64, combining_factor=0.1,
+                           knn_params=dict(n_neighbors=n_neighbors,
+                                           index_time_params={'M': 15, 'ef_construction': 200, }),
+                           collaborative_params=dict(
+                               prediction_network_params=dict(lr=0.01, epochs=75, batch_size=1024,
+                                                              network_depth=2, verbose=verbose,
+                                                              gaussian_noise=0.15, conv_arch=2,
+                                                              kernel_l2=1e-9, dropout=0.0, use_content=True),
+                               user_item_params=dict(lr=0.1, epochs=20, batch_size=64, l2=0.0001,
+                                                     gcn_lr=0.00075, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
+                                                     gcn_kernel_l2=1e-8, gcn_batch_size=1024, verbose=verbose,
+                                                     margin=1.0,
+                                                     gaussian_noise=0.15, conv_arch=2,
+                                                     enable_gcn=True, enable_node2vec=False,
+                                                     enable_triplet_loss=False)))
+
 hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
                             "svd": {"biased": True, "n_factors": 20},
                             "algos": ["svd"]}
 
 hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_hybrid_node2vec=hyperparameters_gcn_node2vec,
                            content_only=hyperparameter_content, gcn_resnet=hyperparameters_gcn_resnet,
+                           gcn_ncf=hyperparameters_gcn_ncf,
                            svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
 
 content_only = False
 svdpp_hybrid = False
 surprise = False
 gcn_hybrid = True
-gcn_hybrid_node2vec = True
-gcn_resnet = True
+gcn_hybrid_node2vec = False
+gcn_resnet = False
+gcn_ncf = False
 
 from pprint import pprint
 
@@ -170,6 +188,7 @@ if not enable_kfold:
                                                          prepare_data_mappers, rating_scale,
                                                          svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
                                                          gcn_hybrid_node2vec=gcn_hybrid_node2vec, gcn_resnet=gcn_resnet,
+                                                         gcn_ncf=gcn_ncf,
                                                          surprise=surprise, content_only=content_only,
                                                          enable_error_analysis=enable_error_analysis,
                                                          enable_baselines=enable_baselines)
@@ -198,6 +217,7 @@ else:
                                      prepare_data_mappers, rating_scale,
                                      svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
                                      gcn_hybrid_node2vec=gcn_hybrid_node2vec, gcn_resnet=gcn_resnet,
+                                     gcn_ncf=gcn_ncf,
                                      surprise=surprise, content_only=content_only,
                                      enable_error_analysis=False, enable_baselines=False)
 

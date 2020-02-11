@@ -161,7 +161,7 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
 def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
                       get_data_mappers, rating_scale, algo,
                       enable_error_analysis=False, enable_baselines=False):
-    from . import SVDppHybrid, HybridGCNRec, HybridGCNRecResnet
+    from . import SVDppHybrid, HybridGCNRec, HybridGCNRecResnet, HybridGCNRecNCF
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
     if algo == "svdpp_hybrid":
@@ -180,6 +180,13 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
                               fast_inference=False, super_fast_inference=False)
     elif algo in ["gcn_resnet"]:
         recsys = HybridGCNRecResnet(embedding_mapper=embedding_mapper,
+                              knn_params=hyperparameters["knn_params"],
+                              rating_scale=rating_scale,
+                              n_content_dims=hyperparameters["n_dims"],
+                              n_collaborative_dims=hyperparameters["n_dims"],
+                              fast_inference=False, super_fast_inference=False)
+    elif algo in ["gcn_ncf"]:
+        recsys = HybridGCNRecNCF(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
                               rating_scale=rating_scale,
                               n_content_dims=hyperparameters["n_dims"],
@@ -271,7 +278,7 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
 def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
               get_data_mappers, rating_scale,
               svdpp_hybrid=True, surprise=True,
-              gcn_hybrid=True, gcn_hybrid_node2vec=True, gcn_resnet=True,
+              gcn_hybrid=True, gcn_hybrid_node2vec=True, gcn_resnet=True, gcn_ncf=True,
               content_only=True, enable_error_analysis=False, enable_baselines=False):
     results = []
     recs = []
@@ -333,6 +340,17 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                           items, hyperparameters, get_data_mappers, rating_scale,
                                                                             algo="gcn_resnet",
+                                                                            enable_error_analysis=enable_error_analysis,
+                                                                        enable_baselines=enable_baselines)
+        results.extend(res)
+        recs.append(gcn_rec)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
+
+    if gcn_ncf:
+        hyperparameters = hyperparamters_dict["gcn_ncf"]
+        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+                                                                          items, hyperparameters, get_data_mappers, rating_scale,
+                                                                            algo="gcn_ncf",
                                                                             enable_error_analysis=enable_error_analysis,
                                                                         enable_baselines=enable_baselines)
         results.extend(res)
