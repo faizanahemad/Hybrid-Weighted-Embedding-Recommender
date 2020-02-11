@@ -74,6 +74,7 @@ notebook==6.0.1
 numba==0.45.1
 numpy==1.17.3
 opt-einsum==3.1.0
+optuna==1.1.0
 packaging==19.2
 pandas==0.25.2
 pandocfilters==1.4.2
