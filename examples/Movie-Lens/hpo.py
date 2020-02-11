@@ -187,7 +187,7 @@ def rmse_objective(trial):
     n_dims = trial.suggest_discrete_uniform('n_dims', 48, 112, 8)
     params = copy.deepcopy(hyperparamters_dict[algo])
 
-    params["n_dims"] = n_dims
+    params["n_dims"] = int(n_dims)
     params["collaborative_params"]["prediction_network_params"]["lr"] = lr
     params["collaborative_params"]["prediction_network_params"]["gaussian_noise"] = gaussian_noise
     params["collaborative_params"]["prediction_network_params"]["epochs"] = int(epochs)
@@ -211,7 +211,7 @@ def ndcg_objective(trial):
     margin = trial.suggest_discrete_uniform('margin', 1.0, 2.0, 0.2)
     n_dims = trial.suggest_discrete_uniform('n_dims', 48, 112, 8)
     params = copy.deepcopy(hyperparamters_dict[algo])
-    params["n_dims"] = n_dims
+    params["n_dims"] = int(n_dims)
     params["collaborative_params"]["user_item_params"]["gcn_lr"] = gcn_lr
     params["collaborative_params"]["user_item_params"]["gcn_epochs"] = gcn_epochs
     params["collaborative_params"]["user_item_params"]["gcn_layers"] = gcn_layers
