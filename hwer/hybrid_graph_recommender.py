@@ -430,7 +430,7 @@ class HybridGCNRec(SVDppHybrid):
         scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
                                                         steps_per_epoch=int(
                                                             np.ceil(len(user_item_affinities) / batch_size)),
-                                                        div_factor=50, final_div_factor=50)
+                                                        div_factor=100, final_div_factor=100)
         # opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
         user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1, r) for u, i, r in
                                 user_item_affinities]
