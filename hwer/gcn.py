@@ -370,6 +370,7 @@ class NCFScorer(nn.Module):
     def __init__(self, feature_size, dropout, gaussian_noise):
         super(NCFScorer, self).__init__()
         noise = GaussianNoise(gaussian_noise)
+        self.noise = noise
         w1 = nn.Linear(feature_size * 2, feature_size * 2)
         drop = nn.Dropout(dropout)
         pipeline_1 = nn.Sequential(noise, w1, nn.LeakyReLU(negative_slope=0.1), drop)
@@ -380,16 +381,15 @@ class NCFScorer(nn.Module):
         w4 = nn.Linear(feature_size * 2 + 16, feature_size)
         self.uvd_pipeline = nn.Sequential(drop, w4, nn.LeakyReLU(negative_slope=0.1))
         w5 = nn.Linear(feature_size * 3, feature_size)
-        w6 = nn.Linear(feature_size, 64)
-        w7 = nn.Linear(64, 1)
-        pipeline_2 = nn.Sequential(w5, nn.LeakyReLU(negative_slope=0.1), noise, w6, nn.LeakyReLU(negative_slope=0.1), drop, w7)
+        w7 = nn.Linear(feature_size, 1)
+        pipeline_2 = nn.Sequential(w5, nn.LeakyReLU(negative_slope=0.1), drop, w7)
         self.drop = nn.Dropout(dropout)
         self.pipeline_2 = pipeline_2
 
         # init weights
         init_weight(w7.weight, 'xavier_uniform_', 'linear')
         init_bias(w7.bias)
-        weights = [w1, w3, w4, w5, w6]
+        weights = [w1, w3, w4, w5]
         for w in weights:
             init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
             init_bias(w.bias)
@@ -412,8 +412,7 @@ class NCFScorer(nn.Module):
 
         p1_out = self.pipeline_1(torch.cat([h_src, h_dst], 1))
         mains = torch.cat([meta, p1_out], 1)
-        mains = self.drop(mains)
-
+        mains = self.noise(mains)
         score = mu + self.pipeline_2(mains).flatten()
         return score
 
