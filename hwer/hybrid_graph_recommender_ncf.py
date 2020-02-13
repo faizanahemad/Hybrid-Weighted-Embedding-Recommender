@@ -70,6 +70,7 @@ class HybridGCNRecNCF(HybridGCNRec):
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
         conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
+        conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
@@ -105,7 +106,7 @@ class HybridGCNRecNCF(HybridGCNRec):
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderNCF(
             GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, False, g_train,
-                                  conv_arch, gaussian_noise),
+                                  conv_arch, gaussian_noise, conv_depth),
             mu, biases, zeroed_indices=zeroed_indices,
         ncf=NCFScorer(self.n_collaborative_dims, dropout, gaussian_noise))
         opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)

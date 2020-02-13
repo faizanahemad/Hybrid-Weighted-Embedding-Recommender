@@ -162,7 +162,7 @@ class HybridGCNRec(SVDppHybrid):
         self.log.info("Getting Triplet Model for GCN")
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
                                                                 gcn_layers, gcn_dropout, False, g_train,
-                                                                conv_arch, gaussian_noise, triplet_vectors),
+                                                                conv_arch, gaussian_noise, conv_depth, triplet_vectors),
                                           margin)
         return model
 
@@ -389,6 +389,7 @@ class HybridGCNRec(SVDppHybrid):
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
         enable_implicit = hyperparams["enable_implicit"] if "enable_implicit" in hyperparams else False
         conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
+        conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
@@ -424,7 +425,7 @@ class HybridGCNRec(SVDppHybrid):
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicit(
             GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, False, g_train,
-                                  conv_arch, gaussian_noise),
+                                  conv_arch, gaussian_noise, conv_depth),
             mu, biases, zeroed_indices=zeroed_indices)
         opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
         scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
