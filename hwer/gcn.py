@@ -73,11 +73,10 @@ class GraphSageConvWithSamplingV1(nn.Module):
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+        h = self.noise(h)
         h_concat = torch.cat([h, h_agg], 1)
         h_concat = self.drop(h_concat)
-        h_concat = self.noise(h_concat)
         h_new = self.W(h_concat)
-        h_new = self.noise(h_new)
         if self.activation is not None:
             h_new = self.activation(h_new, negative_slope=0.1)
         if self.prediction_layer:
@@ -95,7 +94,7 @@ class GraphSageConvWithSamplingV2(nn.Module):
         drop = nn.Dropout(dropout)
         #
         Wagg_1 = nn.Linear(feature_size, feature_size)
-        Wagg = [noise, Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
+        Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
         init_bias(Wagg_1.bias)
         init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu')
 
@@ -119,9 +118,9 @@ class GraphSageConvWithSamplingV2(nn.Module):
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         h_agg = self.Wagg(h_agg)
+        h = self.noise(h)
         h_concat = torch.cat([h, h_agg], 1)
         h_new = self.W(h_concat)
-        h_new = self.noise(h_new)
         if self.prediction_layer:
             return {'h': h_new}
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
@@ -139,7 +138,7 @@ class GraphSageConvWithSamplingV3(nn.Module):
         #
         W1 = nn.Linear(feature_size * 2, feature_size * 2)
         W2 = nn.Linear(feature_size * 2, feature_size)
-        W = [noise, W1, nn.LeakyReLU(negative_slope=0.1), drop, W2]
+        W = [W1, nn.LeakyReLU(negative_slope=0.1), drop, W2]
         self.drop = nn.Dropout(dropout)
         self.activation = activation
         self.prediction_layer = prediction_layer
@@ -160,9 +159,9 @@ class GraphSageConvWithSamplingV3(nn.Module):
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+        h = self.noise(h)
         h_concat = torch.cat([h, h_agg], 1)
         h_new = self.W(h_concat)
-        h_new = self.noise(h_new)
         if self.prediction_layer:
             return {'h': h_new}
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
@@ -178,13 +177,13 @@ class GraphSageConvWithSamplingV4(nn.Module):
         drop = nn.Dropout(dropout)
         #
         Wagg_1 = nn.Linear(feature_size, feature_size)
-        Wagg = [noise, Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
+        Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
         init_bias(Wagg_1.bias)
         init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu')
 
         W1 = nn.Linear(feature_size * 2, feature_size * 2)
         W2 = nn.Linear(feature_size * 2, feature_size)
-        W = [noise, W1, nn.LeakyReLU(negative_slope=0.1), drop, W2]
+        W = [W1, nn.LeakyReLU(negative_slope=0.1), drop, W2]
         self.activation = activation
         self.prediction_layer = prediction_layer
         self.noise = GaussianNoise(gaussian_noise)
@@ -205,9 +204,9 @@ class GraphSageConvWithSamplingV4(nn.Module):
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         h_agg = self.Wagg(h_agg)
+        h = self.noise(h)
         h_concat = torch.cat([h, h_agg], 1)
         h_new = self.W(h_concat)
-        h_new = self.noise(h_new)
         if self.prediction_layer:
             return {'h': h_new}
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
@@ -223,7 +222,7 @@ class GraphSageConvWithSamplingV5(nn.Module):
         noise = GaussianNoise(gaussian_noise)
         drop = nn.Dropout(dropout)
         Wagg_1 = nn.Linear(feature_size, feature_size)
-        Wagg = [noise, Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
+        Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
 
         Wh1 = nn.Linear(feature_size, feature_size * 2)
         Wh = [noise, Wh1, nn.LeakyReLU(negative_slope=0.1)]
@@ -262,7 +261,6 @@ class GraphSageConvWithSamplingV5(nn.Module):
         h_new = self.W(h_concat)
         h_agg = self.Wagg(h_agg)
         h_new = h_new + h_agg
-        h_new = self.noise(h_new)
         if self.prediction_layer:
             return {'h': h_new}
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
@@ -299,9 +297,8 @@ class GraphSageWithSampling(nn.Module):
         init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w.bias)
 
-        drop = nn.Dropout(dropout)
         noise = GaussianNoise(gaussian_noise)
-        self.proj = nn.Sequential(drop, w, nn.LeakyReLU(negative_slope=0.1), noise)
+        self.proj = nn.Sequential(noise, w, nn.LeakyReLU(negative_slope=0.1))
 
         self.G = G
 
@@ -371,19 +368,18 @@ class NCFScorer(nn.Module):
         super(NCFScorer, self).__init__()
         noise = GaussianNoise(gaussian_noise)
         self.noise = noise
-        w1 = nn.Linear(feature_size * 2, feature_size * 2)
+        w1 = nn.Linear(feature_size * 2, 64)
         drop = nn.Dropout(dropout)
-        pipeline_1 = nn.Sequential(noise, w1, nn.LeakyReLU(negative_slope=0.1), drop)
+        pipeline_1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1), drop)
         self.pipeline_1 = pipeline_1
         # bu, bi, h_src * h_dst, h_src * h_dst .sum(), p1 out
-        w3 = nn.Linear(5, 16)
+        w3 = nn.Linear(5, 32)
         self.meta_pipe = nn.Sequential(noise, w3, nn.LeakyReLU(negative_slope=0.1))
-        w4 = nn.Linear(feature_size * 2 + 16, feature_size)
-        self.uvd_pipeline = nn.Sequential(drop, w4, nn.LeakyReLU(negative_slope=0.1))
-        w5 = nn.Linear(feature_size * 3, feature_size)
-        w7 = nn.Linear(feature_size, 1)
-        pipeline_2 = nn.Sequential(w5, nn.LeakyReLU(negative_slope=0.1), drop, w7)
-        self.drop = nn.Dropout(dropout)
+        w4 = nn.Linear(feature_size * 2 + 32, 64)
+        self.uvd_pipeline = nn.Sequential(w4, nn.LeakyReLU(negative_slope=0.1))
+        w5 = nn.Linear(128, 64)
+        w7 = nn.Linear(64, 1)
+        pipeline_2 = nn.Sequential(noise, w5, nn.LeakyReLU(negative_slope=0.1), w7)
         self.pipeline_2 = pipeline_2
 
         # init weights
@@ -412,8 +408,7 @@ class NCFScorer(nn.Module):
 
         p1_out = self.pipeline_1(torch.cat([h_src, h_dst], 1))
         mains = torch.cat([meta, p1_out], 1)
-        mains = self.noise(mains)
-        score = mu + self.pipeline_2(mains).flatten()
+        score = biased_rating + self.pipeline_2(mains).flatten()
         return score
 
 
