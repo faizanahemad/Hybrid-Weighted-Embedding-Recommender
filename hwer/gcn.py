@@ -51,11 +51,9 @@ def init_bias(param):
     nn.init.constant_(param, 0)
 
 
-class GraphSageConvWithSamplingV1(nn.Module):
+class GraphSageConvWithSamplingBase(nn.Module):
     def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV1, self).__init__()
-
-        self.feature_size = feature_size
+        super(GraphSageConvWithSamplingBase, self).__init__()
         layers = []
         depth = min(1, depth)
         self.drop = nn.Dropout(dropout)
@@ -80,74 +78,57 @@ class GraphSageConvWithSamplingV1(nn.Module):
         init_bias(W.bias)
         self.W = nn.Sequential(*layers)
 
-    def forward(self, nodes):
+    def pre_process(self, nodes):
         h_agg = nodes.data['h_agg']
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+        return h, h_agg
+
+    def process_node_data(self, h):
         h = self.noise(h)
-        h_concat = torch.cat([h, h_agg], 1)
-        h_concat = self.drop(h_concat)
+        return h
+
+    def process_neighbourhood_data(self, h_agg):
+        return h_agg
+
+    def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
         if self.prediction_layer:
             return {'h': h_new}
         return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
 
+    def forward(self, nodes):
+        h, h_agg = self.pre_process(nodes)
+        h = self.process_node_data(h)
+        h_agg = self.process_neighbourhood_data(h_agg)
+        h_concat = torch.cat([h, h_agg], 1)
+        h_concat = self.drop(h_concat)
+        return self.post_process(h_concat, h, h_agg)
 
-class GraphSageConvWithSamplingV2(nn.Module):
+
+class GraphSageConvWithSamplingV1(GraphSageConvWithSamplingBase):
     def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV2, self).__init__()
-        self.feature_size = feature_size
+        super(GraphSageConvWithSamplingV1, self).__init__(feature_size, dropout, activation, prediction_layer, gaussian_noise, depth)
 
-        #
+
+class GraphSageConvWithSamplingV2(GraphSageConvWithSamplingBase):
+    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
+        super(GraphSageConvWithSamplingV2, self).__init__(feature_size, dropout, activation, prediction_layer, gaussian_noise, depth)
+
         Wagg_1 = nn.Linear(feature_size, feature_size)
         Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
         init_bias(Wagg_1.bias)
         init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu')
         self.Wagg = nn.Sequential(*Wagg)
 
-        layers = []
-        depth = min(1, depth)
-        self.drop = nn.Dropout(dropout)
-        for i in range(depth - 1):
-            weights = nn.Linear(feature_size * 2, feature_size * 2)
-            init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(weights.bias)
-            layers.append(weights)
-            layers.append(nn.LeakyReLU(negative_slope=0.1))
-
-        W = nn.Linear(feature_size * 2, feature_size)
-        layers.append(W)
-        self.activation = activation
-        self.prediction_layer = prediction_layer
-        self.noise = GaussianNoise(gaussian_noise)
-
-        if self.activation is not None:
-            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
-            layers.append(nn.LeakyReLU(negative_slope=0.1))
-        else:
-            init_weight(W.weight, 'xavier_uniform_', 'linear')
-        init_bias(W.bias)
-        self.W = nn.Sequential(*layers)
-
-    def forward(self, nodes):
-        h_agg = nodes.data['h_agg']
-        h = nodes.data['h']
-        w = nodes.data['w'][:, None]
-        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
-        h_agg = self.Wagg(h_agg)
-        h = self.noise(h)
-        h_concat = torch.cat([h, h_agg], 1)
-        h_concat = self.drop(h_concat)
-        h_new = self.W(h_concat)
-        if self.prediction_layer:
-            return {'h': h_new}
-        return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
+    def process_neighbourhood_data(self, h_agg):
+        return self.Wagg(h_agg)
 
 
-class GraphSageConvWithSamplingV3(nn.Module):
+class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingBase):
     def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV3, self).__init__()
+        super(GraphSageConvWithSamplingV3, self).__init__(feature_size, dropout, activation, prediction_layer, gaussian_noise, depth)
 
         self.feature_size = feature_size
 
@@ -168,40 +149,15 @@ class GraphSageConvWithSamplingV3(nn.Module):
         init_weight(Wh1.weight, 'xavier_uniform_', 'leaky_relu')
 
         #
-        layers = []
-        depth = min(1, depth)
-        self.drop = nn.Dropout(dropout)
-        for i in range(depth - 1):
-            weights = nn.Linear(feature_size * 2, feature_size * 2)
-            init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(weights.bias)
-            layers.append(weights)
-            layers.append(nn.LeakyReLU(negative_slope=0.1))
+    def process_neighbourhood_data(self, h_agg):
+        return self.Wagg(h_agg)
 
-        W = nn.Linear(feature_size * 2, feature_size)
-        layers.append(W)
-        self.activation = activation
-        self.prediction_layer = prediction_layer
-        self.noise = GaussianNoise(gaussian_noise)
-
-        if self.activation is not None:
-            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
-            layers.append(nn.LeakyReLU(negative_slope=0.1))
-        else:
-            init_weight(W.weight, 'xavier_uniform_', 'linear')
-        init_bias(W.bias)
-        self.W = nn.Sequential(*layers)
-
-    def forward(self, nodes):
-        h_agg = nodes.data['h_agg']
-        h = nodes.data['h']
-        w = nodes.data['w'][:, None]
-        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+    def process_node_data(self, h):
         h = self.noise(h)
         h = self.Wh(h)
-        h_agg = self.Wagg(h_agg)
-        h_concat = torch.cat([h, h_agg], 1)
-        h_concat = self.drop(h_concat)
+        return h
+
+    def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
         h_new = h_new + h_agg
         if self.prediction_layer:
