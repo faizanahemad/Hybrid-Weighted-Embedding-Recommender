@@ -177,6 +177,8 @@ class GraphSageWithSampling(nn.Module):
             GraphSageConvWithSampling = GraphSageConvWithSamplingV2
         elif conv_arch == 3:
             GraphSageConvWithSampling = GraphSageConvWithSamplingV3
+        elif conv_arch == 4:
+            GraphSageConvWithSampling = GraphSageConvWithSamplingV4
         else:
             GraphSageConvWithSampling = GraphSageConvWithSamplingV1
 
@@ -188,12 +190,16 @@ class GraphSageWithSampling(nn.Module):
                 convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu, False, gaussian_noise, conv_depth))
 
         self.convs = nn.ModuleList(convs)
+        noise = GaussianNoise(gaussian_noise)
         w = nn.Linear(n_content_dims, feature_size)
         init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w.bias)
+        proj = [noise, w, nn.LeakyReLU(negative_slope=0.1)]
 
-        noise = GaussianNoise(gaussian_noise)
-        self.proj = nn.Sequential(noise, w, nn.LeakyReLU(negative_slope=0.1))
+        if conv_arch == 4:
+            proj.append(LinearResnet(feature_size, feature_size, gaussian_noise))
+
+        self.proj = nn.Sequential(*proj)
 
         self.G = G
 
@@ -259,28 +265,28 @@ class GraphSAGERecommenderImplicit(nn.Module):
 
 
 class NCFScorer(nn.Module):
-    def __init__(self, feature_size, dropout, gaussian_noise):
+    def __init__(self, feature_size, dropout, gaussian_noise, scorer_depth):
         super(NCFScorer, self).__init__()
         noise = GaussianNoise(gaussian_noise)
         self.noise = noise
-        w1 = nn.Linear(feature_size * 2, 64)
-        drop = nn.Dropout(dropout)
-        pipeline_1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1), drop)
+        w1 = nn.Linear(feature_size * 2, feature_size)
+        pipeline_1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1))
         self.pipeline_1 = pipeline_1
-        # bu, bi, h_src * h_dst, h_src * h_dst .sum(), p1 out
-        w3 = nn.Linear(5, 32)
-        self.meta_pipe = nn.Sequential(noise, w3, nn.LeakyReLU(negative_slope=0.1))
-        w4 = nn.Linear(feature_size * 2 + 32, 64)
+        w4 = nn.Linear(feature_size * 2, feature_size)
         self.uvd_pipeline = nn.Sequential(w4, nn.LeakyReLU(negative_slope=0.1))
-        w5 = nn.Linear(128, 64)
-        w7 = nn.Linear(64, 1)
-        pipeline_2 = nn.Sequential(noise, w5, nn.LeakyReLU(negative_slope=0.1), w7)
-        self.pipeline_2 = pipeline_2
+        w5 = nn.Linear(feature_size * 2, feature_size)
+        w7 = nn.Linear(feature_size, 1)
+
+        layers = [LinearResnet(feature_size * 2, feature_size, gaussian_noise)]
+        for i in range(scorer_depth - 1):
+            layers.append(LinearResnet(feature_size, feature_size, gaussian_noise))
+        layers.append(w7)
+        self.layers = nn.Sequential(*layers)
 
         # init weights
         init_weight(w7.weight, 'xavier_uniform_', 'linear')
         init_bias(w7.bias)
-        weights = [w1, w3, w4, w5]
+        weights = [w1, w4, w5]
         for w in weights:
             init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
             init_bias(w.bias)
@@ -288,23 +294,15 @@ class NCFScorer(nn.Module):
     def forward(self, src, dst, mu, node_biases, h_dst, h_src):
         user_item_vec_dot = h_src * h_dst
         user_item_vec_dist = (h_src - h_dst) ** 2
-        user_item_vec_dist_sum = user_item_vec_dist.sum(1)
-        user_item_vec_dot_sum = user_item_vec_dot.sum(1)
         user_bias = node_biases[src + 1]
         item_bias = node_biases[dst + 1]
-        biased_rating = mu + user_item_vec_dot_sum + user_bias + item_bias
-
-        meta = torch.cat([user_item_vec_dot_sum.reshape((-1, 1)), user_item_vec_dist_sum.reshape((-1, 1)),
-                          user_bias.reshape((-1, 1)),
-                          item_bias.reshape((-1, 1)), biased_rating.reshape((-1, 1))], 1)
-        meta = self.meta_pipe(meta)
-        meta = torch.cat([meta, user_item_vec_dot, user_item_vec_dist], 1)
-        meta = self.uvd_pipeline(meta)
+        uvd = torch.cat([user_item_vec_dot, user_item_vec_dist], 1)
+        uvd = self.uvd_pipeline(uvd)
 
         p1_out = self.pipeline_1(torch.cat([h_src, h_dst], 1))
-        mains = torch.cat([meta, p1_out], 1)
-        score = biased_rating + self.pipeline_2(mains).flatten()
-        return score
+        mains = torch.cat([uvd, p1_out], 1)
+        score = self.layers(mains).flatten()
+        return mu + user_bias + item_bias + score
 
 
 class GraphSAGERecommenderNCF(GraphSAGERecommenderImplicit):
@@ -366,3 +364,46 @@ def build_dgl_graph(ratings, total_nodes, content_vectors):
         data={'inv': torch.ones(len(ratings), dtype=torch.uint8),
               'rating': torch.FloatTensor(ratings)})
     return g
+
+
+class LinearResnet(nn.Module):
+    def __init__(self, input_size, output_size, gaussian_noise):
+        super(LinearResnet, self).__init__()
+        self.scaling = False
+        if input_size != output_size:
+            self.scaling = True
+            self.iscale = nn.Linear(input_size, output_size)
+            init_weight(self.iscale.weight, 'xavier_uniform_', 'linear')
+            init_bias(self.iscale.bias)
+        W1 = nn.Linear(input_size, output_size)
+        bn1 = torch.nn.BatchNorm1d(output_size)
+        noise = GaussianNoise(gaussian_noise)
+
+        init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(W1.bias)
+
+        self.W = nn.Sequential(noise, W1, nn.LeakyReLU(negative_slope=0.1))
+
+    def forward(self, h):
+        identity = h
+        if self.scaling:
+            identity = self.iscale(identity)
+        out = self.W(h)
+        out = out + identity
+        return out
+
+
+class GraphSageConvWithSamplingV4(GraphSageConvWithSamplingV2):
+    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
+        super(GraphSageConvWithSamplingV4, self).__init__(feature_size, dropout, activation, prediction_layer, gaussian_noise, depth)
+        #
+        layers = []
+        depth = min(1, depth)
+        self.drop = nn.Dropout(dropout)
+        for i in range(depth - 1):
+            weights = LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise)
+            layers.append(weights)
+
+        W = LinearResnet(feature_size * 2, feature_size, gaussian_noise)
+        layers.append(W)
+        self.W = nn.Sequential(*layers)
