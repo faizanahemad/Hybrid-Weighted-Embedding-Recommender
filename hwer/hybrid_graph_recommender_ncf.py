@@ -71,7 +71,7 @@ class HybridGCNRecNCF(HybridGCNRec):
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
         conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
-        scorer_depth = hyperparams["scorer_depth"] if "scorer_depth" in hyperparams else 1
+        scorer_depth = hyperparams["scorer_depth"] if "scorer_depth" in hyperparams else 2
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]

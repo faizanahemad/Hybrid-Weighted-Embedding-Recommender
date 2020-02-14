@@ -12,6 +12,7 @@ warnings.filterwarnings('ignore')
 import numpy as np
 
 import movielens_data_reader as mdr
+from param_fetcher import fetch_gcn_params, fetch_svdpp_params
 
 dataset = "100K"
 read_data = mdr.get_data_reader(dataset=dataset)
@@ -59,73 +60,17 @@ hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
                               knn_params=dict(n_neighbors=n_neighbors,
                                               index_time_params={'M': 15, 'ef_construction': 200, }))
 
-hyperparameters_svdpp = dict(n_dims=48, combining_factor=0.1,
-                             knn_params=dict(n_neighbors=n_neighbors,
-                                             index_time_params={'M': 15, 'ef_construction': 200, }),
-                             collaborative_params=dict(
-                                 prediction_network_params=dict(lr=0.5, epochs=25, batch_size=64,
-                                                                network_width=128, padding_length=50,
-                                                                network_depth=4, verbose=verbose,
-                                                                kernel_l2=1e-5,
-                                                                bias_regularizer=0.001, dropout=0.05,
-                                                                use_resnet=True, use_content=True),
-                                 user_item_params=dict(lr=0.1, epochs=20, batch_size=64, l2=0.001,
-                                                       verbose=verbose, margin=1.0)))
+hyperparameters_svdpp = fetch_svdpp_params(dataset)
 
-hyperparameters_gcn = dict(n_dims=64, combining_factor=0.1,
-                           knn_params=dict(n_neighbors=n_neighbors,
-                                           index_time_params={'M': 15, 'ef_construction': 200, }),
-                           collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.03, epochs=75, batch_size=1024,
-                                                              network_depth=3, verbose=verbose,
-                                                              gaussian_noise=0.225, conv_arch=2, conv_depth=2,
-                                                              kernel_l2=1e-9, dropout=0.0, use_content=True),
-                               user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
-                                                     gcn_lr=0.00075, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
-                                                     gcn_kernel_l2=1e-8, gcn_batch_size=1024, verbose=verbose,
-                                                     margin=1.0,
-                                                     gaussian_noise=0.15, conv_arch=2,
-                                                     enable_gcn=True, enable_node2vec=False,
-                                                     enable_triplet_loss=False)))
+hyperparameters_gcn = fetch_gcn_params(dataset, "gcn", 2)
 
-hyperparameters_gcn_node2vec = dict(n_dims=64, combining_factor=0.1,
-                                    knn_params=dict(n_neighbors=n_neighbors,
-                                                    index_time_params={'M': 15, 'ef_construction': 200, }),
-                                    collaborative_params=dict(
-                                        prediction_network_params=dict(lr=0.03, epochs=75, batch_size=1024,
-                                                                       network_depth=3, verbose=verbose,
-                                                                       gaussian_noise=0.225, conv_arch=2, conv_depth=2,
-                                                                       kernel_l2=1e-9, dropout=0.0, use_content=True),
-                                        user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
-                                                              gcn_lr=0.00075, gcn_epochs=20, gcn_layers=2,
-                                                              gcn_dropout=0.0,
-                                                              gcn_kernel_l2=1e-8, gcn_batch_size=1024, verbose=verbose,
-                                                              margin=1.0,
-                                                              gaussian_noise=0.15, conv_arch=2,
-                                                              enable_gcn=True, enable_node2vec=True,
-                                                              enable_triplet_loss=True)))
-
-hyperparameters_gcn_ncf = dict(n_dims=64, combining_factor=0.1,
-                               knn_params=dict(n_neighbors=n_neighbors,
-                                               index_time_params={'M': 15, 'ef_construction': 200, }),
-                               collaborative_params=dict(
-                                   prediction_network_params=dict(lr=0.02, epochs=50, batch_size=1024,
-                                                                  network_depth=2, verbose=verbose, scorer_depth=2,
-                                                                  gaussian_noise=0.2, conv_arch=2, conv_depth=2,
-                                                                  kernel_l2=1e-9, dropout=0.0, use_content=True),
-                                   user_item_params=dict(lr=0.1, epochs=20, batch_size=64, l2=0.0001,
-                                                         gcn_lr=0.00075, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
-                                                         gcn_kernel_l2=1e-8, gcn_batch_size=1024, verbose=verbose,
-                                                         margin=1.0,
-                                                         gaussian_noise=0.15, conv_arch=2,
-                                                         enable_gcn=True, enable_node2vec=False,
-                                                         enable_triplet_loss=False)))
+hyperparameters_gcn_ncf = fetch_gcn_params(dataset, "gcn_ncf", 2)
 
 hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
                             "svd": {"biased": True, "n_factors": 20},
                             "algos": ["svd"]}
 
-hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_hybrid_node2vec=hyperparameters_gcn_node2vec,
+hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn,
                            content_only=hyperparameter_content,
                            gcn_ncf=hyperparameters_gcn_ncf,
                            svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
@@ -133,9 +78,8 @@ hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_hybrid_node2vec=h
 content_only = False
 svdpp_hybrid = False
 surprise = False
-gcn_hybrid = True
-gcn_hybrid_node2vec = False
-gcn_ncf = False
+gcn_hybrid = False
+gcn_ncf = True
 
 from pprint import pprint
 
@@ -152,7 +96,6 @@ if not enable_kfold:
                                                          hyperparamters_dict,
                                                          prepare_data_mappers, rating_scale,
                                                          svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
-                                                         gcn_hybrid_node2vec=gcn_hybrid_node2vec,
                                                          gcn_ncf=gcn_ncf,
                                                          surprise=surprise, content_only=content_only,
                                                          enable_error_analysis=enable_error_analysis,
@@ -181,7 +124,6 @@ else:
                                      hyperparamters_dict,
                                      prepare_data_mappers, rating_scale,
                                      svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
-                                     gcn_hybrid_node2vec=gcn_hybrid_node2vec,
                                      gcn_ncf=gcn_ncf,
                                      surprise=surprise, content_only=content_only,
                                      enable_error_analysis=False, enable_baselines=False)

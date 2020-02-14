@@ -387,7 +387,6 @@ class HybridGCNRec(SVDppHybrid):
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
-        enable_implicit = hyperparams["enable_implicit"] if "enable_implicit" in hyperparams else False
         conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
