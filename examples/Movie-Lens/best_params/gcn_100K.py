@@ -45,13 +45,13 @@ params = {
                                                      gaussian_noise=0.15,))),
   5: dict(n_dims=64, combining_factor=0.1,
                            collaborative_params=dict(
-                               prediction_network_params=dict(lr=0.03, epochs=75, batch_size=1024,
+                               prediction_network_params=dict(lr=0.04, epochs=75, batch_size=1024,
                                                               network_depth=3,
-                                                              gaussian_noise=0.25, conv_depth=2,
+                                                              gaussian_noise=0.325, conv_depth=3,
                                                               kernel_l2=1e-9, dropout=0.0,),
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
-                                                     gcn_lr=0.00075, gcn_epochs=20, gcn_layers=2, gcn_dropout=0.0,
+                                                     gcn_lr=0.00075, gcn_epochs=25, gcn_layers=2, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-8, gcn_batch_size=1024, conv_depth=2,
                                                      margin=1.0,
-                                                     gaussian_noise=0.15,))),
+                                                     gaussian_noise=0.05,))),
           }
