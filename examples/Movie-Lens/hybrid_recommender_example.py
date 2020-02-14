@@ -12,53 +12,21 @@ warnings.filterwarnings('ignore')
 import numpy as np
 
 import movielens_data_reader as mdr
-from param_fetcher import fetch_gcn_params, fetch_svdpp_params
+from param_fetcher import fetch_gcn_params, fetch_svdpp_params, fetch_content_params
 
 dataset = "100K"
-read_data = mdr.get_data_reader(dataset=dataset)
-df_user, df_item, ratings = read_data()
+df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale = mdr.build_dataset(dataset)
 
 #
-test_data_subset = False
 enable_baselines = False
 enable_kfold = False
 enable_error_analysis = False
-n_neighbors = 200
 verbose = 2  # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 
-if test_data_subset:
-    n_neighbors = 5
-    if True:
-        item_counts = ratings.groupby(['item'])['user'].count().reset_index()
-        item_counts = item_counts[(item_counts["user"] <= 200) & (item_counts["user"] >= 20)].head(100)
-        items = set(item_counts["item"])
-        ratings = ratings[ratings["item"].isin(items)]
-
-        user_counts = ratings.groupby(['user'])['item'].count().reset_index()
-        user_counts = user_counts[(user_counts["item"] <= 100) & (user_counts["item"] >= 20)].head(100)
-        users = set(user_counts["user"])
-        ratings = ratings[ratings["user"].isin(users)]
-
-        # ratings = pd.concat((ratings[ratings.rating == 1].head(2), ratings[ratings.rating == 5].head(3)))
-        users = set(ratings["user"])
-        items = set(ratings["item"])
-        df_user = df_user[df_user["user"].isin(ratings.user)]
-        df_item = df_item[df_item["item"].isin(ratings.item)]
-    else:
-        cores = 10
-        df_user, df_item, ratings = get_small_subset(df_user, df_item, ratings, cores)
-
-prepare_data_mappers = mdr.get_data_mapper(df_user, df_item, dataset=dataset)
-ratings = ratings[["user", "item", "rating"]]
-user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
-rating_scale = (np.min([r for u, i, r in user_item_affinities]), np.max([r for u, i, r in user_item_affinities]))
-
 print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (
-    ratings.shape[0], len(df_user.user.values), len(df_item.item.values), rating_scale))
+    len(user_item_affinities), len(df_user.user.values), len(df_item.item.values), rating_scale))
 
-hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
-                              knn_params=dict(n_neighbors=n_neighbors,
-                                              index_time_params={'M': 15, 'ef_construction': 200, }))
+hyperparameter_content = fetch_content_params()
 
 hyperparameters_svdpp = fetch_svdpp_params(dataset)
 
@@ -80,8 +48,13 @@ svdpp_hybrid = False
 surprise = False
 gcn_hybrid = False
 gcn_ncf = True
+algos = ["gcn_ncf"]
 
 from pprint import pprint
+
+for algo in algos:
+    print("algo")
+    pprint(hyperparamters_dict[algo])
 
 pprint(hyperparamters_dict)
 
@@ -94,10 +67,7 @@ if not enable_kfold:
                                                          list(df_user.user.values),
                                                          list(df_item.item.values),
                                                          hyperparamters_dict,
-                                                         prepare_data_mappers, rating_scale,
-                                                         svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
-                                                         gcn_ncf=gcn_ncf,
-                                                         surprise=surprise, content_only=content_only,
+                                                         prepare_data_mappers, rating_scale, algos,
                                                          enable_error_analysis=enable_error_analysis,
                                                          enable_baselines=enable_baselines)
     results = display_results(results)
@@ -122,10 +92,7 @@ else:
         recs, res, ucrms = test_once(train_affinities, validation_affinities, list(df_user.user.values),
                                      list(df_item.item.values),
                                      hyperparamters_dict,
-                                     prepare_data_mappers, rating_scale,
-                                     svdpp_hybrid=svdpp_hybrid, gcn_hybrid=gcn_hybrid,
-                                     gcn_ncf=gcn_ncf,
-                                     surprise=surprise, content_only=content_only,
+                                     prepare_data_mappers, rating_scale, algos,
                                      enable_error_analysis=False, enable_baselines=False)
 
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))

@@ -269,14 +269,15 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
 
 
 def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
-              get_data_mappers, rating_scale,
-              svdpp_hybrid=True, surprise=True,
-              gcn_hybrid=True, gcn_ncf=True,
-              content_only=True, enable_error_analysis=False, enable_baselines=False):
+              get_data_mappers, rating_scale, algos,
+              enable_error_analysis=False, enable_baselines=False):
     results = []
     recs = []
+    assert len(algos) > 0
+    algos = set(algos)
+    assert len(algos - {"surprise", "content_only", "svdpp_hybrid", "gcn_hybrid", "gcn_ncf"}) == 0
     user_rating_count_metrics = pd.DataFrame([], columns=["algo", "user_rating_count", "rmse", "mae", "train_map", "map", "train_rmse", "train_mae"])
-    if surprise:
+    if "surprise" in algos:
         hyperparameters_surprise = hyperparamters_dict["surprise"]
         _, surprise_results, surprise_user_rating_count_metrics, _, _ = test_surprise(train_affinities,
                                                                                       validation_affinities,
@@ -287,7 +288,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         results.extend(surprise_results)
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, surprise_user_rating_count_metrics))
 
-    if content_only:
+    if "content_only" in algos:
         hyperparameters = hyperparamters_dict["content_only"]
         content_rec, res, content_user_rating_count_metrics, _, _ = test_content_only(train_affinities, validation_affinities, users,
                                                                                       items, hyperparameters, get_data_mappers, rating_scale,
@@ -296,7 +297,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         recs.append(content_rec)
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, content_user_rating_count_metrics))
 
-    if svdpp_hybrid:
+    if "svdpp_hybrid" in algos:
         hyperparameters = hyperparamters_dict["svdpp_hybrid"]
         svd_rec, res, svdpp_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                               items, hyperparameters, get_data_mappers, rating_scale,
@@ -307,7 +308,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         recs.append(svd_rec)
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, svdpp_user_rating_count_metrics))
 
-    if gcn_hybrid:
+    if "gcn_hybrid" in algos:
         hyperparameters = hyperparamters_dict["gcn_hybrid"]
         gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                           items, hyperparameters, get_data_mappers, rating_scale,
@@ -318,7 +319,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         recs.append(gcn_rec)
         user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
 
-    if gcn_ncf:
+    if "gcn_ncf" in algos:
         hyperparameters = hyperparamters_dict["gcn_ncf"]
         gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                           items, hyperparameters, get_data_mappers, rating_scale,

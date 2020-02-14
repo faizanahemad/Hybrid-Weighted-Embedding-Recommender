@@ -17,6 +17,10 @@ def read_params(location, dataset, algo):
             return pkg.params_svdpp_100K
 
 
+def fetch_content_params():
+    return dict(n_dims=64, combining_factor=0.1, knn_params=knn_params)
+
+
 def fetch_gcn_params(dataset, algo, conv_arch):
     p = read_params("best_params/", dataset, algo)
     p = p[conv_arch]

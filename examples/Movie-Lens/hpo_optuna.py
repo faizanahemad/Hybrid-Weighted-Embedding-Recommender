@@ -1,61 +1,15 @@
-from hwer.validation import *
+import optuna
+import copy
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
-
-pd.set_option('display.max_rows', 500)
-pd.set_option('display.max_columns', 500)
-pd.set_option('display.width', 1000)
-pd.options.display.width = 0
-import warnings
-import optuna
-
-warnings.filterwarnings('ignore')
-import numpy as np
-
-import movielens_data_reader as mdr
-from param_fetcher import fetch_svdpp_params, fetch_gcn_params
+from hpo_base import hyperparamters_dict, df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale
 from optuna.pruners import PercentilePruner
-
-dataset = "100K"
-read_data = mdr.get_data_reader(dataset=dataset)
-df_user, df_item, ratings = read_data()
-
-#
-enable_kfold = True
-n_neighbors = 200
-verbose = 2  # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
-
-prepare_data_mappers = mdr.get_data_mapper(df_user, df_item, dataset=dataset)
-ratings = ratings[["user", "item", "rating"]]
-user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
-rating_scale = (np.min([r for u, i, r in user_item_affinities]), np.max([r for u, i, r in user_item_affinities]))
-
-print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (
-    ratings.shape[0], len(df_user.user.values), len(df_item.item.values), rating_scale))
-
-hyperparameter_content = dict(n_dims=40, combining_factor=0.1,
-                              knn_params=dict(n_neighbors=n_neighbors,
-                                              index_time_params={'M': 15, 'ef_construction': 200, }))
-hyperparameters_svdpp = fetch_svdpp_params(dataset)
-
-hyperparameters_gcn = fetch_gcn_params(dataset, "gcn", 2)
-
-hyperparameters_gcn_ncf = fetch_gcn_params(dataset, "gcn_ncf", 2)
-hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
-                            "svd": {"biased": True, "n_factors": 20},
-                            "algos": ["svd"]}
-
-hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn,
-                           content_only=hyperparameter_content,
-                           gcn_ncf=hyperparameters_gcn_ncf,
-                           svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise, )
+import numpy as np
+from hwer.validation import *
 
 algo = "gcn_hybrid"
 objective = "rmse" # or ndcg
-
-from pprint import pprint
-
-pprint(hyperparamters_dict)
+enable_kfold = False
 
 
 def optimisation_objective(hyperparameters, algo, trial):
@@ -101,6 +55,7 @@ def optimisation_objective(hyperparameters, algo, trial):
 def rmse_objective(trial):
     conv_arch = trial.suggest_categorical('conv_arch', [1])
     network_depth = trial.suggest_int('network_depth', 2, 3)
+    conv_depth = trial.suggest_int('conv_depth', 1, 3)
     epochs = trial.suggest_discrete_uniform('epochs', 50, 100, 10)
     gaussian_noise = trial.suggest_uniform('gaussian_noise', 0., 0.15)
     lr = trial.suggest_loguniform('lr', 1e-2, 5e-2)
@@ -115,6 +70,7 @@ def rmse_objective(trial):
     params["collaborative_params"]["prediction_network_params"]["gaussian_noise"] = gaussian_noise
     params["collaborative_params"]["prediction_network_params"]["epochs"] = int(epochs)
     params["collaborative_params"]["prediction_network_params"]["network_depth"] = int(network_depth)
+    params["collaborative_params"]["prediction_network_params"]["conv_depth"] = int(conv_depth)
     params["collaborative_params"]["prediction_network_params"]["conv_arch"] = conv_arch
     params["collaborative_params"]["prediction_network_params"]["kernel_l2"] = kernel_l2
     params["collaborative_params"]["prediction_network_params"]["dropout"] = dropout
