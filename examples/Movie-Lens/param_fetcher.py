@@ -46,6 +46,26 @@ def fetch_svdpp_params(dataset):
     return
 
 
+def get_best_params(dataset, gcn_conv_variant):
+
+    hyperparameter_content = fetch_content_params()
+
+    hyperparameters_svdpp = fetch_svdpp_params(dataset)
+
+    hyperparameters_gcn = fetch_gcn_params(dataset, "gcn", gcn_conv_variant)
+
+    hyperparameters_gcn_ncf = fetch_gcn_params(dataset, "gcn_ncf", gcn_conv_variant)
+
+    hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
+                                "svd": {"biased": True, "n_factors": 20},
+                                "algos": ["svd"]}
+    hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn,
+                               content_only=hyperparameter_content,
+                               gcn_ncf=hyperparameters_gcn_ncf,
+                               svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise)
+    return hyperparamters_dict
+
+
 n_neighbors = 200
 knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, })
 enable_node2vec = True

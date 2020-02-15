@@ -3,8 +3,8 @@ import argparse
 import copy
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
-from hpo_base import hyperparamters_dict, optimisation_objective, df_user, df_item, user_item_affinities, \
-    prepare_data_mappers, rating_scale
+from hpo_base import optimisation_objective, init_args
+from param_fetcher import get_best_params
 import numpy as np
 from hwer.validation import *
 import dill as pkl
@@ -21,8 +21,8 @@ def report(imv, step):
     pass
 
 
-def build_params(args, objective):
-    params = copy.deepcopy(starting_params)
+def build_params(args, objective, params):
+    params = copy.deepcopy(params)
     if objective == "rmse":
         params["collaborative_params"]["prediction_network_params"]["lr"] = args["lr"]
         params["collaborative_params"]["prediction_network_params"]["epochs"] = int(args["epochs"])
@@ -49,8 +49,8 @@ def run_trial(args):
     :returns: Dict with status and loss from cross-validation
     """
 
-    params = build_params(args, objective)
-    rmse, ndcg = optimisation_objective(params, algo, report, objective)
+    hyperparams = build_params(args, objective, params)
+    rmse, ndcg = optimisation_objective(hyperparams, algo, report, objective, dataset)
     loss = rmse if objective == "rmse" else 1 - ndcg
     return {
         'status': 'fail' if np.isnan(loss) else 'ok',
@@ -129,15 +129,7 @@ def merge_trials(trials1, trials2_slice):
 
 
 if __name__ == '__main__':
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--objective', type=str, default="rmse", metavar='N', choices=["rmse", "ndcg"],
-                    help='')
-    ap.add_argument('--algo', type=str, default="gcn_hybrid", metavar='N', choices=["gcn_hybrid", "gcn_ncf", "svdpp_hybrid"],
-                    help='')
-    args = vars(ap.parse_args())
-    algo = args["algo"]
-    objective = args["objective"]
-    starting_params = copy.deepcopy(hyperparamters_dict[algo])
+    params, dataset, objective, algo = init_args()
     loaded_fnames = []
     trials = None
     # Run new hyperparameter trials until killed
@@ -147,7 +139,7 @@ if __name__ == '__main__':
         # Load up all runs:
         import glob
 
-        path = TRIALS_FOLDER + '/*.pkl'
+        path = TRIALS_FOLDER + '/%s_%s_%s_*.pkl' % (algo, dataset, objective)
         for fname in glob.glob(path):
             if fname in loaded_fnames:
                 continue
@@ -170,7 +162,7 @@ if __name__ == '__main__':
         n = NUMBER_TRIALS_PER_RUN
         try:
             best = fmin(run_trial,
-                        space=define_search_space(objective, starting_params),
+                        space=define_search_space(objective, params),
                         algo=tpe.suggest,
                         max_evals=n + len(trials.trials),
                         trials=trials,
@@ -185,7 +177,7 @@ if __name__ == '__main__':
 
         # Merge with empty trials dataset:
         save_trials = merge_trials(hyperopt_trial, trials.trials[-n:])
-        new_fname = TRIALS_FOLDER + '/' + str(np.random.randint(0, sys.maxsize)) + '.pkl'
+        new_fname = TRIALS_FOLDER + '/%s_%s_%s_' % (algo, dataset, objective) + str(np.random.randint(0, sys.maxsize)) + '.pkl'
         pkl.dump({'trials': save_trials, 'n': n}, open(new_fname, 'wb'))
         loaded_fnames.append(new_fname)
 
