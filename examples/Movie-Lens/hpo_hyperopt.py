@@ -148,7 +148,7 @@ def print_trial_details(trials):
     for trial in trials:
         if trial['result']['status'] == 'ok':
             loss = trial['result']['loss']
-            val = trial['misc']['vals']
+            val = dict(trial['misc']['vals'])
             val['loss'] = loss
             vals.append(val)
             if loss < best_loss:
