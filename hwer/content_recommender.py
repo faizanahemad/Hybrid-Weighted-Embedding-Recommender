@@ -20,6 +20,7 @@ class ContentRecommendation(RecommendationBase):
         self.log = getLogger(type(self).__name__)
 
     def __build_user_only_embeddings__(self, user_ids: List[str], user_data: FeatureSet):
+        self.log.debug("ContentRecommendation::__build_user_only_embeddings__:: Building User Only Embedding ...")
         user_embeddings = {}
         for feature in user_data:
             feature_name = feature.feature_name
@@ -32,12 +33,14 @@ class ContentRecommendation(RecommendationBase):
                 embedding = unit_length(embedding, axis=1)
                 user_embeddings[feature_name] = embedding
 
+        self.log.debug("ContentRecommendation::__build_user_only_embeddings__:: Built User Only Embedding for %s" % list(user_embeddings.keys()))
         return user_embeddings
 
     def __build_item_embeddings__(self, item_ids: List[str],
                                   user_embeddings: Dict[str, np.ndarray],
                                   item_data: FeatureSet,
                                   user_item_affinities: List[Tuple[str, str, float]]):
+        self.log.debug("ContentRecommendation::__build_item_embeddings__:: Building Item Embedding ...")
         item_embeddings = {}
         for feature in item_data:
             if feature.feature_type == "id":
@@ -76,6 +79,9 @@ class ContentRecommendation(RecommendationBase):
             assert np.sum(np.isnan(item_embedding)) == 0
             item_embedding = unit_length(item_embedding, axis=1)
             item_embeddings[feature_name] = item_embedding
+        self.log.debug(
+            "ContentRecommendation::__build_item_embeddings__:: Built Item Embedding for %s" % list(
+                item_embeddings.keys()))
         return item_embeddings
 
     def __build_user_embeddings__(self,
@@ -86,6 +92,7 @@ class ContentRecommendation(RecommendationBase):
                                   item_embeddings: Dict[str, np.ndarray],
                                   user_item_affinities: List[Tuple[str, str, float]]):
 
+        self.log.debug("ContentRecommendation::__build_user_embeddings__:: Building User Embedding ...")
         user_item_dict: Dict[str, Dict[str, float]] = build_user_item_dict(user_item_affinities)
 
         for feature in user_data:
@@ -164,9 +171,13 @@ class ContentRecommendation(RecommendationBase):
             user_embedding = unit_length(user_embedding, axis=1)
             user_embeddings[feature_name] = user_embedding
             processed_features.append(feature_name)
+        self.log.debug(
+            "ContentRecommendation::__build_user_embeddings__:: Built User Embedding for %s, Processed features = %s" % (list(
+                user_embeddings.keys()), processed_features))
         return user_embeddings, processed_features
 
     def __concat_feature_vectors__(self, processed_features, item_embeddings, user_embeddings, n_output_dims):
+        self.log.debug("ContentRecommendation::__concat_feature_vectors__:: Concat Features = %s, " % processed_features)
         # Making Each Embedding vector to have unit length Features
         for feature_name in processed_features:
             item_embedding = unit_length(item_embeddings[feature_name], axis=1)
@@ -204,7 +215,8 @@ class ContentRecommendation(RecommendationBase):
         all_vectors = unit_length(all_vectors, axis=1)
         user_vectors = all_vectors[:user_vectors_length]
         item_vectors = all_vectors[user_vectors_length:]
-
+        self.log.debug(
+            "ContentRecommendation::__concat_feature_vectors__:: Concat Features Done, user_vectors = %s, item_vectors = %s" % (user_vectors.shape, item_vectors.shape))
         return user_vectors, item_vectors
 
     def __build_content_embeddings__(self,

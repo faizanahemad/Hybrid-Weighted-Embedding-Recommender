@@ -251,6 +251,7 @@ class HybridRecommender(RecommendationBase):
             "user_user_affinities"] if "user_user_affinities" in kwargs else list()
 
         self.log.debug("Hybrid Base: Fit Method: content_data_used = %s, content_dims = %s", content_data_used, self.n_content_dims)
+        start = time.time()
         if content_data_used:
             super(type(self.cb), self.cb).fit(user_ids, item_ids, user_item_affinities, **kwargs)
             user_vectors, item_vectors = self.cb.__build_content_embeddings__(user_ids, item_ids,
@@ -259,7 +260,8 @@ class HybridRecommender(RecommendationBase):
                                                                               self.n_content_dims)
         else:
             user_vectors, item_vectors = np.random.rand(len(user_ids), self.n_content_dims), np.random.rand(len(item_ids), self.n_content_dims)
-        self.log.debug("Hybrid Base: Built Content Embedding.")
+        self.log.info("Hybrid Base: Built Content Embedding., user_vectors shape = %s, item vectors shape = %s, Time = %.1f" %
+                       (user_vectors.shape, item_vectors.shape, time.time() - start))
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
 
@@ -280,7 +282,7 @@ class HybridRecommender(RecommendationBase):
         item_vectors = unit_length(item_vectors, axis=1)
 
         assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
-        self.log.debug("Hybrid Base: Building Prediction Network...")
+        self.log.debug("Hybrid Base: Start Building Prediction Network...")
         if content_data_used:
             prediction_artifacts = self.__build_prediction_network__(user_ids, item_ids, user_item_affinities,
                                                                      user_content_vectors, item_content_vectors,
