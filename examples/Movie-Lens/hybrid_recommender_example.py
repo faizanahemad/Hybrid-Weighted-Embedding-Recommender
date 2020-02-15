@@ -32,7 +32,7 @@ hyperparameters_svdpp = fetch_svdpp_params(dataset)
 
 hyperparameters_gcn = fetch_gcn_params(dataset, "gcn", 2)
 
-hyperparameters_gcn_ncf = fetch_gcn_params(dataset, "gcn_ncf", 4)
+hyperparameters_gcn_ncf = fetch_gcn_params(dataset, "gcn_ncf", 5)
 
 hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
                             "svd": {"biased": True, "n_factors": 20},
@@ -53,7 +53,7 @@ algos = ["gcn_ncf"]
 from pprint import pprint
 
 for algo in algos:
-    print("algo")
+    print("algo = %s" % algo)
     pprint(hyperparamters_dict[algo])
 
 pprint(hyperparamters_dict)

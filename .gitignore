@@ -157,3 +157,4 @@ examples/Movie-Lens/20M/Movie-Lens-20M-Content-Builder.ipynb
 examples/approximating_functions_with_nn.py
 examples/basic_negative_sampling_loss.py
 examples/numba_example.py
+examples/Movie-Lens/hyperopt_trials/
