@@ -43,7 +43,7 @@ def fetch_svdpp_params(dataset):
     p["collaborative_params"]["user_item_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["use_content"] = use_content
-    return
+    return p
 
 
 def get_best_params(dataset, gcn_conv_variant):

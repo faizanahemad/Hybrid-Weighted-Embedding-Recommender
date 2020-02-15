@@ -62,8 +62,9 @@ def ndcg_objective(trial):
 
 if __name__ == '__main__':
     parameters, dataset, objective, algo = init_args()
+    conv_arch = parameters["collaborative_params"]["prediction_network_params"]["conv_arch"]
 
-    storage = 'sqlite:///%s_%s_%s.db' % (algo, dataset, objective)
+    storage = 'sqlite:///%s_%s_%s_%s.db' % (algo, dataset, objective, conv_arch)
     study = optuna.create_study(study_name=algo, storage=storage,
                                 load_if_exists=True,
                                 pruner=PercentilePruner(percentile=25.0, n_startup_trials=2, n_warmup_steps=1, interval_steps=1))
