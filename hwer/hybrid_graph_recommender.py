@@ -26,6 +26,7 @@ class HybridGCNRec(SVDppHybrid):
                              user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                              n_output_dims: int,
                              hyperparams: Dict):
+        self.log.info("__word2vec_trainer__: Training Node2Vec base Random Walks with Word2Vec...")
         from gensim.models import Word2Vec
         walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 40
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
@@ -59,9 +60,9 @@ class HybridGCNRec(SVDppHybrid):
         np.random.shuffle(sentences)
         w2v = Word2Vec(sentences, min_count=1,
                        size=self.n_collaborative_dims, window=window, workers=self.cpu, sg=1,
-                       negative=10, max_vocab_size=None, iter=1)
+                       negative=10, max_vocab_size=None, iter=2)
 
-        for _ in range(0):
+        for _ in range(iter):
             gts = time.time()
             sentences = []
             for w in sentences_generator():
@@ -70,7 +71,7 @@ class HybridGCNRec(SVDppHybrid):
 
             gt += time.time() - gts
             np.random.shuffle(sentences)
-            w2v.train(sentences, total_examples=len(sentences), epochs=1)
+            w2v.train(sentences, total_examples=len(sentences), epochs=2)
 
         all_words = set(list(flatten(sentences)))
         nodes = set(walker.nodes)
@@ -123,7 +124,7 @@ class HybridGCNRec(SVDppHybrid):
                                      n_output_dims: int,
                                      hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         self.log.debug(
-            "Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+            "HybridGCNRec::__node2vec_triplet_trainer__: Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
             len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
 
         enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
