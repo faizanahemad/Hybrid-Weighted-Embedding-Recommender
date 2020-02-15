@@ -62,7 +62,7 @@ def define_search_space(objective, starting_params):
     rmse_space = {
         'lr': hp.qlognormal("lr", np.log(prediction["lr"]),
                            0.5 * prediction["lr"],
-                            0.01 * prediction["lr"]),
+                            0.05 * prediction["lr"]),
         'epochs': hp.quniform('epochs',
                               prediction["epochs"] - 20,
                               prediction["epochs"] + 20, 5),
@@ -82,7 +82,7 @@ def define_search_space(objective, starting_params):
     ndcg_space = {
         'gcn_lr': hp.qlognormal("gcn_lr", np.log(embedding["gcn_lr"]),
                            0.5 * embedding["gcn_lr"],
-                                0.01 * embedding["gcn_lr"]),
+                                0.05 * embedding["gcn_lr"]),
         'gcn_epochs': hp.quniform('gcn_epochs',
                               embedding["gcn_epochs"] - 10,
                               embedding["gcn_epochs"] + 20, 5),

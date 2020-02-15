@@ -259,6 +259,7 @@ class HybridRecommender(RecommendationBase):
                                                                               self.n_content_dims)
         else:
             user_vectors, item_vectors = np.random.rand(len(user_ids), self.n_content_dims), np.random.rand(len(item_ids), self.n_content_dims)
+        self.log.debug("Hybrid Base: Built Content Embedding.")
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
 
@@ -279,6 +280,7 @@ class HybridRecommender(RecommendationBase):
         item_vectors = unit_length(item_vectors, axis=1)
 
         assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
+        self.log.debug("Hybrid Base: Building Prediction Network...")
         if content_data_used:
             prediction_artifacts = self.__build_prediction_network__(user_ids, item_ids, user_item_affinities,
                                                                      user_content_vectors, item_content_vectors,
@@ -292,6 +294,7 @@ class HybridRecommender(RecommendationBase):
                                                                      self.user_id_to_index, self.item_id_to_index,
                                                                      self.rating_scale, prediction_network_params)
         self.prediction_artifacts.update(dict(prediction_artifacts))
+        self.log.debug("Hybrid Base: Built Prediction Network.")
         self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
                                              self.user_id_to_index, self.item_id_to_index, self.rating_scale, **svd_params)
 
