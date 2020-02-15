@@ -32,6 +32,7 @@ class ContentRecommendation(RecommendationBase):
                 assert np.sum(np.isnan(embedding)) == 0
                 embedding = unit_length(embedding, axis=1)
                 user_embeddings[feature_name] = embedding
+                self.log.debug("ContentRecommendation::__build_user_only_embeddings__:: Finished feature = %s for User only Embedding" % feature_name)
 
         self.log.debug("ContentRecommendation::__build_user_only_embeddings__:: Built User Only Embedding for %s" % list(user_embeddings.keys()))
         return user_embeddings
