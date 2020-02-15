@@ -96,6 +96,13 @@ class ContentRecommendation(RecommendationBase):
         self.log.debug("ContentRecommendation::__build_user_embeddings__:: Building User Embedding ...")
         user_item_dict: Dict[str, Dict[str, float]] = build_user_item_dict(user_item_affinities)
 
+        user_item_idx_list: Dict[str, List[int]] = {}
+        for user, item, affinity in user_item_affinities:
+            if user not in user_item_idx_list:
+                user_item_idx_list[user] = [self.item_id_to_index[item]]
+            else:
+                user_item_idx_list[user].append(self.item_id_to_index[item])
+
         for feature in user_data:
             feature_name = feature.feature_name
             if feature.feature_type != "id" and feature_name not in self.user_only_features:
@@ -133,17 +140,11 @@ class ContentRecommendation(RecommendationBase):
                 self.log.info("Item Embedding: Feature = %s, Nan Users = %s", feature_name,
                               get_nan_rows(item_embedding))
             assert np.sum(np.isnan(user_embedding)) == 0
-            for i, embedding in enumerate(user_embedding):
-                user = user_ids[i]
-                if user not in user_item_dict:
+            for i, (user, embedding) in enumerate(zip(user_ids, user_embedding)):
+                if user not in user_item_idx_list:
                     continue
-                item_dict = user_item_dict[user]
-                items = item_dict.keys()
-                weights = list(item_dict.values())
-                item_indices = [self.item_id_to_index[item] for item in items]
-                item_ems = np.take(item_embedding, indices=item_indices, axis=0)
-                weights[weights == 0] = 1e-3
-                item_em = np.average(item_ems, axis=0, weights=weights)
+                item_indices = user_item_idx_list[user]
+                item_em = item_embedding[item_indices].mean(0)
                 final_embedding = (embedding + item_em) / 2.0
                 user_embedding[i] = final_embedding
                 if i % int(len(user_embedding)/20) == 0:
@@ -160,23 +161,15 @@ class ContentRecommendation(RecommendationBase):
             feature_name = feature.feature_name
             item_embedding = item_embeddings[feature_name]
             item_embedding = unit_length(item_embedding, axis=1)
-            user_embedding = np.zeros(shape=(len(user_ids), item_embedding.shape[1]))
-            average_embedding = np.mean(item_embedding, axis=0)
+            user_embedding = np.ones(shape=(len(user_ids), item_embedding.shape[1]))
             self.log.debug(
                 "ContentRecommendation::__build_user_embeddings__:: Processing Item Only Embeddings for feature = %s" % (
                     feature_name))
             for i, user in enumerate(user_ids):
-                if user in user_item_dict:
-                    item_dict = user_item_dict[user]
-                    items = item_dict.keys()
-                    weights = list(item_dict.values())
-                    item_indices = [self.item_id_to_index[item] for item in items]
-                    item_ems = np.take(item_embedding, indices=item_indices, axis=0)
-                    weights[weights == 0] = 1e-3
-                    item_em = np.average(item_ems, axis=0, weights=weights)
+                if user in user_item_idx_list:
+                    item_indices = user_item_idx_list[user]
+                    item_em = item_embedding[item_indices].mean(0)
                     user_embedding[i] = item_em
-                else:
-                    user_embedding[i] = average_embedding
                 if i % int(len(user_embedding)/20) == 0:
                     self.log.debug("ContentRecommendation::__build_user_embeddings__:: Processed %s/%s Item Only Embeddings of feature %s"
                                    % (i, len(user_embedding), feature_name))

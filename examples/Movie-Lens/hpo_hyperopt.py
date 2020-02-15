@@ -105,6 +105,11 @@ def merge_trials(trials1, trials2_slice):
     if len(trials1.trials) > 0:
         max_tid = max([trial['tid'] for trial in trials1.trials])
 
+    for trial in trials1.trials:
+        for key in trial['misc']['idxs'].keys():
+            if len(trial['misc']['vals'][key]) == 0:
+                trial['misc']['idxs'][key] = []
+
     for trial in trials2_slice:
         tid = trial['tid'] + max_tid + 1
         hyperopt_trial = Trials().new_trial_docs(
@@ -116,7 +121,10 @@ def merge_trials(trials1, trials2_slice):
         hyperopt_trial[0]['tid'] = tid
         hyperopt_trial[0]['misc']['tid'] = tid
         for key in hyperopt_trial[0]['misc']['idxs'].keys():
-            hyperopt_trial[0]['misc']['idxs'][key] = [tid]
+            if len(hyperopt_trial[0]['misc']['vals'][key]) == 0:
+                hyperopt_trial[0]['misc']['idxs'][key] = []
+            else:
+                hyperopt_trial[0]['misc']['idxs'][key] = [tid]
         trials1.insert_trial_docs(hyperopt_trial)
         trials1.refresh()
     return trials1

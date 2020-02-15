@@ -223,7 +223,7 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
     X1, X2, Y1, Y2 = train_test_split(Inputs, Outputs, test_size=0.5)
     autoencoder.fit(X1, Y1,
                     epochs=epochs,
-                    batch_size=4096,
+                    batch_size=1024,
                     shuffle=True,
                     verbose=verbose,
                     validation_data=(X2, Y2),
@@ -231,7 +231,7 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
 
     autoencoder.fit(X2, Y2,
                     epochs=epochs,
-                    batch_size=4096,
+                    batch_size=1024,
                     shuffle=True,
                     verbose=verbose,
                     validation_data=(X1, Y1),
