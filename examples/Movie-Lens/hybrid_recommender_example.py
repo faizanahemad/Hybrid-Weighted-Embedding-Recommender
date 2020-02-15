@@ -26,8 +26,8 @@ verbose = 2  # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (
     len(user_item_affinities), len(df_user.user.values), len(df_item.item.values), rating_scale))
 
-hyperparamters_dict = get_best_params(dataset, 5)
-algos = ["gcn_ncf"] # ["gcn_hybrid", "gcn_ncf", "svdpp_hybrid", "content_only"]
+hyperparamters_dict = get_best_params(dataset, 4)
+algos = ["gcn_hybrid"] # ["gcn_hybrid", "gcn_ncf", "svdpp_hybrid", "content_only"]
 
 from pprint import pprint
 
@@ -53,7 +53,7 @@ if not enable_kfold:
     user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
     # print(user_rating_count_metrics)
     # user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % dataset, index=False)
-    # results.reset_index().to_csv("overall_results_%s.csv" % dataset, index=False)
+    results.reset_index().to_csv("overall_results_%s_%s.csv" % (algo, dataset), index=False)
     # visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
 else:
     X = np.array(user_item_affinities)

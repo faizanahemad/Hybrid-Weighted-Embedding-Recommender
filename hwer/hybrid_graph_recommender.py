@@ -30,7 +30,7 @@ class HybridGCNRec(SVDppHybrid):
         from gensim.models import Word2Vec
         walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 40
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
-        window = hyperparams["window"] if "window" in hyperparams else 4
+        window = hyperparams["window"] if "window" in hyperparams else 5
         iter = hyperparams["iter"] if "iter" in hyperparams else 2
         p = hyperparams["p"] if "p" in hyperparams else 0.5
         q = hyperparams["q"] if "q" in hyperparams else 0.5
@@ -141,6 +141,8 @@ class HybridGCNRec(SVDppHybrid):
                                                                            item_id_to_index,
                                                                            n_output_dims,
                                                                            node2vec_params)
+            self.w2v_user_vectors = w2v_user_vectors
+            self.w2v_item_vectors = w2v_item_vectors
         user_triplet_vectors, item_triplet_vectors = w2v_user_vectors, w2v_item_vectors
 
         if enable_triplet_loss:
@@ -398,6 +400,9 @@ class HybridGCNRec(SVDppHybrid):
         user_vectors = np.concatenate((np.zeros((1, user_vectors.shape[1])), user_vectors))
         item_vectors = np.concatenate((np.zeros((1, item_vectors.shape[1])), item_vectors))
 
+        self.w2v_user_vectors = np.concatenate((np.zeros((1, self.w2v_user_vectors.shape[1])), self.w2v_user_vectors))
+        self.w2v_item_vectors = np.concatenate((np.zeros((1, self.w2v_item_vectors.shape[1])), self.w2v_item_vectors))
+
         mu, user_bias, item_bias = self.__calculate_bias__(user_ids, item_ids, user_item_affinities, rating_scale)
         assert np.sum(np.isnan(user_bias)) == 0
         assert np.sum(np.isnan(item_bias)) == 0
@@ -409,8 +414,8 @@ class HybridGCNRec(SVDppHybrid):
         total_users = len(user_ids) + 1
         total_items = len(item_ids) + 1
         if use_content:
-            user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
-            item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
+            user_vectors = np.concatenate((self.w2v_user_vectors, user_vectors, user_content_vectors), axis=1)
+            item_vectors = np.concatenate((self.w2v_item_vectors, item_vectors, item_content_vectors), axis=1)
         else:
             user_vectors = np.zeros_like(user_vectors)
             item_vectors = np.zeros_like(item_vectors)

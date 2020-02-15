@@ -193,13 +193,14 @@ class GraphSageWithSampling(nn.Module):
 
         self.convs = nn.ModuleList(convs)
         noise = GaussianNoise(gaussian_noise)
-        w = nn.Linear(n_content_dims, feature_size)
+        w = nn.Linear(n_content_dims, n_content_dims)
         init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
         init_bias(w.bias)
         proj = [noise, w, nn.LeakyReLU(negative_slope=0.1)]
 
         if conv_arch == 4 or conv_arch == 5:
-            proj.append(LinearResnet(feature_size, feature_size, gaussian_noise))
+            proj.append(LinearResnet(n_content_dims, n_content_dims, gaussian_noise))
+            proj.append(LinearResnet(n_content_dims, feature_size, gaussian_noise))
 
         self.proj = nn.Sequential(*proj)
 
@@ -409,6 +410,12 @@ class GraphSageConvWithSamplingV4(GraphSageConvWithSamplingV2):
         W = LinearResnet(feature_size * 2, feature_size, gaussian_noise)
         layers.append(W)
         self.W = nn.Sequential(*layers)
+
+        Wagg_1 = nn.Linear(feature_size, feature_size)
+        init_bias(Wagg_1.bias)
+        init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu')
+        Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size, feature_size, gaussian_noise)]
+        self.Wagg = nn.Sequential(*Wagg)
 
 
 class GraphSageConvWithSamplingV5(GraphSageConvWithSamplingV4):
