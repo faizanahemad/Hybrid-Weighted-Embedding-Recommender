@@ -178,7 +178,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         # self.build_content_embeddings(item_data, user_item_affinities)
         assert not self.fit_done
         sparsity = 1 - len(user_item_affinities) / (len(user_ids) * len(item_ids))
-        self.log.info("Start Fitting Recommender with n_users = %s, n_items = %s, n_samples = %s, sparsity = %s",
+        self.log.info("Start Fitting Base Recommender with n_users = %s, n_items = %s, n_samples = %s, sparsity = %s",
                       len(user_ids), len(item_ids), len(user_item_affinities), sparsity)
         user_set = set(user_ids)
         item_set = set(item_ids)
@@ -194,7 +194,10 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.item_features = [feature.feature_name for feature in item_data if feature.feature_type != FeatureType.ID]
         self.item_only_features = list(set(self.item_features) - set(self.user_features))
         self.user_only_features = list(set(self.user_features) - set(self.item_features))
+        self.log.debug("Base: Start Normalize Affinity Scores")
         self.mu, self.bu, self.bi, self.spread, uid = normalize_affinity_scores_by_user_item_bs(user_item_affinities)
+        self.log.debug("Base: End Normalize Affinity Scores")
+        self.log.info("End Fitting Base Recommender")
         return uid
 
     @abc.abstractmethod

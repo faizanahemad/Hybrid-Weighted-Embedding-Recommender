@@ -222,6 +222,7 @@ class ContentRecommendation(RecommendationBase):
                                                                              user_embeddings, item_embeddings,
                                                                              user_item_affinities)
 
+        self.log.info("Concatenating Content Embeddings ... ")
         user_vectors, item_vectors = self.__concat_feature_vectors__(processed_features, item_embeddings,
                                                                      user_embeddings, n_output_dims)
         self.log.info("Built Content Embeddings, user vectors shape = %s, item vectors shape = %s", user_vectors.shape, item_vectors.shape)

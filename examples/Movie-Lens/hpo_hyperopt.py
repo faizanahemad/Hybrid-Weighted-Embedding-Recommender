@@ -38,7 +38,6 @@ def build_params(args, objective, params):
         params["collaborative_params"]["user_item_params"]["gcn_epochs"] = int(args["gcn_epochs"])
         params["collaborative_params"]["user_item_params"]["gaussian_noise"] = args["gaussian_noise"]
         params["collaborative_params"]["user_item_params"]["margin"] = args["margin"]
-        params["n_dims"] = int(args["n_dims"])
 
     return params
 
@@ -59,42 +58,37 @@ def run_trial(args):
 
 
 def define_search_space(objective, starting_params):
+    prediction = starting_params["collaborative_params"]["prediction_network_params"]
     rmse_space = {
-        'lr': hp.qlognormal("lr", np.log(starting_params["collaborative_params"]["prediction_network_params"]["lr"]),
-                           0.5 * starting_params["collaborative_params"]["prediction_network_params"]["lr"],
-                            0.01 * starting_params["collaborative_params"]["prediction_network_params"]["lr"]),
+        'lr': hp.qlognormal("lr", np.log(prediction["lr"]),
+                           0.5 * prediction["lr"],
+                            0.01 * prediction["lr"]),
         'epochs': hp.quniform('epochs',
-                              starting_params["collaborative_params"]["prediction_network_params"]["epochs"] - 20,
-                              starting_params["collaborative_params"]["prediction_network_params"]["epochs"] + 20, 5),
+                              prediction["epochs"] - 20,
+                              prediction["epochs"] + 20, 5),
         'kernel_l2': hp.choice('kernel_l2', [0.0, hp.qloguniform('kernel_l2_choice', np.log(1e-9), np.log(1e-6), 1e-9)]),
         'dropout': hp.choice('dropout', [0.0, hp.quniform('drop', 0.05, 0.2, 0.05)]),
         'batch_size': hp.qloguniform('batch_size', np.log(512), np.log(2048), 512),
-        'conv_depth': hp.quniform('conv_depth', 1, 5, 1),
-        'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(
-            starting_params["collaborative_params"]["prediction_network_params"]["gaussian_noise"]),
-                                       0.5 * starting_params["collaborative_params"]["prediction_network_params"][
-                                           "gaussian_noise"], 0.005),
-        'network_depth': hp.quniform('network_depth', 2, 5, 1),
+        'conv_depth': hp.quniform('conv_depth', 1, 6, 1),
+        'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(prediction["gaussian_noise"]),
+                                       0.5 * prediction["gaussian_noise"], 0.005),
+        'network_depth': hp.quniform('network_depth', 2, prediction['network_depth'] + 2, 1),
         'n_dims': hp.quniform('n_dims',
-                              starting_params["collaborative_params"]["prediction_network_params"]["epochs"] - 32,
-                              starting_params["collaborative_params"]["prediction_network_params"]["epochs"] + 32, 16),
+                              starting_params["n_dims"] - 32,
+                              starting_params["n_dims"] + 64, 16),
     }
 
+    embedding = starting_params["collaborative_params"]["user_item_params"]
     ndcg_space = {
-        'gcn_lr': hp.qlognormal("gcn_lr", np.log(starting_params["collaborative_params"]["user_item_params"]["gcn_lr"]),
-                           0.5 * starting_params["collaborative_params"]["user_item_params"]["gcn_lr"],
-                                0.01 * starting_params["collaborative_params"]["user_item_params"]["gcn_lr"]),
+        'gcn_lr': hp.qlognormal("gcn_lr", np.log(embedding["gcn_lr"]),
+                           0.5 * embedding["gcn_lr"],
+                                0.01 * embedding["gcn_lr"]),
         'gcn_epochs': hp.quniform('gcn_epochs',
-                              starting_params["collaborative_params"]["user_item_params"]["gcn_epochs"] - 10,
-                              starting_params["collaborative_params"]["user_item_params"]["gcn_epochs"] + 20, 5),
-        'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(
-            starting_params["collaborative_params"]["user_item_params"]["gaussian_noise"]),
-                                       0.5 * starting_params["collaborative_params"]["user_item_params"][
-                                           "gaussian_noise"], 0.005),
-        'margin': hp.quniform('margin', 0.8, 2.0, 0.2),
-        'n_dims': hp.quniform('n_dims',
-                              starting_params["collaborative_params"]["prediction_network_params"]["epochs"] - 32,
-                              starting_params["collaborative_params"]["prediction_network_params"]["epochs"] + 32, 16),
+                              embedding["gcn_epochs"] - 10,
+                              embedding["gcn_epochs"] + 20, 5),
+        'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(embedding["gaussian_noise"]),
+                                       0.5 * embedding["gaussian_noise"], 0.005),
+        'margin': hp.quniform('margin', 0.8, 1.8, 0.2)
     }
 
     return rmse_space if objective == "rmse" else ndcg_space
@@ -128,10 +122,44 @@ def merge_trials(trials1, trials2_slice):
     return trials1
 
 
-if __name__ == '__main__':
-    params, dataset, objective, algo = init_args()
+def load_trials(algo, dataset, objective):
     loaded_fnames = []
     trials = None
+    path = TRIALS_FOLDER + '/%s_%s_%s_*.pkl' % (algo, dataset, objective)
+    for fname in glob.glob(path):
+        trials_obj = pkl.load(open(fname, 'rb'))
+        n_trials = trials_obj['n']
+        trials_obj = trials_obj['trials']
+        if len(loaded_fnames) == 0:
+            trials = trials_obj
+        else:
+            print("Merging trials")
+            trials = merge_trials(trials, trials_obj.trials[-n_trials:])
+
+        loaded_fnames.append(fname)
+    print("Loaded trials", len(loaded_fnames))
+    return trials
+
+
+def print_trial_details(trials):
+    best_loss = np.inf
+    best_trial = None
+    vals = []
+    for trial in trials:
+        if trial['result']['status'] == 'ok':
+            loss = trial['result']['loss']
+            val = trial['misc']['vals']
+            val['loss'] = loss
+            vals.append(val)
+            if loss < best_loss:
+                best_loss = loss
+                best_trial = trial
+    print(pd.DataFrame.from_records(vals))
+    print("Best = ", best_loss, best_trial['misc']['vals'])
+
+
+if __name__ == '__main__':
+    params, dataset, objective, algo = init_args()
     # Run new hyperparameter trials until killed
     while True:
         np.random.seed()
@@ -139,25 +167,11 @@ if __name__ == '__main__':
         # Load up all runs:
         import glob
 
-        path = TRIALS_FOLDER + '/%s_%s_%s_*.pkl' % (algo, dataset, objective)
-        for fname in glob.glob(path):
-            if fname in loaded_fnames:
-                continue
-
-            trials_obj = pkl.load(open(fname, 'rb'))
-            n_trials = trials_obj['n']
-            trials_obj = trials_obj['trials']
-            if len(loaded_fnames) == 0:
-                trials = trials_obj
-            else:
-                print("Merging trials")
-                trials = merge_trials(trials, trials_obj.trials[-n_trials:])
-
-            loaded_fnames.append(fname)
-
-        print("Loaded trials", len(loaded_fnames))
-        if len(loaded_fnames) == 0:
+        trials = load_trials(algo, dataset, objective)
+        if trials is None:
             trials = Trials()
+        else:
+            print_trial_details(trials)
 
         n = NUMBER_TRIALS_PER_RUN
         try:
@@ -179,7 +193,6 @@ if __name__ == '__main__':
         save_trials = merge_trials(hyperopt_trial, trials.trials[-n:])
         new_fname = TRIALS_FOLDER + '/%s_%s_%s_' % (algo, dataset, objective) + str(np.random.randint(0, sys.maxsize)) + '.pkl'
         pkl.dump({'trials': save_trials, 'n': n}, open(new_fname, 'wb'))
-        loaded_fnames.append(new_fname)
 
 
 

@@ -37,27 +37,8 @@ class HybridRecommender(RecommendationBase):
                                            user_vectors: np.ndarray, item_vectors: np.ndarray,
                                            hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
 
-        entity_affiity_fn = None
+        self.log.debug("Started Building Collaborative Embeddings...")
         user_item_affinity_fn = self.__user_item_affinities_triplet_trainer__
-
-        if len(item_item_affinities) > 0:
-            item_item_params = {} if "item_item_params" not in hyperparams else hyperparams["item_item_params"]
-
-            item_vectors = entity_affiity_fn(entity_ids=item_ids,
-                                                                     entity_entity_affinities=item_item_affinities,
-                                                                     entity_id_to_index=self.item_id_to_index,
-                                                                     vectors=item_vectors,
-                                                                     n_output_dims=self.n_content_dims,
-                                                                     hyperparams=item_item_params)
-
-        if len(user_user_affinities) > 0:
-            user_user_params = {} if "user_user_params" not in hyperparams else hyperparams["user_user_params"]
-            user_vectors = entity_affiity_fn(entity_ids=user_ids,
-                                                                     entity_entity_affinities=user_user_affinities,
-                                                                     entity_id_to_index=self.user_id_to_index,
-                                                                     vectors=user_vectors,
-                                                                     n_output_dims=self.n_content_dims,
-                                                                     hyperparams=user_user_params)
 
         if len(user_item_affinities) > 0:
             user_item_params = {} if "user_item_params" not in hyperparams else hyperparams["user_item_params"]
@@ -196,6 +177,7 @@ class HybridRecommender(RecommendationBase):
         from .tf_utils import LRSchedule
         learning_rate = LRSchedule(lr=lr, epochs=epochs, batch_size=batch_size, n_examples=len(user_item_affinities))
         sgd = tf.keras.optimizers.SGD(learning_rate=lr, momentum=0.9, nesterov=True)
+        self.log.debug("Started Training User-Item Affinities...")
         model.compile(optimizer=sgd,
                       loss=['mean_squared_error'], metrics=["mean_squared_error"])
 
@@ -245,7 +227,7 @@ class HybridRecommender(RecommendationBase):
             **kwargs):
         start_time = time.time()
         _ = super().fit(user_ids, item_ids, user_item_affinities, **kwargs)
-
+        self.log.debug("Hybrid Base: Fit Method Started")
         item_data: FeatureSet = kwargs["item_data"] if "item_data" in kwargs else FeatureSet([])
         user_data: FeatureSet = kwargs["user_data"] if "user_data" in kwargs else FeatureSet([])
         hyperparameters = {} if "hyperparameters" not in kwargs else kwargs["hyperparameters"]
@@ -268,7 +250,7 @@ class HybridRecommender(RecommendationBase):
         user_user_affinities: List[Tuple[str, str, bool]] = kwargs[
             "user_user_affinities"] if "user_user_affinities" in kwargs else list()
 
-        self.log.debug("Fit Method: content_data_used = %s, content_dims = %s", content_data_used, self.n_content_dims)
+        self.log.debug("Hybrid Base: Fit Method: content_data_used = %s, content_dims = %s", content_data_used, self.n_content_dims)
         if content_data_used:
             super(type(self.cb), self.cb).fit(user_ids, item_ids, user_item_affinities, **kwargs)
             user_vectors, item_vectors = self.cb.__build_content_embeddings__(user_ids, item_ids,
