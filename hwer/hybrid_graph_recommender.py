@@ -318,8 +318,10 @@ class HybridGCNRec(SVDppHybrid):
 
                 # Training
                 total_loss = 0.0
+                odd_even = True
                 for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
-                    score = model.forward(nodeflow, s, d, n)
+                    score = model.forward(nodeflow, s, d, n) if odd_even else model.forward(nodeflow, d, s, n)
+                    odd_even = not odd_even
                     loss = (score ** 2).mean()
                     total_loss = total_loss + loss
 
@@ -328,11 +330,7 @@ class HybridGCNRec(SVDppHybrid):
                     opt.step()
                 return total_loss / len(src_batches), train_rmse, eval_total
 
-            if epoch % 2 == 1:
-                loss, train_rmse, eval_total = train(src, dst, neg)
-            else:
-                # Reverse Training
-                loss, train_rmse, eval_total = train(dst, src, neg)
+            loss, train_rmse, eval_total = train(src, dst, neg)
 
             total_time = time.time() - start
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
@@ -504,8 +502,10 @@ class HybridGCNRec(SVDppHybrid):
 
                 # Training
                 total_loss = 0.0
+                odd_even = True
                 for s, d, r, nodeflow in zip(src_batches, dst_batches, rating_batches, sampler):
-                    score = model.forward(nodeflow, s, d)
+                    score = model.forward(nodeflow, s, d) if odd_even else model.forward(nodeflow, d, s)
+                    odd_even = not odd_even
                     # r = r + torch.randn(r.shape)
                     loss = ((score - r) ** 2).mean()
                     total_loss = total_loss + loss.item()
@@ -515,10 +515,7 @@ class HybridGCNRec(SVDppHybrid):
                     scheduler.step()
                 return total_loss / len(src_batches)
 
-            if epoch % 2 == 1:
-                loss = train(src, dst, rating)
-            else:
-                loss = train(dst, src, rating)
+            loss = train(src, dst, rating)
 
             total_time = time.time() - start
 

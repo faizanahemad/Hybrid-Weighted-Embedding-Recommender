@@ -188,8 +188,10 @@ class HybridGCNRecNCF(HybridGCNRec):
 
                 # Training
                 total_loss = 0.0
+                odd_even = True
                 for s, d, r, nodeflow in zip(src_batches, dst_batches, rating_batches, sampler):
-                    score = model.forward(nodeflow, s, d)
+                    score = model.forward(nodeflow, s, d) if odd_even else model.forward(nodeflow, d, s)
+                    odd_even = not odd_even
                     # r = r + torch.randn(r.shape)
                     loss = ((score - r) ** 2).mean()
                     total_loss = total_loss + loss.item()
@@ -199,11 +201,7 @@ class HybridGCNRecNCF(HybridGCNRec):
                     scheduler.step()
                 return total_loss / len(src_batches)
 
-            if epoch % 2 == 1:
-                loss = train(src, dst, rating)
-            else:
-                loss = train(dst, src, rating)
-
+            loss = train(src, dst, rating)
             total_time = time.time() - start
 
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),

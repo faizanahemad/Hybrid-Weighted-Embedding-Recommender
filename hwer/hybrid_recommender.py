@@ -14,7 +14,6 @@ from .recommendation_base import RecommendationBase, FeatureSet
 from .utils import unit_length, unit_length_violations
 
 
-
 class HybridRecommender(RecommendationBase):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False, super_fast_inference: bool = False):
