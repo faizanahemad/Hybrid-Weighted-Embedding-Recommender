@@ -1,7 +1,7 @@
 from hwer.validation import *
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
-from hpo_base import init_args
+import distutils
 import argparse
 
 pd.set_option('display.max_rows', 500)
@@ -18,6 +18,16 @@ from param_fetcher import get_best_params
 from pprint import pprint
 
 
+def str2bool(v):
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--algo', type=str, metavar='N', nargs='+',
@@ -29,10 +39,13 @@ if __name__ == '__main__':
     ap.add_argument('--conv_arch', type=int, default=1, metavar='N',
                     choices=[1, 2, 3, 4, 5],
                     help='')
+    ap.add_argument('--enable_kfold', type=str2bool, default=False, metavar='N',
+                    help='')
     args = vars(ap.parse_args())
     algos = args["algo"]
     dataset = args["dataset"]
     conv_arch = int(args["conv_arch"])
+    enable_kfold = args["enable_kfold"]
     hyperparamters_dict = get_best_params(dataset, conv_arch)
     for algo in algos:
         print("algo = %s" % algo)
@@ -42,7 +55,6 @@ if __name__ == '__main__':
 
     #
     enable_baselines = False
-    enable_kfold = False
     enable_error_analysis = False
     verbose = 2  # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 
