@@ -15,6 +15,13 @@ def read_params(location, dataset, algo):
             return pkg.params_gcn_ncf_100K
         if algo == "svdpp":
             return pkg.params_svdpp_100K
+    if dataset == "1M":
+        if algo == "gcn":
+            return pkg.params_gcn_1M
+        if algo == "gcn_ncf":
+            return pkg.params_gcn_ncf_1M
+        if algo == "svdpp":
+            return pkg.params_svdpp_1M
 
 
 def fetch_content_params():
