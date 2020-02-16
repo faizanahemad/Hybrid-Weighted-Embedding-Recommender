@@ -47,7 +47,7 @@ params = {
                            collaborative_params=dict(
                                prediction_network_params=dict(lr=0.05, epochs=50, batch_size=1024,
                                                               network_depth=3,
-                                                              gaussian_noise=0.275, conv_depth=2,
+                                                              gaussian_noise=0.275, conv_depth=3,
                                                               kernel_l2=1e-9, dropout=0.0,),
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
                                                      gcn_lr=0.00075, gcn_epochs=25, gcn_layers=2, gcn_dropout=0.0,

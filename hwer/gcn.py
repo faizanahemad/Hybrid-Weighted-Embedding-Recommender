@@ -193,15 +193,18 @@ class GraphSageWithSampling(nn.Module):
 
         self.convs = nn.ModuleList(convs)
         noise = GaussianNoise(gaussian_noise)
-        w = nn.Linear(n_content_dims, n_content_dims)
-        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(w.bias)
-        proj = [noise, w, nn.LeakyReLU(negative_slope=0.1)]
 
         if conv_arch == 4 or conv_arch == 5:
+            w = nn.Linear(n_content_dims, n_content_dims)
+            proj = [noise, w, nn.LeakyReLU(negative_slope=0.1)]
             proj.append(LinearResnet(n_content_dims, n_content_dims, gaussian_noise))
             proj.append(LinearResnet(n_content_dims, feature_size, gaussian_noise))
+        else:
+            w = nn.Linear(n_content_dims, feature_size)
+            proj = [noise, w, nn.LeakyReLU(negative_slope=0.1)]
 
+        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(w.bias)
         self.proj = nn.Sequential(*proj)
 
         self.G = G
@@ -404,10 +407,10 @@ class GraphSageConvWithSamplingV4(GraphSageConvWithSamplingV2):
         depth = min(1, depth)
         self.drop = nn.Dropout(dropout)
         for i in range(depth - 1):
-            weights = LinearResnet(feature_size * 4, feature_size * 4, gaussian_noise)
+            weights = LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise)
             layers.append(weights)
 
-        W = LinearResnet(feature_size * 4, feature_size, gaussian_noise)
+        W = LinearResnet(feature_size * 2, feature_size, gaussian_noise)
         layers.append(W)
         self.W = nn.Sequential(*layers)
 
@@ -439,6 +442,17 @@ class GraphSageConvWithSamplingV5(GraphSageConvWithSamplingV4):
         init_bias(Wagg_1.bias)
         init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu')
         init_weight(Wh1.weight, 'xavier_uniform_', 'leaky_relu')
+
+        layers = []
+        depth = min(1, depth)
+        self.drop = nn.Dropout(dropout)
+        for i in range(depth - 1):
+            weights = LinearResnet(feature_size * 4, feature_size * 4, gaussian_noise)
+            layers.append(weights)
+
+        W = LinearResnet(feature_size * 4, feature_size, gaussian_noise)
+        layers.append(W)
+        self.W = nn.Sequential(*layers)
 
         #
     def process_neighbourhood_data(self, h_agg):
