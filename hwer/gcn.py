@@ -275,24 +275,23 @@ class NCFScorer(nn.Module):
         super(NCFScorer, self).__init__()
         noise = GaussianNoise(gaussian_noise)
         self.noise = noise
-        w1 = nn.Linear(feature_size * 2, feature_size)
-        pipeline_1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size, feature_size, gaussian_noise))
+        w1 = nn.Linear(feature_size * 2, feature_size * 2)
+        pipeline_1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise))
         self.pipeline_1 = pipeline_1
-        w4 = nn.Linear(feature_size * 2, feature_size)
-        self.uvd_pipeline = nn.Sequential(w4, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size, feature_size, gaussian_noise))
-        w5 = nn.Linear(feature_size * 2, feature_size)
-        w7 = nn.Linear(feature_size, 1)
+        w4 = nn.Linear(feature_size * 2, feature_size * 2)
+        self.uvd_pipeline = nn.Sequential(w4, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise))
+        w7 = nn.Linear(feature_size * 2, 1)
 
-        layers = [LinearResnet(feature_size * 2, feature_size, gaussian_noise)]
+        layers = [LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise)]
         for i in range(scorer_depth - 1):
-            layers.append(LinearResnet(feature_size, feature_size, gaussian_noise))
+            layers.append(LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise))
         layers.append(w7)
         self.layers = nn.Sequential(*layers)
 
         # init weights
         init_weight(w7.weight, 'xavier_uniform_', 'linear')
         init_bias(w7.bias)
-        weights = [w1, w4, w5]
+        weights = [w1, w4]
         for w in weights:
             init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
             init_bias(w.bias)
