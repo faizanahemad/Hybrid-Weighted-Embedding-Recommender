@@ -209,6 +209,8 @@ class HybridGCNRec(SVDppHybrid):
             item_id_to_index,
             n_output_dims,
             hyperparams)
+        import gc
+        gc.collect()
 
         if not enable_gcn:
             return user_triplet_vectors, item_triplet_vectors
@@ -414,14 +416,24 @@ class HybridGCNRec(SVDppHybrid):
         total_users = len(user_ids) + 1
         total_items = len(item_ids) + 1
         if use_content:
-            user_vectors = np.concatenate((self.w2v_user_vectors, user_vectors, user_content_vectors), axis=1)
-            item_vectors = np.concatenate((self.w2v_item_vectors, item_vectors, item_content_vectors), axis=1)
+            try:
+                user_vectors = np.concatenate((self.w2v_user_vectors, user_vectors, user_content_vectors), axis=1)
+                item_vectors = np.concatenate((self.w2v_item_vectors, item_vectors, item_content_vectors), axis=1)
+                self.w2v_user_vectors = None
+                self.w2v_item_vectors = None
+                del self.w2v_user_vectors
+                del self.w2v_item_vectors
+            except AttributeError as e:
+                user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
+                item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
         else:
-            user_vectors = np.zeros_like(user_vectors)
-            item_vectors = np.zeros_like(item_vectors)
+            user_vectors = np.zeros((user_vectors.shape[0], 1))
+            item_vectors = np.zeros((item_vectors.shape[0], 1))
         edge_list = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                      user_item_affinities]
         biases = np.concatenate(([0.0], user_bias, item_bias))
+        import gc
+        gc.collect()
         g_train = build_dgl_graph(edge_list, total_users + total_items, np.concatenate((user_vectors, item_vectors)))
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()

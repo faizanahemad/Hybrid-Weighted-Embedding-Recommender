@@ -26,7 +26,7 @@ verbose = 2  # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (
     len(user_item_affinities), len(df_user.user.values), len(df_item.item.values), rating_scale))
 
-hyperparamters_dict = get_best_params(dataset, 4)
+hyperparamters_dict = get_best_params(dataset, 5)
 algos = ["gcn_hybrid"] # ["gcn_hybrid", "gcn_ncf", "svdpp_hybrid", "content_only"]
 
 from pprint import pprint

@@ -258,12 +258,19 @@ class HybridRecommender(RecommendationBase):
                                                                               user_data, item_data,
                                                                               user_item_affinities,
                                                                               self.n_content_dims)
+            self.cb = None
+            del self.cb
+            del kwargs["user_data"]
+            del kwargs["item_data"]
+
         else:
             user_vectors, item_vectors = np.random.rand(len(user_ids), self.n_content_dims), np.random.rand(len(item_ids), self.n_content_dims)
         self.log.info("Hybrid Base: Built Content Embedding., user_vectors shape = %s, item vectors shape = %s, Time = %.1f" %
                        (user_vectors.shape, item_vectors.shape, time.time() - start))
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
+        import gc
+        gc.collect()
 
         user_content_vectors, item_content_vectors = user_vectors.copy(), item_vectors.copy()
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1] == self.n_content_dims
