@@ -96,15 +96,10 @@ if __name__ == '__main__':
                                          enable_error_analysis=False, enable_baselines=False)
 
             user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
-            res = display_results(res)
-            results.append(res)
-            print("#" * 80)
+            results.extend(res)
 
-        results = pd.concat(results)
-        results = results.groupby(["algo"]).mean().reset_index()
-        print(results)
         user_rating_count_metrics = user_rating_count_metrics.groupby(["algo", "user_rating_count"]).mean().reset_index()
         display_results(results)
-        visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
+        # visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
     for algo in algos:
         print("algo = %s" % algo, hyperparamters_dict[algo])
