@@ -338,7 +338,7 @@ class HybridGCNRec(SVDppHybrid):
             loss, train_rmse, eval_total = train(src, dst, neg)
 
             total_time = time.time() - start
-            self.log.debug('Epoch %2d/%2d: ' % (int(epoch + 1),
+            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
                                                gcn_epochs) + ' Training loss: %.4f' % loss.item() + ' Training RMSE: %.4f' % train_rmse.item() + '|| Generator Time: %.1f' % total_gen + ' Eval Time: %.1f' % eval_total + ' Time Taken: %.1f' % total_time)
 
             #
@@ -537,7 +537,7 @@ class HybridGCNRec(SVDppHybrid):
 
             total_time = time.time() - start
 
-            self.log.debug('Epoch %2d/%2d: ' % (int(epoch + 1),
+            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
                                                epochs) + ' Training loss: %.4f' % loss + ' Train RMSE: %.4f ||' % train_rmse.item() + ' Eval Time: %.1f ||' % eval_total + '|| Time Taken: %.1f' % total_time)
 
         model.eval()
