@@ -74,7 +74,7 @@ if __name__ == '__main__':
         user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
         # print(user_rating_count_metrics)
         # user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % dataset, index=False)
-        results.reset_index().to_csv("overall_results_%s_%s.csv" % (algo, dataset), index=False)
+        results.reset_index().to_csv("overall_results_%s.csv" % (dataset), index=False)
         # visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
     else:
         X = np.array(user_item_affinities)
@@ -102,9 +102,9 @@ if __name__ == '__main__':
 
         results = pd.concat(results)
         results = results.groupby(["algo"]).mean().reset_index()
+        print(results)
         user_rating_count_metrics = user_rating_count_metrics.groupby(["algo", "user_rating_count"]).mean().reset_index()
         display_results(results)
         visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
     for algo in algos:
-        print("algo = %s" % algo)
-        pprint(hyperparamters_dict[algo])
+        print("algo = %s" % algo, hyperparamters_dict[algo])

@@ -276,15 +276,15 @@ class NCFScorer(nn.Module):
         noise = GaussianNoise(gaussian_noise)
         self.noise = noise
         w1 = nn.Linear(feature_size * 2, feature_size * 2)
-        pipeline_1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise))
+        pipeline_1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1))
         self.pipeline_1 = pipeline_1
         w4 = nn.Linear(feature_size * 2, feature_size * 2)
-        self.uvd_pipeline = nn.Sequential(w4, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise))
-        w7 = nn.Linear(feature_size * 2, 1)
+        self.uvd_pipeline = nn.Sequential(w4, nn.LeakyReLU(negative_slope=0.1))
+        w7 = nn.Linear(feature_size * 4, 1)
 
-        layers = [LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise)]
+        layers = [LinearResnet(feature_size * 4, feature_size * 4, gaussian_noise)]
         for i in range(scorer_depth - 1):
-            layers.append(LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise))
+            layers.append(LinearResnet(feature_size * 4, feature_size * 4, gaussian_noise))
         layers.append(w7)
         self.layers = nn.Sequential(*layers)
 
