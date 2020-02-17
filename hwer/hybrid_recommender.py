@@ -281,7 +281,7 @@ class HybridRecommender(RecommendationBase):
                                                                              user_vectors, item_vectors,
                                                                              collaborative_params)
 
-        self.log.debug("Fit Method, Use content = %s, Unit Length Violations:: user_content = %s, item_content = %s" +
+        self.log.debug("Hybrid Base: Fit Method, Use content = %s, Unit Length Violations:: user_content = %s, item_content = %s" +
                        "user_collab = %s, item_collab = %s", content_data_used,
                        unit_length_violations(user_content_vectors, axis=1), unit_length_violations(item_content_vectors, axis=1),
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))

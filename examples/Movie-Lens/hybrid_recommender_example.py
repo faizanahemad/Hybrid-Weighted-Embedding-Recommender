@@ -1,7 +1,6 @@
 from hwer.validation import *
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
-import distutils
 import argparse
 
 pd.set_option('display.max_rows', 500)
@@ -28,6 +27,7 @@ def str2bool(v):
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
+
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--algo', type=str, metavar='N', nargs='+',
@@ -47,9 +47,6 @@ if __name__ == '__main__':
     conv_arch = int(args["conv_arch"])
     enable_kfold = args["enable_kfold"]
     hyperparamters_dict = get_best_params(dataset, conv_arch)
-    for algo in algos:
-        print("algo = %s" % algo)
-        pprint(hyperparamters_dict[algo])
 
     df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale = mdr.build_dataset(dataset)
 
@@ -108,3 +105,6 @@ if __name__ == '__main__':
         user_rating_count_metrics = user_rating_count_metrics.groupby(["algo", "user_rating_count"]).mean().reset_index()
         display_results(results)
         visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
+    for algo in algos:
+        print("algo = %s" % algo)
+        pprint(hyperparamters_dict[algo])

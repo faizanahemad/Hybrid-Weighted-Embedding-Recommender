@@ -9,7 +9,8 @@ params = {
                                                          gcn_lr=0.001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                          gcn_kernel_l2=1e-8, gcn_batch_size=1024, conv_depth=2,
                                                          margin=1.0,
-                                                         gaussian_noise=0.15,))),
+                                                         gaussian_noise=0.15,
+                                                         node2vec_params=dict(walk_length=40, num_walks=20, window=5, iter=2, p=0.5, q=0.5)))),
     2: dict(n_dims=64, combining_factor=0.1,
                                collaborative_params=dict(
                                    prediction_network_params=dict(lr=0.03, epochs=50, batch_size=1024,
@@ -20,7 +21,8 @@ params = {
                                                          gcn_lr=0.001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                          gcn_kernel_l2=1e-8, gcn_batch_size=1024, conv_depth=2,
                                                          margin=1.0,
-                                                         gaussian_noise=0.15,))),
+                                                         gaussian_noise=0.15,
+                                                         node2vec_params=dict(walk_length=40, num_walks=20, window=5, iter=2, p=0.5, q=0.5)))),
     3: dict(n_dims=64, combining_factor=0.1,
                                collaborative_params=dict(
                                    prediction_network_params=dict(lr=0.05, epochs=50, batch_size=1024,
@@ -31,7 +33,8 @@ params = {
                                                          gcn_lr=0.001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                          gcn_kernel_l2=1e-8, gcn_batch_size=1024, conv_depth=2,
                                                          margin=1.0,
-                                                         gaussian_noise=0.05,))),
+                                                         gaussian_noise=0.05,
+                                                         node2vec_params=dict(walk_length=40, num_walks=20, window=5, iter=2, p=0.5, q=0.5)))),
     4: dict(n_dims=64, combining_factor=0.1,
                                collaborative_params=dict(
                                    prediction_network_params=dict(lr=0.05, epochs=50, batch_size=1024,
@@ -42,7 +45,8 @@ params = {
                                                          gcn_lr=0.001, gcn_epochs=10, gcn_layers=2, gcn_dropout=0.0,
                                                          gcn_kernel_l2=1e-8, gcn_batch_size=1024, conv_depth=2,
                                                          margin=1.0,
-                                                         gaussian_noise=0.05,))),
+                                                         gaussian_noise=0.05,
+                                                         node2vec_params=dict(walk_length=40, num_walks=20, window=5, iter=2, p=0.5, q=0.5)))),
     5: dict(n_dims=64, combining_factor=0.1,
                                collaborative_params=dict(
                                    prediction_network_params=dict(lr=0.05, epochs=55, batch_size=1024,
@@ -53,5 +57,6 @@ params = {
                                                          gcn_lr=0.001, gcn_epochs=20, gcn_layers=3, gcn_dropout=0.0,
                                                          gcn_kernel_l2=1e-8, gcn_batch_size=1024, conv_depth=3,
                                                          margin=1.0,
-                                                         gaussian_noise=0.025,)))
+                                                         gaussian_noise=0.025,
+                                                         node2vec_params=dict(walk_length=40, num_walks=20, window=5, iter=2, p=0.5, q=0.5))))
 }
