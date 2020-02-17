@@ -402,9 +402,6 @@ class HybridGCNRec(SVDppHybrid):
         user_vectors = np.concatenate((np.zeros((1, user_vectors.shape[1])), user_vectors))
         item_vectors = np.concatenate((np.zeros((1, item_vectors.shape[1])), item_vectors))
 
-        self.w2v_user_vectors = np.concatenate((np.zeros((1, self.w2v_user_vectors.shape[1])), self.w2v_user_vectors))
-        self.w2v_item_vectors = np.concatenate((np.zeros((1, self.w2v_item_vectors.shape[1])), self.w2v_item_vectors))
-
         mu, user_bias, item_bias = self.__calculate_bias__(user_ids, item_ids, user_item_affinities, rating_scale)
         assert np.sum(np.isnan(user_bias)) == 0
         assert np.sum(np.isnan(item_bias)) == 0
@@ -417,6 +414,11 @@ class HybridGCNRec(SVDppHybrid):
         total_items = len(item_ids) + 1
         if use_content:
             try:
+                self.w2v_user_vectors = np.concatenate(
+                    (np.zeros((1, self.w2v_user_vectors.shape[1])), self.w2v_user_vectors))
+                self.w2v_item_vectors = np.concatenate(
+                    (np.zeros((1, self.w2v_item_vectors.shape[1])), self.w2v_item_vectors))
+
                 user_vectors = np.concatenate((self.w2v_user_vectors, user_vectors, user_content_vectors), axis=1)
                 item_vectors = np.concatenate((self.w2v_item_vectors, item_vectors, item_content_vectors), axis=1)
                 self.w2v_user_vectors = None
