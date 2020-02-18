@@ -143,7 +143,7 @@ def build_dataset(dataset):
     df_user, df_item, ratings = read_data()
 
     prepare_data_mappers = get_data_mapper(df_user, df_item, dataset=dataset)
-    ratings = ratings[["user", "item", "rating"]]
+    ratings = ratings[["user", "item", "rating"]].sample(frac=1.0)
     user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
     rating_scale = (np.min([r for u, i, r in user_item_affinities]), np.max([r for u, i, r in user_item_affinities]))
     return df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale

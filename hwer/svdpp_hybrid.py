@@ -15,7 +15,9 @@ class SVDppHybrid(HybridRecommender):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False,
                  super_fast_inference: bool = False):
-        super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims, fast_inference, super_fast_inference)
+        assert n_content_dims == n_collaborative_dims
+        super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims,
+                         n_collaborative_dims, fast_inference, super_fast_inference)
         self.log = getLogger(type(self).__name__)
 
     def __prediction_network_datagen__(self, user_ids: List[str], item_ids: List[str],
@@ -366,4 +368,6 @@ class SVDppHybrid(HybridRecommender):
             user_vectors, item_vectors = user_vectors * (1 - alpha), item_vectors * (1 - alpha)
             user_vectors = user_content_vectors + user_vectors
             item_vectors = item_content_vectors + item_vectors
+            self.n_output_dims = user_vectors.shape[1]
+            assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_output_dims
         return user_vectors,  item_vectors

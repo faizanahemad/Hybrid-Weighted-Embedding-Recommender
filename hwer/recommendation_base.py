@@ -128,6 +128,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
     def __build_knn__(self, user_ids: List[str], item_ids: List[str],
                       user_vectors: np.ndarray, item_vectors: np.ndarray):
 
+        self.log.debug("Starting KNN Indexing Process...")
         n_neighbors = self.knn_params["n_neighbors"]
         index_time_params = self.knn_params["index_time_params"]
         user_vectors = unit_length(user_vectors, axis=1)
@@ -139,14 +140,14 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         assert len(user_vectors) == len(self.users_set)
         assert user_vectors.shape[1] == item_vectors.shape[1]
         user_knn.add_items(user_vectors, list(range(len(self.users_set))))
-
+        self.log.debug("Built User KNN...")
         item_knn = hnswlib.Index(space='cosine', dim=item_vectors.shape[1])
         item_knn.init_index(max_elements=len(item_ids) * 2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])
         item_knn.set_ef(n_neighbors * 2)
         assert len(item_vectors) == len(self.items_set)
         item_knn.add_items(item_vectors, list(range(len(self.items_set))))
-
+        self.log.debug("Built Item KNN...")
         self.user_knn = user_knn
         self.item_knn = item_knn
         self.log.info("Built KNN, user vectors shape = %s, item vectors shape = %s, n_neighbors = %s",
