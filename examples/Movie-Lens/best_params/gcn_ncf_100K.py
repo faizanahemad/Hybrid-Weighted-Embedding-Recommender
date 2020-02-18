@@ -50,8 +50,8 @@ params = {
     5: dict(n_dims=96, combining_factor=0.1,
                                collaborative_params=dict(
                                    prediction_network_params=dict(lr=0.04, epochs=55, batch_size=1024,
-                                                                  network_depth=4, scorer_depth=3,
-                                                                  gaussian_noise=0.1, conv_depth=3,
+                                                                  network_depth=3, scorer_depth=3,
+                                                                  gaussian_noise=0.125, conv_depth=3,
                                                                   kernel_l2=1e-9, dropout=0.0),
                                    user_item_params=dict(lr=0.1, epochs=10, batch_size=64, l2=0.0001,
                                                          gcn_lr=0.0001, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0,
