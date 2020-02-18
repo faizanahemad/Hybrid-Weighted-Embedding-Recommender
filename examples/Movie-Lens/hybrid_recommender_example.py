@@ -1,3 +1,5 @@
+# python hybrid_recommender_example.py --dataset 100K --conv_arch 5 --algo gcn_ncf --enable_kfold False
+
 from hwer.validation import *
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
@@ -99,6 +101,8 @@ if __name__ == '__main__':
             results.extend(res)
 
         user_rating_count_metrics = user_rating_count_metrics.groupby(["algo", "user_rating_count"]).mean().reset_index()
+        print(pd.DataFrame.from_records(results))
+        print("#" * 80)
         display_results(results)
         # visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
     for algo in algos:
