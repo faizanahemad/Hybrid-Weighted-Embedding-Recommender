@@ -51,12 +51,12 @@ params = {
                            collaborative_params=dict(
                                prediction_network_params=dict(lr=0.05, epochs=70, batch_size=1536,
                                                               network_depth=4,
-                                                              gaussian_noise=0.275, conv_depth=4,
+                                                              gaussian_noise=0.325, conv_depth=4,
                                                               kernel_l2=1e-9, dropout=0.0,),
                                user_item_params=dict(lr=0.1, epochs=30, batch_size=64, l2=0.0001,
-                                                     gcn_lr=0.00075, gcn_epochs=25, gcn_layers=2, gcn_dropout=0.0,
+                                                     gcn_lr=0.00075, gcn_epochs=25, gcn_layers=3, gcn_dropout=0.0,
                                                      gcn_kernel_l2=1e-8, gcn_batch_size=1024, conv_depth=2,
                                                      margin=1.0,
                                                      gaussian_noise=0.05,
-                                                     node2vec_params=dict(walk_length=40, num_walks=20, window=5, iter=2, p=0.5, q=0.5)))),
+                                                     node2vec_params=dict(walk_length=40, num_walks=30, window=7, iter=2, p=1.0, q=0.25)))),
           }
