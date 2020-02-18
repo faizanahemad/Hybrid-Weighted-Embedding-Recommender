@@ -153,6 +153,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.log.info("Built KNN, user vectors shape = %s, item vectors shape = %s, n_neighbors = %s",
                       user_vectors.shape,
                       item_vectors.shape, n_neighbors)
+        assert self.users_set == set(self.user_id_to_index.keys())
+        assert self.items_set == set(self.item_id_to_index.keys())
 
     def add_user(self, user_id: str, features: FeatureSet, user_item_affinities: List[Tuple[str, str, float]]):
         assert self.fit_done
@@ -212,11 +214,11 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         item_vectors = None
         if len(users) > 0:
             users, _ = zip(*users)
-            users = [self.user_id_to_index[u] for u in users]
+            users = [self.user_id_to_index[u] for u in users if u in self.users_set]
             user_vectors = self.user_knn.get_items(users)
         if len(items) > 0:
             items, _ = zip(*items)
-            items = [self.item_id_to_index[i] for i in items]
+            items = [self.item_id_to_index[i] for i in items if i in self.items_set]
             item_vectors = self.item_knn.get_items(items)
         if user_vectors is not None and item_vectors is not None:
             embeddings = np.concatenate((user_vectors, item_vectors), axis=0)
