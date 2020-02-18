@@ -47,16 +47,16 @@ params = {
                                                          margin=1.0,
                                                          gaussian_noise=0.05,
                                                          node2vec_params=dict(walk_length=40, num_walks=20, window=5, iter=2, p=0.5, q=0.5)))),
-    5: dict(n_dims=64, combining_factor=0.1,
+    5: dict(n_dims=96, combining_factor=0.1,
                                collaborative_params=dict(
-                                   prediction_network_params=dict(lr=0.05, epochs=55, batch_size=1024,
-                                                                  network_depth=4, scorer_depth=4,
-                                                                  gaussian_noise=0.15, conv_depth=4,
+                                   prediction_network_params=dict(lr=0.04, epochs=55, batch_size=1024,
+                                                                  network_depth=4, scorer_depth=3,
+                                                                  gaussian_noise=0.1, conv_depth=3,
                                                                   kernel_l2=1e-9, dropout=0.0),
-                                   user_item_params=dict(lr=0.1, epochs=20, batch_size=64, l2=0.0001,
-                                                         gcn_lr=0.001, gcn_epochs=20, gcn_layers=3, gcn_dropout=0.0,
+                                   user_item_params=dict(lr=0.1, epochs=10, batch_size=64, l2=0.0001,
+                                                         gcn_lr=0.0001, gcn_epochs=10, gcn_layers=3, gcn_dropout=0.0,
                                                          gcn_kernel_l2=1e-8, gcn_batch_size=1024, conv_depth=3,
                                                          margin=1.0,
                                                          gaussian_noise=0.025,
-                                                         node2vec_params=dict(walk_length=40, num_walks=20, window=5, iter=2, p=0.5, q=0.5))))
+                                                         node2vec_params=dict(walk_length=40, num_walks=20, window=5, iter=2, p=1.0, q=0.25))))
 }
