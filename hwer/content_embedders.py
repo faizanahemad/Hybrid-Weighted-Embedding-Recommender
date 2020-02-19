@@ -58,7 +58,7 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         self.ohe = None
         self.log = getLogger(type(self).__name__)
         self.columns = None
-        self.verbose = kwargs["verbose"] if "verbose" in kwargs else 2
+        self.verbose = kwargs["verbose"] if "verbose" in kwargs else 0
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
@@ -109,7 +109,7 @@ class MultiCategoricalEmbedding(ContentEmbeddingBase):
         self.vectorizer = None
         self.input_mapper = lambda x: " ".join(map(lambda y: "__" + str(y).strip() + "__", x))
         self.log = getLogger(type(self).__name__)
-        self.verbose = kwargs["verbose"] if "verbose" in kwargs else 2
+        self.verbose = kwargs["verbose"] if "verbose" in kwargs else 0
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
@@ -205,7 +205,7 @@ class NumericEmbedding(ContentEmbeddingBase):
         self.scaler = None
         self.encoder = None
         self.standard_scaler = None
-        self.verbose = kwargs["verbose"] if "verbose" in kwargs else 2
+        self.verbose = kwargs["verbose"] if "verbose" in kwargs else 0
         self.log = getLogger(type(self).__name__)
 
     def __prepare_inputs(self, inputs):
