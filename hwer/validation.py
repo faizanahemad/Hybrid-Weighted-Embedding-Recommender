@@ -405,7 +405,7 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.xlabel("Algorithm")
     plt.ylabel("Retrieval Time in milli-seconds")
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('retrieval_time_vs_algo.png', bbox_inches='tight')
 
     plt.figure(figsize=(12, 8))
     plt.title("Mean Absolute Error vs Algorithm")
@@ -413,7 +413,7 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.xlabel("Algorithm")
     plt.ylabel("Mean Absolute Error")
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('mae_vs_algo.png', bbox_inches='tight')
 
     plt.figure(figsize=(12, 8))
     plt.title("RMSE vs Algorithm")
@@ -421,7 +421,7 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.xlabel("Algorithm")
     plt.ylabel("RMSE")
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('rmse_vs_algo.png', bbox_inches='tight')
 
     plt.figure(figsize=(12, 8))
     plt.title("NDCG vs Algorithm")
@@ -429,7 +429,7 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.xlabel("Algorithm")
     plt.ylabel("NDCG")
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('ndcg_vs_algo.png', bbox_inches='tight')
 
     plt.figure(figsize=(12, 8))
     plt.title("Mean Average Precision vs Algorithm")
@@ -437,7 +437,15 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.xlabel("Algorithm")
     plt.ylabel("Mean Average Precision")
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('map_vs_algo.png', bbox_inches='tight')
+
+    plt.figure(figsize=(12, 8))
+    plt.title("Mean Reciprocal Rank vs Algorithm")
+    sns.barplot(results.index, results.mrr)
+    plt.xlabel("Algorithm")
+    plt.ylabel("Mean Reciprocal Rank ")
+    plt.xticks(rotation=45, ha='right')
+    plt.savefig('mrr_vs_algo.png', bbox_inches='tight')
 
     unique_algos = user_rating_count_metrics["algo"].nunique()
     markers = None
@@ -450,35 +458,35 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     sns.lineplot(x="user_rating_count", y="mae", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('mae_vs_urc.png', bbox_inches='tight')
 
     plt.figure(figsize=(12, 8))
     plt.title("Mean Average Precision vs User Rating Count")
     sns.lineplot(x="user_rating_count", y="map", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('map_vs_urc.png', bbox_inches='tight')
 
     plt.figure(figsize=(12, 8))
     plt.title("RMSE vs User Rating Count")
     sns.lineplot(x="user_rating_count", y="rmse", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('rmse_vs_urc.png', bbox_inches='tight')
 
     plt.figure(figsize=(12, 8))
     plt.title("Mean Reciprocal Rank vs User Rating Count")
     sns.lineplot(x="user_rating_count", y="mrr", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('mrr_vs_urc.png', bbox_inches='tight')
 
     plt.figure(figsize=(12, 8))
     plt.title("NDCG vs User Rating Count")
     sns.lineplot(x="user_rating_count", y="ndcg", hue="algo", markers=markers, style=style, data=user_rating_count_metrics)
     plt.semilogx(basex=2)
     plt.xticks(rotation=45, ha='right')
-    plt.show()
+    plt.savefig('ndcg_vs_urc.png', bbox_inches='tight')
 
 
 def get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items):

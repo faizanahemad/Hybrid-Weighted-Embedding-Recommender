@@ -1,6 +1,13 @@
 # Hybrid-Weighted-Embedding-Recommendation
 A Hybrid Recommendation system which uses Content embeddings and augments them with collaborative features. Weighted Combination of embeddings enables solving cold start with fast training and serving
 
+# TODO:
+- Library the Test bench
+- Improve docs
+- Multi-item types
+- Users-Multiple_item_types-Other-things enabled graph
+- No users and items just unique str ids
+
 # Environment Setup
 - Install Anaconda from https://www.anaconda.com/distribution/
 

@@ -54,10 +54,12 @@ class HybridGCNRec(SVDppHybrid):
 
         # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
         sentences = []
+        # TODO: Batch write to file
         for w in sentences_generator():
             sentences.append(list(map(str, w)))
         gt += time.time() - gts
         np.random.shuffle(sentences)
+        # TODO: train from file
         w2v = Word2Vec(sentences, min_count=1,
                        size=self.n_collaborative_dims, window=window, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
@@ -84,36 +86,6 @@ class HybridGCNRec(SVDppHybrid):
         self.log.info(
             "Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Word2Vec Time = %.1f" % (
             gt, time.time() - start))
-        return user_vectors, item_vectors
-
-    def __node2vec_trainer__(self,
-                             user_ids: List[str], item_ids: List[str],
-                             user_item_affinities: List[Tuple[str, str, float]],
-                             user_vectors: np.ndarray, item_vectors: np.ndarray,
-                             user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                             n_output_dims: int,
-                             hyperparams: Dict):
-        import networkx as nx
-        from node2vec import Node2Vec
-        walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 60
-        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 140
-        window = hyperparams["window"] if "window" in hyperparams else 4
-        iter = hyperparams["iter"] if "iter" in hyperparams else 5
-        p = hyperparams["p"] if "p" in hyperparams else 0.5
-        q = hyperparams["q"] if "q" in hyperparams else 0.5
-
-        total_users = len(user_ids)
-        total_items = len(item_ids)
-        affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in user_item_affinities]
-        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-        edges = [(str(x), str(y)) for x, y, w in affinities]
-        graph = nx.DiGraph(edges)
-        node2vec = Node2Vec(graph, dimensions=n_output_dims, p=p, q=q,
-                            walk_length=walk_length, num_walks=num_walks, workers=self.cpu)
-        n2v = node2vec.fit(window=window, min_count=1, batch_words=1000, iter=iter,
-                           workers=self.cpu, sg=1, negative=10, max_vocab_size=None, )
-        user_vectors = np.array([n2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
-        item_vectors = np.array([n2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
         return user_vectors, item_vectors
 
     def __node2vec_triplet_trainer__(self,

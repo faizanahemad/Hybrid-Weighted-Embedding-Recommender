@@ -81,8 +81,6 @@ use_content = True
 enable_gcn = True
 verbose = 2
 
-datasets = ["100K", "1M", "20M"]
-algos = ["gcn", "gcn_ncf", "svdpp"]
 
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
