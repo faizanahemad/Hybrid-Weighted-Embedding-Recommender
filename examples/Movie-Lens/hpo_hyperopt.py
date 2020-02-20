@@ -49,7 +49,7 @@ def run_trial(args):
     """
 
     hyperparams = build_params(args, objective, params)
-    rmse, ndcg = optimisation_objective(hyperparams, algo, report, objective, dataset)
+    rmse, ndcg = optimisation_objective(hyperparams, algo, report, dataset)
     loss = rmse if objective == "rmse" else 1 - ndcg
     return {
         'status': 'fail' if np.isnan(loss) else 'ok',

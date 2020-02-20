@@ -46,58 +46,14 @@ if __name__ == '__main__':
 
     df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale = mdr.build_dataset(dataset)
     #
-    enable_error_analysis = False
     verbose = 2  # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 
     print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (
         len(user_item_affinities), len(df_user.user.values), len(df_item.item.values), rating_scale))
-
-    if not enable_kfold:
-        train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2,
-                                                                   stratify=[u for u, i, r in user_item_affinities])
-        print("Train Length = ", len(train_affinities))
-        print("Validation Length =", len(validation_affinities))
-        recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities,
-                                                             list(df_user.user.values),
-                                                             list(df_item.item.values),
-                                                             hyperparamters_dict,
-                                                             prepare_data_mappers, rating_scale, algos,
-                                                             enable_error_analysis=enable_error_analysis,
-                                                             enable_baselines=enable_baselines)
-        results = display_results(results)
-        user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
-        # print(user_rating_count_metrics)
-        # user_rating_count_metrics.to_csv("algo_user_rating_count_%s.csv" % dataset, index=False)
-        results.reset_index().to_csv("overall_results_%s.csv" % (dataset), index=False)
-        visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
-    else:
-        X = np.array(user_item_affinities)
-        y = np.array([u for u, i, r in user_item_affinities])
-        skf = StratifiedKFold(n_splits=5)
-        results = []
-        user_rating_count_metrics = pd.DataFrame([],
-                                                 columns=["algo", "user_rating_count", "rmse", "mae", "map",
-                                                          "train_rmse",
-                                                          "train_mae"])
-        for train_index, test_index in skf.split(X, y):
-            train_affinities, validation_affinities = X[train_index], X[test_index]
-            train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
-            validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
-            #
-            recs, res, ucrms = test_once(train_affinities, validation_affinities, list(df_user.user.values),
-                                         list(df_item.item.values),
-                                         hyperparamters_dict,
-                                         prepare_data_mappers, rating_scale, algos,
-                                         enable_error_analysis=False, enable_baselines=enable_baselines)
-
-            user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
-            results.extend(res)
-
-        user_rating_count_metrics = user_rating_count_metrics.groupby(
-            ["algo", "user_rating_count"]).mean().reset_index()
-        print(pd.DataFrame.from_records(results))
-        print("#" * 80)
-        display_results(results)
-        visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
+    run_models_for_testing(df_user, df_item, user_item_affinities,
+                           prepare_data_mappers, rating_scale,
+                           algos, hyperparamters_dict,
+                           enable_error_analysis=False, enable_baselines=enable_baselines,
+                           enable_kfold=enable_kfold, display=True)
     for algo in algos:
         print("algo = %s" % algo, hyperparamters_dict[algo])

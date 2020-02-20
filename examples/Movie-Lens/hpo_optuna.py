@@ -6,8 +6,9 @@ import numpy as np
 from hwer.validation import *
 
 
-def get_reporter(trial):
+def get_reporter(trial, objective):
     def report(imv, step):
+        imv = imv["rmse"] if objective=="rmse" else 1 - imv["ndcg"]
         trial.report(imv, step)
         if trial.should_prune():
             raise optuna.exceptions.TrialPruned()
@@ -33,7 +34,7 @@ def rmse_objective(trial):
     params["collaborative_params"]["prediction_network_params"]["kernel_l2"] = kernel_l2
     report = get_reporter(trial)
 
-    rmse, _ = optimisation_objective(params, algo, report, objective, dataset)
+    rmse, _ = optimisation_objective(params, algo, report, dataset)
     return rmse
 
 
