@@ -9,9 +9,7 @@ from numpy.linalg import norm
 from scipy.special import comb
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
-from surprise import BaselineOnly
-from surprise import Dataset
-from surprise import Reader
+import argparse
 
 
 def locality_preserving_dimensionality_reduction(data: np.ndarray, n_neighbors=100, max_similarity=0.1, ):
@@ -289,6 +287,9 @@ def build_item_user_dict(user_item_affinities: List[Tuple[str, str, float]]):
 
 def normalize_affinity_scores_by_user_item_bs(user_item_affinities: List[Tuple[str, str, float]], rating_scale=(1, 5)) \
         -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
+    from surprise import BaselineOnly
+    from surprise import Dataset
+    from surprise import Reader
     train = pd.DataFrame(user_item_affinities)
     reader = Reader(rating_scale=rating_scale)
     trainset = Dataset.load_from_df(train, reader).build_full_trainset()
@@ -347,6 +348,7 @@ class UserNotFoundException(Exception):
 
 class ItemNotFoundException(Exception):
     pass
+
 
 def str2bool(v):
     if isinstance(v, bool):
