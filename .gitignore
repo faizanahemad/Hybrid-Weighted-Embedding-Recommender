@@ -158,3 +158,4 @@ examples/approximating_functions_with_nn.py
 examples/basic_negative_sampling_loss.py
 examples/numba_example.py
 examples/Movie-Lens/hyperopt_trials/
+*.png

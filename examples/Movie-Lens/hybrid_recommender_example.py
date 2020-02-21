@@ -1,8 +1,6 @@
 # python hybrid_recommender_example.py --dataset 100K --conv_arch 5 --algo gcn_ncf --enable_kfold False
 
 from hwer.validation import *
-from sklearn.model_selection import StratifiedKFold
-from sklearn.model_selection import train_test_split
 import argparse
 
 pd.set_option('display.max_rows', 500)
