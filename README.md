@@ -8,6 +8,21 @@ A Hybrid Recommendation system which uses Content embeddings and augments them w
 - Users-Multiple_item_types-Other-things enabled graph
 - No users and items just unique str ids
 
+# TODO:
+- Paper: Figure out sections and relevant papers to take content arrangement hints.
+- Figure out latex template codes for relevant conferences.
+    - AMLC
+    - ICLR/AAAI/NIPS/ICML/IEEE/ACM kdd, sigkdd, recsys
+    
+- ML-20M
+- ML-100K/ML-1M/ML-20M vanilla, feat, text-feat
+- Ablation Study
+    - Resnet Arch vs Normal Arch
+    - Text Features, other features, no features/ no content
+    - No/Gaussian noise
+    - Node2vec, triplet vectors input
+
+
 # Environment Setup
 - Install Anaconda from https://www.anaconda.com/distribution/
 

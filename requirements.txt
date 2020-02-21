@@ -35,7 +35,7 @@ gensim==3.8.1
 google-pasta==0.1.7
 graphviz==0.13.2
 h5py==2.10.0
-hnswlib==0.3.2.0
+hnswlib==0.3.4
 hyperopt==0.2.2
 idna==2.8
 importlib-metadata==0.23

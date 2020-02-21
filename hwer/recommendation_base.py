@@ -288,9 +288,9 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         return list(sorted(results, key=operator.itemgetter(1), reverse=False))
 
     @staticmethod
-    def persist(filename: str, instance):
-        pass
+    def persist(instance, path: str="."):
+        raise NotImplementedError()
 
     @staticmethod
-    def load(filename: str):
-        pass
+    def load(path: str = "."):
+        raise NotImplementedError()

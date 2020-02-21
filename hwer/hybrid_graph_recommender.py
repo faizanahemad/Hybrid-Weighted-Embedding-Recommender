@@ -8,6 +8,11 @@ from .logging import getLogger
 from .random_walk import *
 from .svdpp_hybrid import SVDppHybrid
 from .utils import unit_length_violations
+import logging
+import dill
+import sys
+logger = getLogger(__name__, "DEBUG")
+logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
 class HybridGCNRec(SVDppHybrid):
@@ -586,3 +591,41 @@ class HybridGCNRec(SVDppHybrid):
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
         return predictions
+
+    @staticmethod
+    def persist(model, path: str = "."):
+        logger.info("save_model:: Saving Model...")
+        user_knn_path = os.path.join(path, 'user_knn.bin')
+        item_knn_path = os.path.join(path, 'item_knn.bin')
+
+        model.user_knn.save_index(user_knn_path)
+        model.item_knn.save_index(item_knn_path)
+        logger.debug("save_model:: Saved Serialized HNSW KNN indices.")
+
+        model.user_knn = None
+        model.item_knn = None
+        model_path = os.path.join(path, 'model.pth')
+        with open(model_path, 'wb') as f:
+            dill.dump(model, f)
+        logger.info("save_model:: Saved Model to %s" % model_path)
+
+    @staticmethod
+    def load(path: str = "."):
+        import hnswlib
+        logger.info("load_model:: Loading Model...")
+        logger.debug("Load Dir Contents = %s" % os.listdir(path))
+        user_knn_path = os.path.join(path, 'user_knn.bin')
+        item_knn_path = os.path.join(path, 'item_knn.bin')
+        with open(os.path.join(path, 'model.pth'), 'rb') as f:
+            model = dill.load(f)
+        logger.debug("load_model:: Loaded Main Model without HNSW KNN indices.")
+
+        user_knn = hnswlib.Index(space='cosine', dim=model.n_output_dims)
+        user_knn.load_index(user_knn_path)
+        item_knn = hnswlib.Index(space='cosine', dim=model.n_output_dims)
+        item_knn.load_index(item_knn_path)
+        logger.debug("load_model:: Loaded Serialized HNSW KNN indices.")
+        model.user_knn = user_knn
+        model.item_knn = item_knn
+        logger.info("load_model:: Loaded Full Model.")
+        return model
