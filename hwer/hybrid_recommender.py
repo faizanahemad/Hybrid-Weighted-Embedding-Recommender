@@ -91,7 +91,6 @@ class HybridRecommender(RecommendationBase):
                                                  hyperparams: Dict):
 
         import tensorflow as tf
-        import tensorflow.keras.backend as K
         output_shapes = (((), (), ()), ())
         output_types = ((tf.int64, tf.int64, tf.int64), tf.float32)
         generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
@@ -314,6 +313,8 @@ class HybridRecommender(RecommendationBase):
         user_vectors, item_vectors = self.prepare_for_knn(alpha, content_data_used,
                                                           user_content_vectors, item_content_vectors,
                                                           user_vectors, item_vectors)
+        self.knn_user_vectors = user_vectors
+        self.knn_item_vectors = item_vectors
         self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
         self.fit_done = True
         self.log.info("End Fitting Recommender, user_vectors shape = %s, item_vectors shape = %s, Time to fit = %.1f",
@@ -330,6 +331,8 @@ class HybridRecommender(RecommendationBase):
             user_vectors = np.concatenate((user_content_vectors, user_vectors), axis=1)
             item_vectors = np.concatenate((item_content_vectors, item_vectors), axis=1)
             assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_output_dims
+        user_vectors = unit_length(user_vectors, axis=1)
+        item_vectors = unit_length(item_vectors, axis=1)
         return user_vectors, item_vectors
 
     @abc.abstractmethod

@@ -8,7 +8,7 @@ from more_itertools import flatten
 
 from .hybrid_recommender import HybridRecommender
 from .logging import getLogger
-from .utils import get_rng, normalize_affinity_scores_by_user_item_bs
+from .utils import get_rng, normalize_affinity_scores_by_user_item_bs, unit_length
 
 
 class SVDppHybrid(HybridRecommender):
@@ -370,4 +370,6 @@ class SVDppHybrid(HybridRecommender):
             item_vectors = item_content_vectors + item_vectors
             self.n_output_dims = user_vectors.shape[1]
             assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_output_dims
+        user_vectors = unit_length(user_vectors, axis=1)
+        item_vectors = unit_length(item_vectors, axis=1)
         return user_vectors,  item_vectors

@@ -56,24 +56,20 @@ class ContentRecommendation(RecommendationBase):
             embedding = unit_length(embedding, axis=1)
             item_embeddings[feature_name] = embedding
 
-        item_user_dict: Dict[str, Dict[str, float]] = build_item_user_dict(user_item_affinities)
+        item_user_idx_list: Dict[str, List[int]] = {}
+        for user, item, affinity in user_item_affinities:
+            if item not in item_user_idx_list:
+                item_user_idx_list[item] = [self.user_id_to_index[user]]
+            else:
+                item_user_idx_list[item].append(self.user_id_to_index[user])
         for feature_name in self.user_only_features:
             user_embedding = user_embeddings[feature_name]
-            item_embedding = np.zeros(shape=(len(item_ids), user_embedding.shape[1]))
-            average_embedding = np.mean(user_embedding, axis=0)
+            item_embedding = np.full(shape=(len(item_ids), user_embedding.shape[1]), fill_value=1/np.sqrt(user_embedding.shape[1]))
             for i, item in enumerate(item_ids):
-                if item in item_user_dict:
-                    user_dict = item_user_dict[item]
-                    users = user_dict.keys()
-                    weights = list(user_dict.values())
-                    user_indices = [self.user_id_to_index[user] for user in users]
-                    user_ems = np.take(user_embedding, indices=user_indices, axis=0)
-                    assert len(user_ems) > 0
-                    weights[weights == 0] = 1e-3
-                    item_em = np.average(user_ems, axis=0, weights=weights)
-                    item_embedding[i] = item_em
-                else:
-                    item_embedding[i] = average_embedding.copy()
+                if item not in item_user_idx_list:
+                    continue
+                user_indices = item_user_idx_list[item]
+                item_embedding[i] = user_embedding[user_indices].mean(0)
             if np.sum(np.isnan(item_embedding)) != 0:
                 self.log.info("Item Embedding:user_only_features: Feature = %s, Nan Items = %s", feature_name,
                               get_nan_rows(item_embedding))
@@ -94,8 +90,6 @@ class ContentRecommendation(RecommendationBase):
                                   user_item_affinities: List[Tuple[str, str, float]]):
 
         self.log.debug("ContentRecommendation::__build_user_embeddings__:: Building User Embedding ...")
-        user_item_dict: Dict[str, Dict[str, float]] = build_user_item_dict(user_item_affinities)
-
         user_item_idx_list: Dict[str, List[int]] = {}
         for user, item, affinity in user_item_affinities:
             if user not in user_item_idx_list:
@@ -166,10 +160,11 @@ class ContentRecommendation(RecommendationBase):
                 "ContentRecommendation::__build_user_embeddings__:: Processing Item Only Embeddings for feature = %s" % (
                     feature_name))
             for i, user in enumerate(user_ids):
-                if user in user_item_idx_list:
-                    item_indices = user_item_idx_list[user]
-                    item_em = item_embedding[item_indices].mean(0)
-                    user_embedding[i] = item_em
+                if user not in user_item_idx_list:
+                    continue
+                item_indices = user_item_idx_list[user]
+                item_em = item_embedding[item_indices].mean(0)
+                user_embedding[i] = item_em
                 if i % int(len(user_embedding)/20) == 0:
                     self.log.debug("ContentRecommendation::__build_user_embeddings__:: Processed %s/%s Item Only Embeddings of feature %s"
                                    % (i, len(user_embedding), feature_name))
@@ -267,6 +262,8 @@ class ContentRecommendation(RecommendationBase):
                                                                        user_data, item_data, user_item_affinities,
                                                                        self.n_output_dims)
 
+        self.knn_user_vectors = user_vectors
+        self.knn_item_vectors = item_vectors
         self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
 
         # AutoEncoder them so that error is minimised and distance is maintained

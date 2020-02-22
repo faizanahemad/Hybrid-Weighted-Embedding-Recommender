@@ -22,7 +22,7 @@ from scipy.stats import describe
 from .utils import average_precision, reciprocal_rank, ndcg
 
 
-def surprise_get_topk(model, users, items, k=200) -> Dict[str, List[Tuple[str, float]]]:
+def surprise_get_topk(model, users, items, k) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
         p = [(i, model.predict(u, i).est) for i in items]
@@ -31,7 +31,7 @@ def surprise_get_topk(model, users, items, k=200) -> Dict[str, List[Tuple[str, f
     return predictions
 
 
-def model_get_topk(model, users, items, k=200) -> Dict[str, List[Tuple[str, float]]]:
+def model_get_topk(model, users, items, k) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
         p = model.find_items_for_user(u)
@@ -39,14 +39,14 @@ def model_get_topk(model, users, items, k=200) -> Dict[str, List[Tuple[str, floa
     return predictions
 
 
-def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list, k=100):
+def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list, k=200):
     validation_users = list(set([u for u, i, r in validation_affinities]))
     train_users = list(set([u for u, i, r in train_affinities]))
     assert len(validation_users) == len(train_users) and set(train_users) == set(validation_users)
     train_uid = defaultdict(set)
     items_extracted_length = []
     s = time.time()
-    predictions = get_topk(model, validation_users, item_list, k=k * 2)
+    predictions = get_topk(model, validation_users, item_list, k)
     e = time.time()
     pred_time = e - s
     for u, i, r in train_affinities:
@@ -662,6 +662,13 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
         results = display_results(results)
         results.to_csv("overall_results.csv")
         visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
+        for rec in recs:
+            c = rec.__class__
+            c.persist(rec)
+            rec = c.load()
+            rec.find_items_for_user(df_user.user.values[0])
+
+
     else:
         results = pd.DataFrame.from_records(results)
         results = results.groupby(["algo"]).mean().reset_index()
