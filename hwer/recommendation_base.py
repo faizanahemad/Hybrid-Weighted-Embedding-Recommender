@@ -88,6 +88,8 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         self.user_id_to_index = bidict()
         self.item_id_to_index = bidict()
+        self.knn_user_vectors = None
+        self.knn_item_vectors = None
         self.user_knn = None
         self.item_knn = None
         self.fit_done = False
@@ -131,8 +133,6 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         self.log.debug("Starting KNN Indexing Process...")
         n_neighbors = self.knn_params["n_neighbors"]
         index_time_params = self.knn_params["index_time_params"]
-        user_vectors = unit_length(user_vectors, axis=1)
-        item_vectors = unit_length(item_vectors, axis=1)
         user_knn = hnswlib.Index(space='cosine', dim=user_vectors.shape[1])
         user_knn.init_index(max_elements=len(user_ids) * 2,
                             ef_construction=index_time_params['ef_construction'], M=index_time_params['M'])
@@ -215,11 +215,11 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         if len(users) > 0:
             users, _ = zip(*users)
             users = [self.user_id_to_index[u] for u in users if u in self.users_set]
-            user_vectors = self.user_knn.get_items(users)
+            user_vectors = self.knn_user_vectors[users]
         if len(items) > 0:
             items, _ = zip(*items)
             items = [self.item_id_to_index[i] for i in items if i in self.items_set]
-            item_vectors = self.item_knn.get_items(items)
+            item_vectors = self.knn_item_vectors[items]
         if user_vectors is not None and item_vectors is not None:
             embeddings = np.concatenate((user_vectors, item_vectors), axis=0)
         elif user_vectors is not None:
@@ -233,42 +233,6 @@ class RecommendationBase(metaclass=abc.ABCMeta):
     def get_average_embeddings(self, entities: List[Tuple[str, EntityType]]):
         embeddings = self.get_embeddings(entities)
         return np.average(embeddings, axis=0)
-
-    def find_similar_items(self, item: str, positive: List[Tuple[str, EntityType]] = None,
-                           negative: List[Tuple[str, EntityType]] = None, k=None) \
-            -> List[Tuple[str, float]]:
-        assert self.fit_done
-        if item not in self.items_set:
-            raise ItemNotFoundException("Item with itemID = %s, was not provided in training" % item)
-        k = self.knn_params['n_neighbors'] if k is None else k
-        embedding_list = [self.get_average_embeddings([(item, EntityType.ITEM)])]
-        if positive is not None and len(positive) > 0:
-            embedding_list.append(self.get_average_embeddings(positive))
-        if negative is not None and len(negative) > 0:
-            embedding_list.append(-1 * self.get_average_embeddings(negative))
-
-        embedding = np.average(embedding_list, axis=0)
-
-        (neighbors,), (dist,) = self.item_knn.knn_query([embedding], k=k)
-        results = [(self.item_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
-        return list(sorted(results, key=operator.itemgetter(1), reverse=False))
-
-    def find_similar_users(self, user: str, positive: List[Tuple[str, EntityType]] = None,
-                           negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
-        assert self.fit_done
-        if user not in self.users_set:
-            raise UserNotFoundException("User with userID = %s, was not provided in training" % user)
-        k = self.knn_params['n_neighbors'] if k is None else k
-        embedding_list = [self.get_average_embeddings([(user, EntityType.USER)])]
-        if positive is not None and len(positive) > 0:
-            embedding_list.append(self.get_average_embeddings(positive))
-        if negative is not None and len(negative) > 0:
-            embedding_list.append(-1 * self.get_average_embeddings(negative))
-
-        embedding = np.average(embedding_list, axis=0)
-        (neighbors,), (dist,) = self.user_knn.knn_query([embedding], k=k)
-        results = [(self.user_id_to_index.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
-        return list(sorted(results, key=operator.itemgetter(1), reverse=False))
 
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
                             negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
@@ -288,7 +252,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         return list(sorted(results, key=operator.itemgetter(1), reverse=False))
 
     @staticmethod
-    def persist(instance, path: str="."):
+    def persist(instance, path: str = "."):
         raise NotImplementedError()
 
     @staticmethod

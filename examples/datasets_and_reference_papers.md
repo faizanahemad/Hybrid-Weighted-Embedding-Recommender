@@ -17,6 +17,8 @@ Interactions Modeling](https://arxiv.org/pdf/1810.12027.pdf)
 - [Word2Vec Negative Sampling](https://papers.nips.cc/paper/5021-distributed-representations-of-words-and-phrases-and-their-compositionality.pdf)
 - [Graph Representation](https://www.researchgate.net/publication/332351429_PhD_Qualifier_Written_Critiques_Network_Embeddings_via_Deep_Learning_Techniques)
 - [Node2Vec](https://cs.stanford.edu/~jure/pubs/node2vec-kdd16.pdf)
+- [A Neural Autoregressive Approach to Collaborative Filtering (CF-NADE)](https://arxiv.org/pdf/1605.09477.pdf)
+- [Graph Convolutional Matrix Completion](https://arxiv.org/pdf/1706.02263.pdf)
 
 
 
