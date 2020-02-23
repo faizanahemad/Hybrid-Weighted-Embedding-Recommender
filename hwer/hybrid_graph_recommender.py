@@ -11,7 +11,7 @@ from .utils import unit_length_violations
 import logging
 import dill
 import sys
-logger = getLogger(__name__, "DEBUG")
+logger = getLogger(__name__)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
