@@ -594,6 +594,7 @@ class HybridGCNRec(SVDppHybrid):
 
     @staticmethod
     def persist(model, path: str = "."):
+        import hnswlib
         logger.info("save_model:: Saving Model...")
         user_knn_path = os.path.join(path, 'user_knn.bin')
         item_knn_path = os.path.join(path, 'item_knn.bin')
