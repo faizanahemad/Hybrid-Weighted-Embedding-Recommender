@@ -565,8 +565,8 @@ class HybridGCNRec(SVDppHybrid):
 
         user, item = zip(*uip)
 
-        user = np.array(user).astype(int)
-        item = np.array(item).astype(int) + total_users
+        user = np.array(user)
+        item = np.array(item) + total_users
 
         predictions = np.full(len(user), self.mu)
         for i in range(0, len(user), batch_size):
