@@ -69,6 +69,9 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         remaining_items = [i for i, r in remaining_items]
         predictions[u] = list(filter(lambda x: x not in train_uid[u], remaining_items))[:k]
         train_predictions[u] = remaining_items[:k]
+    from more_itertools import flatten
+    train_diversity = len(set(list(flatten(list(train_predictions.values())))))/len(item_list)
+    diversity = len(set(list(flatten(list(predictions.values()))))) / len(item_list)
 
     train_mean_ap = np.mean([average_precision(train_actuals[u], train_predictions[u]) for u in train_users])
     train_mrr = np.mean([reciprocal_rank(train_actuals[u], train_predictions[u]) for u in train_users])
@@ -94,6 +97,7 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
     return {"train_map": train_mean_ap, "map": mean_ap, "train_mrr": train_mrr, "mrr": mrr,
             "retrieval_time": pred_time, "train_ndcg": train_ndcg, "ndcg": val_ndcg,
             "actuals": validation_actuals, "predictions": predictions,
+            "train_diversity": train_diversity, "diversity": diversity,
             "train_actuals": train_actuals, "train_predictions": train_predictions,
             "train_actuals_score_dict": train_actuals_score_dict,
             "validation_actuals_score_dict": validation_actuals_score_dict}
@@ -143,7 +147,7 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
         stats = {"algo": name, "rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
                  "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
                  "train_ndcg": ex_ee["train_ndcg"], "ndcg": ex_ee["ndcg"], "train_mrr": ex_ee["train_mrr"],
-                 "mrr": ex_ee["mrr"],
+                 "mrr": ex_ee["mrr"], "train_diversity": ex_ee["train_diversity"], "diversity": ex_ee["diversity"],
                  "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time,
                  "user_rating_count_metrics": user_rating_count_metrics}
         return stats
@@ -467,6 +471,14 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.xticks(rotation=45, ha='right')
     plt.savefig('mrr_vs_algo.png', bbox_inches='tight')
 
+    plt.figure(figsize=(12, 8))
+    plt.title("Diversity vs Algorithm")
+    sns.barplot(results.index, results.diversity)
+    plt.xlabel("Algorithm")
+    plt.ylabel("Proportion of total items.")
+    plt.xticks(rotation=45, ha='right')
+    plt.savefig('diversity_vs_algo.png', bbox_inches='tight')
+
     unique_algos = user_rating_count_metrics["algo"].nunique()
     markers = None
     style = None
@@ -544,7 +556,7 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
     stats = {"rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
              "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
              "train_ndcg": ex_ee["train_ndcg"], "ndcg": ex_ee["ndcg"], "train_mrr": ex_ee["train_mrr"],
-             "mrr": ex_ee["mrr"],
+             "mrr": ex_ee["mrr"], "train_diversity": ex_ee["train_diversity"], "diversity": ex_ee["diversity"],
              "train_rmse": train_rmse, "train_mae": train_mae}
     return predictions, actuals, stats, user_rating_count_metrics
 
