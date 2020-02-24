@@ -32,6 +32,7 @@ class HybridGCNRec(SVDppHybrid):
                              n_output_dims: int,
                              hyperparams: Dict):
         self.log.info("__word2vec_trainer__: Training Node2Vec base Random Walks with Word2Vec...")
+        import gc
         from gensim.models import Word2Vec
         walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 40
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
@@ -74,9 +75,11 @@ class HybridGCNRec(SVDppHybrid):
                 sentences.append(list(map(str, w)))
             # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
 
+            gc.collect()
             gt += time.time() - gts
             np.random.shuffle(sentences)
             w2v.train(sentences, total_examples=len(sentences), epochs=2)
+            gc.collect()
 
         user_vectors = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
@@ -335,6 +338,7 @@ class HybridGCNRec(SVDppHybrid):
             "End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s, margin = %.4f",
             unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
 
+        gc.collect()
         return user_vectors, item_vectors
 
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
@@ -428,6 +432,7 @@ class HybridGCNRec(SVDppHybrid):
         rating = torch.DoubleTensor(rating)
 
         for epoch in range(epochs):
+            gc.collect()
             start = time.time()
 
             model.eval()
