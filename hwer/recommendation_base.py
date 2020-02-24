@@ -3,7 +3,6 @@ from collections import defaultdict
 from enum import Enum
 from typing import List, Tuple, Optional
 
-import hnswlib
 import numpy as np
 from bidict import bidict
 
@@ -130,6 +129,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
     def __build_knn__(self, user_ids: List[str], item_ids: List[str],
                       user_vectors: np.ndarray, item_vectors: np.ndarray):
 
+        import hnswlib
         self.log.debug("Starting KNN Indexing Process...")
         n_neighbors = self.knn_params["n_neighbors"]
         index_time_params = self.knn_params["index_time_params"]
@@ -236,6 +236,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
     def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
                             negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
+        import hnswlib
         assert self.fit_done
         if user not in self.users_set:
             raise UserNotFoundException("User with userID = %s, was not provided in training" % user)

@@ -11,7 +11,7 @@ from .utils import unit_length_violations
 import logging
 import dill
 import sys
-logger = getLogger(__name__, "DEBUG")
+logger = getLogger(__name__)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
 
@@ -44,8 +44,6 @@ class HybridGCNRec(SVDppHybrid):
         total_items = len(item_ids)
 
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in user_item_affinities]
-        _, present_items, _ = zip(*affinities)
-        present_items = set(list(map(str, present_items)))
         affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
         walker = Walker(read_edgelist(affinities), p=p, q=q)
         walker.preprocess_transition_probs()
@@ -80,12 +78,6 @@ class HybridGCNRec(SVDppHybrid):
             np.random.shuffle(sentences)
             w2v.train(sentences, total_examples=len(sentences), epochs=2)
 
-        all_words = set(list(flatten(sentences)))
-        nodes = set(walker.nodes)
-        for i in item_ids:
-            itm = str(total_users + self.item_id_to_index[i])
-            if itm not in w2v.wv:
-                print(i, self.item_id_to_index[i], itm, itm in all_words, itm in nodes, itm in present_items)
         user_vectors = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
         self.log.info(
@@ -573,27 +565,25 @@ class HybridGCNRec(SVDppHybrid):
 
         user, item = zip(*uip)
 
-        user = np.array(user).astype(int)
-        item = np.array(item).astype(int) + total_users
+        user = np.array(user)
+        item = np.array(item) + total_users
 
-        score = np.zeros(len(user))
+        predictions = np.full(len(user), self.mu)
         for i in range(0, len(user), batch_size):
             s = user[i:i + batch_size]
             d = item[i:i + batch_size]
 
             res = get_score(s, d, mu, bias,
                             h[d], h[s], )
-            score[i:i + batch_size] = res
+            predictions[i:i + batch_size] = res
 
-        predictions = score
-        predictions = np.array(predictions)
-        assert len(predictions) == len(user_item_pairs)
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
         return predictions
 
     @staticmethod
     def persist(model, path: str = "."):
+        import hnswlib
         logger.info("save_model:: Saving Model...")
         user_knn_path = os.path.join(path, 'user_knn.bin')
         item_knn_path = os.path.join(path, 'item_knn.bin')

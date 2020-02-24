@@ -256,7 +256,6 @@ class NumericEmbedding(ContentEmbeddingBase):
         assert np.sum(np.isnan(inputs)) == 0
         assert np.sum(np.isinf(inputs)) == 0
         outputs = self.encoder.predict(inputs)
-        print(np.sum(np.isnan(outputs)), np.sum(np.isinf(outputs)))
         assert np.sum(np.isnan(outputs)) == 0
         assert np.sum(np.isinf(outputs)) == 0
         outputs = unit_length(outputs,
