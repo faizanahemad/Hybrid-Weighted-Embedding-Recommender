@@ -16,6 +16,7 @@ enable_kfold = False
 TRIALS_FOLDER = 'hyperopt_trials'
 NUMBER_TRIALS_PER_RUN = 1
 
+# https://github.com/MilesCranmer/easy_distributed_hyperopt
 
 def report(imv, step):
     pass

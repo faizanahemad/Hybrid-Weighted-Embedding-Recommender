@@ -80,6 +80,12 @@ def get_data_reader(dataset="100K"):
     def read_data_100K():
         users = pd.read_csv("100K/users.csv", sep="\t")
         movies = pd.read_csv("100K/movies.csv", sep="\t")
+        # Based on GC-MC Paper and code: https://github.com/riannevdberg/gc-mc/blob/master/gcmc/preprocessing.py#L326
+        train = pd.read_csv("100K/ml-100k/u1.base", sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
+        test = pd.read_csv("100K/ml-100k/u1.test", sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
+        train["is_test"] = False
+        test["is_test"] = True
+        ratings = pd.concat((train, test))
         movies.genres = movies.genres.fillna("[]").apply(literal_eval)
         movies['year'] = movies['year'].fillna(-1).astype(int)
         movies.keywords = movies.keywords.fillna("[]").apply(literal_eval)
@@ -93,9 +99,6 @@ def get_data_reader(dataset="100K"):
         movies["title_length"] = movies["title"].apply(len)
         movies["overview_length"] = movies["overview"].apply(len)
         movies["runtime"] = movies["runtime"].fillna(0.0)
-        ratings = pd.read_csv("100K/ratings.csv", sep="\t")
-        ratings.rename(columns={"user_id": "user", "product_id": "item"}, inplace=True)
-        ratings = ratings[["user", "item", "rating"]]
         users.rename(columns={"id": "user"}, inplace=True)
         movies.rename(columns={"id": "item"}, inplace=True)
         return users, movies, ratings
@@ -105,10 +108,18 @@ def get_data_reader(dataset="100K"):
         movies = pd.read_csv("1M/movies.csv", sep="\t", engine="python")
         ratings = pd.read_csv("1M/ratings.csv", sep="\t", engine="python")
 
-        users['user_id'] = users['user_id'].astype(str)
-        movies['movie_id'] = movies['movie_id'].astype(str)
         ratings['movie_id'] = ratings['movie_id'].astype(str)
         ratings['user_id'] = ratings['user_id'].astype(str)
+        ratings.rename(columns={"user_id": "user", "movie_id": "item"}, inplace=True)
+        ratings = ratings[["user", "item", "rating"]]
+        # Based on Paper https://arxiv.org/pdf/1605.09477.pdf (CF-NADE GC-MC)
+        train = ratings.sample(frac=0.9)
+        test = ratings.sample(frac=0.9)
+        train["is_test"] = False
+        test["is_test"] = True
+        ratings = pd.concat((train, test))
+        users['user_id'] = users['user_id'].astype(str)
+        movies['movie_id'] = movies['movie_id'].astype(str)
 
         movies.genres = movies.genres.fillna("[]").apply(literal_eval)
         movies['year'] = movies['year'].fillna(-1).astype(int)
@@ -122,8 +133,6 @@ def get_data_reader(dataset="100K"):
         movies["title_length"] = movies["title"].apply(len)
         movies["overview_length"] = movies["overview"].apply(len)
         movies["runtime"] = movies["runtime"].fillna(0.0)
-        ratings = ratings[["user_id", "movie_id", "rating"]]
-        ratings.rename(columns={"user_id": "user", "movie_id": "item"}, inplace=True)
         movies.rename(columns={"movie_id": "item"}, inplace=True)
         users.rename(columns={"user_id": "user"}, inplace=True)
         return users, movies, ratings
@@ -143,7 +152,14 @@ def build_dataset(dataset):
     df_user, df_item, ratings = read_data()
 
     prepare_data_mappers = get_data_mapper(df_user, df_item, dataset=dataset)
-    ratings = ratings[["user", "item", "rating"]].sample(frac=1.0)
-    user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
-    rating_scale = (np.min([r for u, i, r in user_item_affinities]), np.max([r for u, i, r in user_item_affinities]))
-    return df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale
+    ratings = ratings.sample(frac=1.0)
+    provided_test_set = False
+    assert len(ratings.columns) in [3, 4]
+    if len(ratings.columns) == 3:
+        user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
+    if len(ratings.columns) == 4:
+        provided_test_set = True
+        user_item_affinities = [(row[0], row[1], float(row[2]), bool(row[3])) for row in ratings.values]
+
+    rating_scale = (np.min([x[2] for x in user_item_affinities]), np.max([x[2] for x in user_item_affinities]))
+    return df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, provided_test_set

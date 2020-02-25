@@ -76,7 +76,7 @@ def get_best_params(dataset, gcn_conv_variant):
 n_neighbors = 200
 knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, })
 enable_node2vec = True
-enable_triplet_loss = True
+enable_triplet_loss = False
 use_content = True
 enable_gcn = True
 verbose = 2

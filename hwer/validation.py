@@ -42,11 +42,11 @@ def model_get_topk(model, users, items, k) -> Dict[str, List[Tuple[str, float]]]
 def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list, k=200):
     validation_users = list(set([u for u, i, r in validation_affinities]))
     train_users = list(set([u for u, i, r in train_affinities]))
-    assert len(validation_users) == len(train_users) and set(train_users) == set(validation_users)
+    all_users = list(set(train_users + validation_users))
     train_uid = defaultdict(set)
     items_extracted_length = []
     s = time.time()
-    predictions = get_topk(model, validation_users, item_list, k)
+    predictions = get_topk(model, all_users, item_list, k)
     e = time.time()
     pred_time = e - s
     for u, i, r in train_affinities:
@@ -624,12 +624,17 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
                            prepare_data_mappers, rating_scale,
                            algos, hyperparamters_dict,
                            enable_error_analysis=False, enable_baselines=False,
-                           enable_kfold=False, display=True, report=lambda x, y: None):
+                           enable_kfold=False, display=True, report=lambda x, y: None,
+                           provided_test_set=False):
     from sklearn.model_selection import StratifiedKFold
     from sklearn.model_selection import train_test_split
     if not enable_kfold:
-        train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2,
-                                                                   stratify=[u for u, i, r in user_item_affinities])
+        if provided_test_set:
+            train_affinities = [(u, i, r) for u, i, r, t in user_item_affinities if not t]
+            validation_affinities = [(u, i, r) for u, i, r, t in user_item_affinities if t]
+        else:
+            train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2,
+                                                                       stratify=[u for u, i, r in user_item_affinities])
 
         recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities,
                                                              list(df_user.user.values),

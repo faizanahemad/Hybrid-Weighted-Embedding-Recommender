@@ -42,7 +42,7 @@ if __name__ == '__main__':
     enable_baselines = args["enable_baselines"]
     hyperparamters_dict = get_best_params(dataset, conv_arch)
 
-    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale = mdr.build_dataset(dataset)
+    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = mdr.build_dataset(dataset)
     #
     verbose = 2  # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 
@@ -52,6 +52,6 @@ if __name__ == '__main__':
                            prepare_data_mappers, rating_scale,
                            algos, hyperparamters_dict,
                            enable_error_analysis=False, enable_baselines=enable_baselines,
-                           enable_kfold=enable_kfold, display=True)
+                           enable_kfold=enable_kfold, display=True, provided_test_set=ts)
     for algo in algos:
         print("algo = %s" % algo, hyperparamters_dict[algo])

@@ -18,7 +18,7 @@ enable_kfold = False
 
 
 def optimisation_objective(hyperparameters, algo, report, dataset):
-    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale = mdr.build_dataset(dataset)
+    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = mdr.build_dataset(dataset)
     rmse, ndcg = run_model_for_hpo(df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale,
                                    hyperparameters, algo, report,
                                    enable_kfold=enable_kfold)
