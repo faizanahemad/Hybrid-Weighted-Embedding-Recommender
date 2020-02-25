@@ -1,8 +1,8 @@
 import hnswlib
 import numpy as np
 
-dim = 5
-num_elements = 100
+dim = 16
+num_elements = 10000
 
 # Generating sample data
 data = np.float32(np.random.random((num_elements, dim)))
@@ -18,12 +18,12 @@ p.init_index(max_elements=num_elements, ef_construction=200, M=16)
 p.add_items(data, data_labels)
 
 # Controlling the recall by setting ef:
-p.set_ef(50)  # ef should always be > k
+p.set_ef(100)  # ef should always be > k
 
 # Query dataset, k - number of closest elements (returns 2 numpy arrays)
-labels, distances = p.knn_query(data[0:5], k=5)
 
-(labels,), (distances, ) = p.knn_query([data[0]], k=3)
+labels, distances = p.knn_query(data[0:5], k=100)
+(labels,), (distances, ) = p.knn_query([data[0]], k=100)
 
 print(labels)
 print(distances)
@@ -37,4 +37,11 @@ i2 = p.get_items([2,3])
 i3 = np.concatenate((i1,i2),axis=0)
 print(i3.shape)
 print(np.average(i3, axis=0))
+
+from sklearn.neighbors import KDTree
+tree = KDTree(data, leaf_size=16)
+(distances,), (labels,) = tree.query(data[:1], k=100)
+print(labels)
+print(distances)
+
 
