@@ -102,6 +102,8 @@ class Walker:
         Repeatedly simulate random walks from each node.
         '''
         nodes = self.nodes
+        import numpy as np
+        np.random.shuffle(nodes)
         adjacency_list = self.adjacency_list
         alias_nodes = self.alias_nodes
         alias_edges = self.alias_edges

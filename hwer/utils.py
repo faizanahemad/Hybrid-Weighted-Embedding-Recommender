@@ -359,3 +359,11 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
+def save_list_per_line(lines, filename, mode='a'):
+    # convert lines to a single blob of text
+    lines = list(map(lambda s: " ".join(list(map(lambda x: str(x).strip(), s))), lines))
+    data = '\n'.join(lines)
+    with open(filename, mode) as file:
+        file.write(data)
