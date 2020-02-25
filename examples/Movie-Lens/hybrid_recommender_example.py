@@ -42,7 +42,7 @@ if __name__ == '__main__':
     enable_baselines = args["enable_baselines"]
     hyperparamters_dict = get_best_params(dataset, conv_arch)
 
-    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = mdr.build_dataset(dataset)
+    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = mdr.build_dataset(dataset, fold=1)
     #
     verbose = 2  # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 

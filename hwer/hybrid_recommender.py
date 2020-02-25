@@ -287,6 +287,7 @@ class HybridRecommender(RecommendationBase):
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
         user_vectors = unit_length(user_vectors, axis=1)
         item_vectors = unit_length(item_vectors, axis=1)
+        gc.collect()
 
         assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
         self.log.debug("Hybrid Base: Start Building Prediction Network...")
@@ -303,6 +304,7 @@ class HybridRecommender(RecommendationBase):
                                                                      self.user_id_to_index, self.item_id_to_index,
                                                                      self.rating_scale, prediction_network_params)
         self.prediction_artifacts.update(dict(prediction_artifacts))
+        gc.collect()
         self.log.debug("Hybrid Base: Built Prediction Network.")
         self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
                                              self.user_id_to_index, self.item_id_to_index, self.rating_scale, **svd_params)
@@ -319,6 +321,7 @@ class HybridRecommender(RecommendationBase):
         self.fit_done = True
         self.log.info("End Fitting Recommender, user_vectors shape = %s, item_vectors shape = %s, Time to fit = %.1f",
                       user_vectors.shape, item_vectors.shape, time.time() - start_time)
+        gc.collect()
         return user_vectors, item_vectors
 
     @abc.abstractmethod

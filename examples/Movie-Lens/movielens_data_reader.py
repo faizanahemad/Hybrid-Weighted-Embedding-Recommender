@@ -77,12 +77,18 @@ def get_data_mapper(df_user, df_item, dataset="100K"):
 
 def get_data_reader(dataset="100K"):
 
-    def read_data_100K():
+    def read_data_100K(**kwargs):
         users = pd.read_csv("100K/users.csv", sep="\t")
         movies = pd.read_csv("100K/movies.csv", sep="\t")
         # Based on GC-MC Paper and code: https://github.com/riannevdberg/gc-mc/blob/master/gcmc/preprocessing.py#L326
-        train = pd.read_csv("100K/ml-100k/u1.base", sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
-        test = pd.read_csv("100K/ml-100k/u1.test", sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
+        if "fold" in kwargs and type(kwargs["fold"])==int and 1 <= kwargs["fold"] <= 5:
+            train_file = "100K/ml-100k/u%s.base" % kwargs["fold"]
+            test_file = "100K/ml-100k/u%s.test" % kwargs["fold"]
+        else:
+            train_file = "100K/ml-100k/u1.base"
+            test_file = "100K/ml-100k/u1.test"
+        train = pd.read_csv(train_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
+        test = pd.read_csv(test_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
         train["is_test"] = False
         test["is_test"] = True
         ratings = pd.concat((train, test))
@@ -103,7 +109,7 @@ def get_data_reader(dataset="100K"):
         movies.rename(columns={"id": "item"}, inplace=True)
         return users, movies, ratings
 
-    def read_data_1M():
+    def read_data_1M(**kwargs):
         users = pd.read_csv("1M/users.csv", sep="\t", engine="python")
         movies = pd.read_csv("1M/movies.csv", sep="\t", engine="python")
         ratings = pd.read_csv("1M/ratings.csv", sep="\t", engine="python")
@@ -147,9 +153,9 @@ def get_data_reader(dataset="100K"):
         raise ValueError("Unsupported Dataset")
 
 
-def build_dataset(dataset):
+def build_dataset(dataset, **kwargs):
     read_data = get_data_reader(dataset=dataset)
-    df_user, df_item, ratings = read_data()
+    df_user, df_item, ratings = read_data(**kwargs)
 
     prepare_data_mappers = get_data_mapper(df_user, df_item, dataset=dataset)
     ratings = ratings.sample(frac=1.0)
