@@ -48,36 +48,38 @@ class HybridGCNRec(SVDppHybrid):
         walker = Walker(read_edgelist(affinities), p=p, q=q)
         walker.preprocess_transition_probs()
 
+        sfile = "sentences.txt"
+        from more_itertools import chunked
+        from .utils import save_list_per_line
+
         def sentences_generator():
-            return walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
+            g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
+            save_list_per_line([[""]], sfile, 'w')
+            total_sentences = 0
+            for w in chunked(g, 128):
+                total_sentences += len(w)
+                save_list_per_line(w, sfile, 'a')
+            return total_sentences
 
         gts = time.time()
         start = gts
         gt = 0.0
-
+        sentences_generator()
         # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
-        sentences = []
-        # TODO: Batch write to file
-        for w in sentences_generator():
-            sentences.append(list(map(str, w)))
         gt += time.time() - gts
-        np.random.shuffle(sentences)
         # TODO: train from file
-        w2v = Word2Vec(sentences, min_count=1,
+        w2v = Word2Vec(corpus_file=sfile, min_count=1,
                        size=self.n_collaborative_dims, window=window, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
 
         for _ in range(iter):
             gts = time.time()
-            sentences = []
-            for w in sentences_generator():
-                sentences.append(list(map(str, w)))
+            total_examples = sentences_generator()
             # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
 
             gc.collect()
             gt += time.time() - gts
-            np.random.shuffle(sentences)
-            w2v.train(sentences, total_examples=len(sentences), epochs=2)
+            w2v.train(corpus_file=sfile, epochs=2, total_examples=total_examples, total_words=len(walker.nodes))
             gc.collect()
 
         user_vectors = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
