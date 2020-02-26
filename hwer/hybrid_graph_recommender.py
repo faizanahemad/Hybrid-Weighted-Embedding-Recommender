@@ -35,11 +35,10 @@ class HybridGCNRec(SVDppHybrid):
         self.log.info("__word2vec_trainer__: Training Node2Vec base Random Walks with Word2Vec...")
         import gc
         from gensim.models import Word2Vec
-        walk_length = hyperparams["walk_length"] if "walk_length" in hyperparams else 40
+        walk_length = 10
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
-        window = hyperparams["window"] if "window" in hyperparams else 5
         iter = hyperparams["iter"] if "iter" in hyperparams else 2
-        p = hyperparams["p"] if "p" in hyperparams else 0.5
+        p = 1.0
         q = hyperparams["q"] if "q" in hyperparams else 0.5
 
         total_users = len(user_ids)
@@ -50,7 +49,7 @@ class HybridGCNRec(SVDppHybrid):
         walker = Walker(read_edgelist(affinities), p=p, q=q)
         walker.preprocess_transition_probs()
 
-        sfile = "sentences.txt"
+        sfile = "sentences-%s.txt" % str(np.random.randint(int(1e8)))
         from more_itertools import chunked
         from .utils import save_list_per_line
 
@@ -69,12 +68,12 @@ class HybridGCNRec(SVDppHybrid):
         sentences_generator()
         # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
         gt += time.time() - gts
-        w2v = Word2Vec(corpus_file=sfile, min_count=1,
+        w2v = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0001,
                        size=int(self.n_collaborative_dims/2), window=3, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
         w2v.init_sims(True)
 
-        w2v2 = Word2Vec(corpus_file=sfile, min_count=1,
+        w2v2 = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0001,
                        size=int(self.n_collaborative_dims/2), window=7, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
         w2v2.init_sims(True)
@@ -111,46 +110,6 @@ class HybridGCNRec(SVDppHybrid):
         self.log.info("Node2Vec Unit Length violation: users = %s, items = %s"
                        % (unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1)))
         return user_vectors, item_vectors
-
-    def __node2vec_triplet_trainer__(self,
-                                     user_ids: List[str], item_ids: List[str],
-                                     user_item_affinities: List[Tuple[str, str, float]],
-                                     user_vectors: np.ndarray, item_vectors: np.ndarray,
-                                     user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                     n_output_dims: int,
-                                     hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        self.log.debug(
-            "HybridGCNRec::__node2vec_triplet_trainer__: Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
-            len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
-
-        enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
-        enable_triplet_loss = hyperparams["enable_triplet_loss"] if "enable_triplet_loss" in hyperparams else False
-        node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
-
-        assert np.sum(np.isnan(user_vectors)) == 0
-        assert np.sum(np.isnan(item_vectors)) == 0
-        w2v_user_vectors, w2v_item_vectors = None, None
-        if enable_node2vec:
-            w2v_user_vectors, w2v_item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
-                                                                           user_id_to_index,
-                                                                           item_id_to_index,
-                                                                           n_output_dims,
-                                                                           node2vec_params)
-            self.w2v_user_vectors = w2v_user_vectors
-            self.w2v_item_vectors = w2v_item_vectors
-        user_triplet_vectors, item_triplet_vectors = w2v_user_vectors, w2v_item_vectors
-
-        if enable_triplet_loss:
-            user_triplet_vectors, item_triplet_vectors = super().__user_item_affinities_triplet_trainer__(user_ids,
-                                                                                                          item_ids,
-                                                                                                          user_item_affinities,
-                                                                                                          w2v_user_vectors,
-                                                                                                          w2v_item_vectors,
-                                                                                                          user_id_to_index,
-                                                                                                          item_id_to_index,
-                                                                                                          n_output_dims,
-                                                                                                          hyperparams)
-        return w2v_user_vectors, w2v_item_vectors, user_triplet_vectors, item_triplet_vectors
 
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
                                   conv_depth, network_width,
@@ -191,7 +150,6 @@ class HybridGCNRec(SVDppHybrid):
         margin = hyperparams["margin"] if "margin" in hyperparams else 1.0
         gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
         enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
-        enable_triplet_loss = hyperparams["enable_triplet_loss"] if "enable_triplet_loss" in hyperparams else False
         enable_gcn = hyperparams["enable_gcn"] if "enable_gcn" in hyperparams else False
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         network_width = hyperparams["network_width"] if "network_width" in hyperparams else 128
@@ -202,35 +160,35 @@ class HybridGCNRec(SVDppHybrid):
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
 
-        w2v_user_vectors, w2v_item_vectors, user_triplet_vectors, item_triplet_vectors = self.__node2vec_triplet_trainer__(
-            user_ids, item_ids, user_item_affinities,
-            user_vectors, item_vectors,
-            user_id_to_index,
-            item_id_to_index,
-            n_output_dims,
-            hyperparams)
         import gc
         gc.collect()
+
+        user_triplet_vectors, item_triplet_vectors = user_vectors, item_vectors
+        if enable_node2vec:
+            w2v_user_vectors, w2v_item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
+                                                                           user_id_to_index,
+                                                                           item_id_to_index,
+                                                                           n_output_dims,
+                                                                           node2vec_params)
+            self.w2v_user_vectors = w2v_user_vectors
+            self.w2v_item_vectors = w2v_item_vectors
+            user_triplet_vectors, item_triplet_vectors = w2v_user_vectors, w2v_item_vectors
 
         if not enable_gcn:
             return user_triplet_vectors, item_triplet_vectors
 
         triplet_vectors = None
-        if enable_node2vec or enable_triplet_loss:
+        if enable_node2vec:
             triplet_vectors = np.concatenate(
                 (np.zeros((1, user_triplet_vectors.shape[1])), user_triplet_vectors, item_triplet_vectors))
             triplet_vectors = torch.FloatTensor(triplet_vectors)
 
         total_users = len(user_ids)
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i], r) for u, i, r in user_item_affinities]
-        graph_user_vectors, graph_item_vectors = user_vectors, item_vectors
-        if enable_node2vec and enable_triplet_loss:
-            graph_user_vectors = np.concatenate((user_vectors, w2v_user_vectors), axis=1)
-            graph_item_vectors = np.concatenate((item_vectors, w2v_item_vectors), axis=1)
         g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids),
-                                  np.concatenate((graph_user_vectors, graph_item_vectors)))
+                                  np.concatenate((user_vectors, item_vectors)))
         g_train.readonly()
-        n_content_dims = graph_user_vectors.shape[1]
+        n_content_dims = user_vectors.shape[1]
         model = self.__get_triplet_gcn_model__(n_content_dims, self.n_collaborative_dims, gcn_layers,
                                                conv_depth, network_width,
                                                gcn_dropout, g_train, triplet_vectors, margin,
