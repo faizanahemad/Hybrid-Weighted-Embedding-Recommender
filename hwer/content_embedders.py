@@ -95,8 +95,8 @@ class CategoricalEmbedding(ContentEmbeddingBase):
         self.log.debug("Start Transform CategoricalEmbedding for feature name %s", feature.feature_name)
         df = pd.DataFrame(data=feature.values, columns=self.columns, dtype=str)
         network_inputs = self.ohe.transform(df[self.columns])
-
-        outputs = unit_length(self.encoder.predict(network_inputs), axis=1) if self.make_unit_length else self.encoder.predict(network_inputs)
+        outputs = self.encoder.predict(network_inputs)
+        outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
         self.log.debug("End Transform CategoricalEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
 
@@ -147,7 +147,8 @@ class MultiCategoricalEmbedding(ContentEmbeddingBase):
         self.log.debug("Start Transform MultiCategoricalEmbedding for feature name %s", feature.feature_name)
         df = pd.DataFrame(data=np.array(feature.values).T, columns=["input"])
         network_inputs = self.vectorizer.transform(list(df.input.map(self.input_mapper).values)).toarray()
-        outputs = unit_length(self.encoder.predict(network_inputs), axis=1) if self.make_unit_length else self.encoder.predict(network_inputs)
+        outputs = self.encoder.predict(network_inputs)
+        outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
         self.log.debug("End Transform MultiCategoricalEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
 
@@ -258,8 +259,8 @@ class NumericEmbedding(ContentEmbeddingBase):
         outputs = self.encoder.predict(inputs)
         assert np.sum(np.isnan(outputs)) == 0
         assert np.sum(np.isinf(outputs)) == 0
-        outputs = unit_length(outputs,
-                              axis=1) if self.make_unit_length else self.encoder.predict(inputs)
+        outputs = self.encoder.predict(inputs)
+        outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
         self.log.debug("End Transform NumericEmbedding for feature name %s", feature.feature_name)
         return self.check_output_dims(outputs, feature)
 
