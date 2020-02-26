@@ -22,6 +22,8 @@ class HybridGCNRec(SVDppHybrid):
         super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims,
                          fast_inference, super_fast_inference)
         self.log = getLogger(type(self).__name__)
+        assert n_collaborative_dims % 2 == 0
+        assert n_content_dims == n_collaborative_dims
         self.cpu = int(os.cpu_count() / 2)
 
     def __word2vec_trainer__(self,
@@ -68,9 +70,14 @@ class HybridGCNRec(SVDppHybrid):
         # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
         gt += time.time() - gts
         w2v = Word2Vec(corpus_file=sfile, min_count=1,
-                       size=self.n_collaborative_dims, window=window, workers=self.cpu, sg=1,
+                       size=int(self.n_collaborative_dims/2), window=3, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
         w2v.init_sims(True)
+
+        w2v2 = Word2Vec(corpus_file=sfile, min_count=1,
+                       size=int(self.n_collaborative_dims/2), window=7, workers=self.cpu, sg=1,
+                       negative=10, max_vocab_size=None, iter=2)
+        w2v2.init_sims(True)
 
         for _ in range(iter):
             gts = time.time()
@@ -82,10 +89,22 @@ class HybridGCNRec(SVDppHybrid):
             w2v.init_sims(True)
             w2v.train(corpus_file=sfile, epochs=2, total_examples=total_examples, total_words=len(walker.nodes))
             w2v.init_sims(True)
+
+            w2v2.init_sims(True)
+            w2v2.train(corpus_file=sfile, epochs=2, total_examples=total_examples, total_words=len(walker.nodes))
+            w2v2.init_sims(True)
+
             gc.collect()
-        user_vectors = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
-        item_vectors = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
-        from .utils import unit_length_violations
+        uv1 = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
+        iv1 = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
+
+        uv2 = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
+        iv2 = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
+
+        from .utils import unit_length, unit_length_violations
+        user_vectors = unit_length(np.concatenate((uv1, uv2), axis=1), axis=1)
+        item_vectors = unit_length(np.concatenate((iv1, iv2), axis=1), axis=1)
+
         self.log.info(
             "Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Word2Vec Time = %.1f" % (
             gt, time.time() - start))
