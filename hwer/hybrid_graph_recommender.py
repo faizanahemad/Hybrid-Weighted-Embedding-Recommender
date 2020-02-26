@@ -97,8 +97,8 @@ class HybridGCNRec(SVDppHybrid):
         uv1 = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         iv1 = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
 
-        uv2 = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
-        iv2 = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
+        uv2 = np.array([w2v2.wv[str(self.user_id_to_index[u])] for u in user_ids])
+        iv2 = np.array([w2v2.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
 
         from .utils import unit_length, unit_length_violations
         user_vectors = unit_length(np.concatenate((uv1, uv2), axis=1), axis=1)
