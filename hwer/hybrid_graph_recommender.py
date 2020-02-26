@@ -67,10 +67,10 @@ class HybridGCNRec(SVDppHybrid):
         sentences_generator()
         # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
         gt += time.time() - gts
-        # TODO: train from file
         w2v = Word2Vec(corpus_file=sfile, min_count=1,
                        size=self.n_collaborative_dims, window=window, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
+        w2v.init_sims(True)
 
         for _ in range(iter):
             gts = time.time()
@@ -79,14 +79,18 @@ class HybridGCNRec(SVDppHybrid):
 
             gc.collect()
             gt += time.time() - gts
+            w2v.init_sims(True)
             w2v.train(corpus_file=sfile, epochs=2, total_examples=total_examples, total_words=len(walker.nodes))
+            w2v.init_sims(True)
             gc.collect()
-
         user_vectors = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         item_vectors = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
+        from .utils import unit_length_violations
         self.log.info(
             "Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Word2Vec Time = %.1f" % (
             gt, time.time() - start))
+        self.log.info("Node2Vec Unit Length violation: users = %s, items = %s"
+                       % (unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1)))
         return user_vectors, item_vectors
 
     def __node2vec_triplet_trainer__(self,
