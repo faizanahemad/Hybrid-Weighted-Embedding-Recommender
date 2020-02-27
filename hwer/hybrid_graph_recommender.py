@@ -131,6 +131,8 @@ class HybridGCNRec(SVDppHybrid):
         from .gcn import build_dgl_graph
         import torch
         import torch.nn.functional as F
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        cpu = torch.device('cpu')
         import dgl
         self.log.debug(
             "Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
@@ -332,6 +334,8 @@ class HybridGCNRec(SVDppHybrid):
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
         from .gcn import build_dgl_graph, GraphSageWithSampling, GraphSAGERecommenderImplicit, get_score
         import torch
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        cpu = torch.device('cpu')
         import dgl
         import gc
         self.log.debug(
@@ -420,6 +424,7 @@ class HybridGCNRec(SVDppHybrid):
         src = torch.LongTensor(src)
         dst = torch.LongTensor(dst) + total_users
         rating = torch.DoubleTensor(rating)
+        model.to(device)
 
         for epoch in range(epochs):
             gc.collect()
@@ -451,9 +456,16 @@ class HybridGCNRec(SVDppHybrid):
                 for i in range(0, len(src), batch_size):
                     s = src[i:i + batch_size]
                     d = dst[i:i + batch_size]
+                    s.to(device)
+                    d.to(device)
                     #
+                    h_d = h[d]
+                    h_s = h[s]
+                    h_d.to(device)
+                    h_s.to(device)
 
-                    res = get_score(s, d, model.mu, model.node_biases, h[d], h[s])
+                    res = get_score(s, d, model.mu, model.node_biases, h_d, h_s)
+                    res.to(cpu)
                     score[i:i + batch_size] = res
                 train_rmse = ((score - rating) ** 2).mean().sqrt()
             eval_total = time.time() - eval_start_time
@@ -488,6 +500,9 @@ class HybridGCNRec(SVDppHybrid):
                 total_loss = 0.0
                 odd_even = True
                 for s, d, r, nodeflow in zip(src_batches, dst_batches, rating_batches, sampler):
+                    s.to(device)
+                    d.to(device)
+
                     score = model.forward(nodeflow, s, d) if odd_even else model.forward(nodeflow, d, s)
                     odd_even = not odd_even
                     # r = r + torch.randn(r.shape)

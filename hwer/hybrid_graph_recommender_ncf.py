@@ -55,6 +55,8 @@ class HybridGCNRecNCF(HybridGCNRec):
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
         from .gcn import build_dgl_graph, GraphSageWithSampling, GraphSAGERecommenderNCF, NCFScorer
         import torch
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        cpu = torch.device('cpu')
         import dgl
         self.log.debug(
             "Start Building Prediction Network, collaborative vectors shape = %s, content vectors shape = %s",
