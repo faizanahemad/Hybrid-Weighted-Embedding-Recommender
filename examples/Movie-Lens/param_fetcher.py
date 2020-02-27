@@ -40,7 +40,6 @@ def fetch_gcn_params(dataset, algo, conv_arch):
     p["collaborative_params"]["prediction_network_params"]["use_content"] = use_content
     p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_gcn
     p["collaborative_params"]["user_item_params"]["enable_node2vec"] = enable_node2vec
-    p["collaborative_params"]["user_item_params"]["enable_triplet_loss"] = enable_triplet_loss
     return p
 
 
@@ -76,7 +75,6 @@ def get_best_params(dataset, gcn_conv_variant):
 n_neighbors = 200
 knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, })
 enable_node2vec = True
-enable_triplet_loss = False
 use_content = True
 enable_gcn = True
 verbose = 2

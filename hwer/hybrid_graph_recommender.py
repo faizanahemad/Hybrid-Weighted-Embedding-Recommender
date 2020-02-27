@@ -71,12 +71,12 @@ class HybridGCNRec(SVDppHybrid):
         w2v = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0001,
                        size=int(self.n_collaborative_dims/2), window=3, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
-        w2v.init_sims(True)
+        # w2v.init_sims(True)
 
         w2v2 = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0001,
                        size=int(self.n_collaborative_dims/2), window=7, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
-        w2v2.init_sims(True)
+        # w2v2.init_sims(True)
 
         for _ in range(iter):
             gts = time.time()
@@ -85,13 +85,11 @@ class HybridGCNRec(SVDppHybrid):
 
             gc.collect()
             gt += time.time() - gts
-            w2v.init_sims(True)
+            # w2v.init_sims(True)
             w2v.train(corpus_file=sfile, epochs=2, total_examples=total_examples, total_words=len(walker.nodes))
-            w2v.init_sims(True)
 
-            w2v2.init_sims(True)
+            # w2v2.init_sims(True)
             w2v2.train(corpus_file=sfile, epochs=2, total_examples=total_examples, total_words=len(walker.nodes))
-            w2v2.init_sims(True)
 
             gc.collect()
         uv1 = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
@@ -101,8 +99,8 @@ class HybridGCNRec(SVDppHybrid):
         iv2 = np.array([w2v2.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
 
         from .utils import unit_length, unit_length_violations
-        user_vectors = unit_length(np.concatenate((uv1, uv2), axis=1), axis=1)
-        item_vectors = unit_length(np.concatenate((iv1, iv2), axis=1), axis=1)
+        user_vectors = np.concatenate((uv1, uv2), axis=1)
+        item_vectors = np.concatenate((iv1, iv2), axis=1)
 
         self.log.info(
             "Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Word2Vec Time = %.1f" % (
@@ -390,6 +388,12 @@ class HybridGCNRec(SVDppHybrid):
         else:
             user_vectors = np.zeros((user_vectors.shape[0], 1))
             item_vectors = np.zeros((item_vectors.shape[0], 1))
+        # user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
+        # item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
+
+        # user_vectors = user_content_vectors
+        # item_vectors = item_content_vectors
+
         edge_list = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                      user_item_affinities]
         biases = np.concatenate(([0.0], user_bias, item_bias))
