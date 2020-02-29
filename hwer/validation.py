@@ -22,12 +22,12 @@ from scipy.stats import describe
 from .utils import average_precision, reciprocal_rank, ndcg
 
 
-def surprise_get_topk(model, users, items, k) -> Dict[str, List[Tuple[str, float]]]:
+def surprise_get_topk(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
         p = [(i, model.predict(u, i).est) for i in items]
         p = list(sorted(p, key=operator.itemgetter(1), reverse=True))
-        predictions[u] = p[:k]
+        predictions[u] = p
     return predictions
 
 
@@ -35,11 +35,11 @@ def model_get_topk(model, users, items, k) -> Dict[str, List[Tuple[str, float]]]
     predictions = defaultdict(list)
     for u in users:
         p = model.find_items_for_user(u)
-        predictions[u] = p[:k]
+        predictions[u] = p
     return predictions
 
 
-def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list, k=200):
+def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list, k=100):
     validation_users = list(set([u for u, i, r in validation_affinities]))
     train_users = list(set([u for u, i, r in train_affinities]))
     all_users = list(set(train_users + validation_users))

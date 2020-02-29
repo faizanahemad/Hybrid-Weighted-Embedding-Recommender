@@ -48,7 +48,7 @@ def init_weight(param, initializer, nonlinearity):
 
 
 def init_bias(param):
-    nn.init.constant_(param, 0)
+    nn.init.normal_(param, 0, 0.01)
 
 
 class GraphSageConvWithSamplingBase(nn.Module):

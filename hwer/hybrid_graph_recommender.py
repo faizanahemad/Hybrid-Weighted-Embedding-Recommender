@@ -66,22 +66,20 @@ class HybridGCNRec(SVDppHybrid):
         start = gts
         gt = 0.0
         sentences_generator()
-        # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
         gt += time.time() - gts
-        w2v = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0001,
+        w2v = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0002,
                        size=int(self.n_collaborative_dims/2), window=3, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
         # w2v.init_sims(True)
 
-        w2v2 = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0001,
-                       size=int(self.n_collaborative_dims/2), window=7, workers=self.cpu, sg=1,
+        w2v2 = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0002,
+                       size=int(self.n_collaborative_dims/2), window=5, workers=self.cpu, sg=1,
                        negative=10, max_vocab_size=None, iter=2)
         # w2v2.init_sims(True)
 
         for _ in range(iter):
             gts = time.time()
             total_examples = sentences_generator()
-            # sentences = Parallel(n_jobs=self.cpu, prefer="threads")(delayed(lambda w: list(map(str, w)))(w) for w in sentences_generator())
 
             gc.collect()
             gt += time.time() - gts
@@ -415,7 +413,7 @@ class HybridGCNRec(SVDppHybrid):
         scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
                                                         steps_per_epoch=int(
                                                             np.ceil(len(user_item_affinities) / batch_size)),
-                                                        div_factor=100, final_div_factor=100)
+                                                        div_factor=25, final_div_factor=100)
         # opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
         user_item_affinities = [(user_id_to_index[u] + 1, item_id_to_index[i] + 1, r) for u, i, r in
                                 user_item_affinities]
