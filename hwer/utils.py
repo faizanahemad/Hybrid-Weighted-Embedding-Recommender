@@ -98,8 +98,17 @@ def ndcg(y_true: Dict[str, float], y_pred: List[str]):
     idcg = np.sum((np.power(2, y_true_sorted) - 1)/(np.log2(np.arange(len(y_true_sorted)) + 2)))
     y_pred = [y_true[i] if i in y_true else 0 for i in y_pred]
     dcg = np.sum((np.power(2, y_pred) - 1) / (np.log2(np.arange(len(y_pred)) + 2)))
-
     return dcg/(idcg + 1e-8)
+
+
+def binary_ndcg(y_true: Dict[str, float], y_pred: List[str]):
+    return ndcg({k:1 for k, v in y_true.items()}, y_pred)
+
+
+def recall(y_true: Dict[str, float], y_pred: List[str]):
+    norm = min(len(y_pred), len(y_true))
+    recall = sum([1 if i in y_true else 0 for i in y_pred])
+    return recall/norm
 
 
 

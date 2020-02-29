@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import describe
 
-from .utils import average_precision, reciprocal_rank, ndcg
+from .utils import average_precision, reciprocal_rank, ndcg, binary_ndcg, recall
 
 
 def surprise_get_topk(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
@@ -31,7 +31,7 @@ def surprise_get_topk(model, users, items) -> Dict[str, List[Tuple[str, float]]]
     return predictions
 
 
-def model_get_topk(model, users, items, k) -> Dict[str, List[Tuple[str, float]]]:
+def model_get_topk(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
         p = model.find_items_for_user(u)
@@ -39,14 +39,14 @@ def model_get_topk(model, users, items, k) -> Dict[str, List[Tuple[str, float]]]
     return predictions
 
 
-def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list, k=100):
+def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):
     validation_users = list(set([u for u, i, r in validation_affinities]))
     train_users = list(set([u for u, i, r in train_affinities]))
     all_users = list(set(train_users + validation_users))
     train_uid = defaultdict(set)
     items_extracted_length = []
     s = time.time()
-    predictions = get_topk(model, all_users, item_list, k)
+    predictions = get_topk(model, all_users, item_list)
     e = time.time()
     pred_time = e - s
     for u, i, r in train_affinities:
@@ -64,18 +64,29 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         train_actuals[u] = remaining_items
 
     train_predictions = dict()
+    predictions_10 = dict()
+    predictions_20 = dict()
+    predictions_50 = dict()
+    predictions_100 = dict()
     for u, i in predictions.items():
         remaining_items = list(sorted(i, key=operator.itemgetter(1), reverse=True))
         remaining_items = [i for i, r in remaining_items]
-        predictions[u] = list(filter(lambda x: x not in train_uid[u], remaining_items))[:k]
-        train_predictions[u] = remaining_items[:k]
+        filtered_items = list(filter(lambda x: x not in train_uid[u], remaining_items))
+        train_predictions[u] = remaining_items[:100]
+        predictions_10[u] = filtered_items[:10]
+        predictions_20[u] = filtered_items[:20]
+        predictions_50[u] = filtered_items[:50]
+        predictions_100[u] = filtered_items[:100]
+
     from more_itertools import flatten
     train_diversity = len(set(list(flatten(list(train_predictions.values())))))/len(item_list)
-    diversity = len(set(list(flatten(list(predictions.values()))))) / len(item_list)
+    diversity = len(set(list(flatten(list(predictions_100.values()))))) / len(item_list)
 
     train_mean_ap = np.mean([average_precision(train_actuals[u], train_predictions[u]) for u in train_users])
     train_mrr = np.mean([reciprocal_rank(train_actuals[u], train_predictions[u]) for u in train_users])
     train_ndcg = np.mean([ndcg(train_actuals_score_dict[u], train_predictions[u]) for u in train_users])
+    train_binary_ndcg = np.mean([binary_ndcg(train_actuals_score_dict[u], train_predictions[u]) for u in train_users])
+    train_recall = np.mean([recall(train_actuals_score_dict[u], train_predictions[u]) for u in train_users])
 
     validation_actuals = defaultdict(list)
     for u, i, r in validation_affinities:
@@ -90,17 +101,44 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         items_extracted_length.append(len(remaining_items))
         validation_actuals[u] = remaining_items
 
-    mean_ap = np.mean([average_precision(validation_actuals[u], predictions[u]) for u in validation_users])
-    mrr = np.mean([reciprocal_rank(validation_actuals[u], predictions[u]) for u in validation_users])
-    val_ndcg = np.mean([ndcg(validation_actuals_score_dict[u], predictions[u]) for u in validation_users])
+    mean_ap = np.mean([average_precision(validation_actuals[u], predictions_100[u]) for u in validation_users])
+    mrr = np.mean([reciprocal_rank(validation_actuals[u], predictions_100[u]) for u in validation_users])
+    val_ndcg = np.mean([ndcg(validation_actuals_score_dict[u], predictions_100[u]) for u in validation_users])
+    val_binary_ndcg = np.mean([binary_ndcg(validation_actuals_score_dict[u], predictions_100[u]) for u in validation_users])
+    val_recall = np.mean([recall(validation_actuals_score_dict[u], predictions_100[u]) for u in validation_users])
 
-    return {"train_map": train_mean_ap, "map": mean_ap, "train_mrr": train_mrr, "mrr": mrr,
-            "retrieval_time": pred_time, "train_ndcg": train_ndcg, "ndcg": val_ndcg,
-            "actuals": validation_actuals, "predictions": predictions,
-            "train_diversity": train_diversity, "diversity": diversity,
+    mean_ap_10 = np.mean([average_precision(validation_actuals[u], predictions_10[u]) for u in validation_users])
+    mrr_10 = np.mean([reciprocal_rank(validation_actuals[u], predictions_10[u]) for u in validation_users])
+    val_ndcg_10 = np.mean([ndcg(validation_actuals_score_dict[u], predictions_10[u]) for u in validation_users])
+    val_binary_ndcg_10 = np.mean([binary_ndcg(validation_actuals_score_dict[u], predictions_10[u]) for u in validation_users])
+    val_recall_10 = np.mean([recall(validation_actuals_score_dict[u], predictions_10[u]) for u in validation_users])
+
+    mean_ap_20 = np.mean([average_precision(validation_actuals[u], predictions_20[u]) for u in validation_users])
+    mrr_20 = np.mean([reciprocal_rank(validation_actuals[u], predictions_20[u]) for u in validation_users])
+    val_ndcg_20 = np.mean([ndcg(validation_actuals_score_dict[u], predictions_20[u]) for u in validation_users])
+    val_binary_ndcg_20 = np.mean([binary_ndcg(validation_actuals_score_dict[u], predictions_20[u]) for u in validation_users])
+    val_recall_20 = np.mean([recall(validation_actuals_score_dict[u], predictions_20[u]) for u in validation_users])
+
+    mean_ap_50 = np.mean([average_precision(validation_actuals[u], predictions_50[u]) for u in validation_users])
+    mrr_50 = np.mean([reciprocal_rank(validation_actuals[u], predictions_50[u]) for u in validation_users])
+    val_ndcg_50 = np.mean([ndcg(validation_actuals_score_dict[u], predictions_50[u]) for u in validation_users])
+    val_binary_ndcg_50 = np.mean([binary_ndcg(validation_actuals_score_dict[u], predictions_50[u]) for u in validation_users])
+    val_recall_50 = np.mean([recall(validation_actuals_score_dict[u], predictions_50[u]) for u in validation_users])
+
+    metrics = {"train_map": train_mean_ap, "map": mean_ap, "train_mrr": train_mrr, "mrr": mrr,
+               "retrieval_time": pred_time,
+               "train_ndcg@100": train_ndcg, "ndcg@100": val_ndcg,
+               "train_recall@100": train_recall, "recall@100": val_recall,
+               "train_b_ndcg@100": train_binary_ndcg, "ndcg_b@100": val_binary_ndcg,
+               "ndcg@50": val_ndcg_50, "ndcg_b@50": val_binary_ndcg_50,
+               "ndcg@20": val_ndcg_20, "ndcg_b@20": val_binary_ndcg_20,
+               "ndcg@10": val_ndcg_10, "ndcg_b@10": val_binary_ndcg_10,
+               "recall@10": val_recall_10, "recall@20": val_recall_20, "recall@50": val_recall_50,
+               "train_diversity": train_diversity, "diversity": diversity}
+    return {"actuals": validation_actuals, "predictions": predictions_100,
             "train_actuals": train_actuals, "train_predictions": train_predictions,
             "train_actuals_score_dict": train_actuals_score_dict,
-            "validation_actuals_score_dict": validation_actuals_score_dict}
+            "validation_actuals_score_dict": validation_actuals_score_dict, "metrics": metrics}
 
 
 def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}, rating_scale=(1, 5)):
@@ -144,12 +182,10 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
                                                                      ex_ee["train_actuals_score_dict"],
                                                                      ex_ee["validation_actuals_score_dict"])
         user_rating_count_metrics["algo"] = name
-        stats = {"algo": name, "rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
-                 "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
-                 "train_ndcg": ex_ee["train_ndcg"], "ndcg": ex_ee["ndcg"], "train_mrr": ex_ee["train_mrr"],
-                 "mrr": ex_ee["mrr"], "train_diversity": ex_ee["train_diversity"], "diversity": ex_ee["diversity"],
+        stats = {"algo": name, "rmse": rmse, "mae": mae,
                  "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time,
                  "user_rating_count_metrics": user_rating_count_metrics}
+        stats.update(ex_ee["metrics"])
         return stats
 
     algo_map = {"svd": SVD(**(algo_params["svd"] if "svd" in algo_params else {})),
@@ -413,7 +449,11 @@ def display_results(results: List[Dict[str, Any]]):
     df['time'] = df['time'].apply(lambda s: str(datetime.timedelta(seconds=s)))
     time = df['retrieval_time']
     df['retrieval_time'] = df['retrieval_time'].apply(lambda s: str(datetime.timedelta(seconds=s)))
-    print(df)
+    from tabulate import tabulate
+    from more_itertools import chunked
+    col_lists = list(chunked(df.columns, 9))
+    for c in col_lists:
+        print(tabulate(df[c], headers='keys', tablefmt='psql'))
     df['retrieval_time'] = time
     return df
 
@@ -449,7 +489,7 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
 
     plt.figure(figsize=(12, 8))
     plt.title("NDCG vs Algorithm")
-    sns.barplot(results.index, results.ndcg)
+    sns.barplot(results.index, results["ndcg@100"])
     plt.xlabel("Algorithm")
     plt.ylabel("NDCG")
     plt.xticks(rotation=45, ha='right')
@@ -553,11 +593,9 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
                                                                  ex_ee["train_actuals"], ex_ee["train_predictions"],
                                                                  ex_ee["train_actuals_score_dict"],
                                                                  ex_ee["validation_actuals_score_dict"])
-    stats = {"rmse": rmse, "mae": mae, "train_map": ex_ee["train_map"],
-             "map": ex_ee["map"], "retrieval_time": ex_ee["retrieval_time"],
-             "train_ndcg": ex_ee["train_ndcg"], "ndcg": ex_ee["ndcg"], "train_mrr": ex_ee["train_mrr"],
-             "mrr": ex_ee["mrr"], "train_diversity": ex_ee["train_diversity"], "diversity": ex_ee["diversity"],
+    stats = {"rmse": rmse, "mae": mae,
              "train_rmse": train_rmse, "train_mae": train_mae}
+    stats.update(ex_ee["metrics"])
     return predictions, actuals, stats, user_rating_count_metrics
 
 
@@ -643,7 +681,7 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
                                                              prepare_data_mappers, rating_scale, algos,
                                                              enable_error_analysis=enable_error_analysis,
                                                              enable_baselines=enable_baselines)
-        rmse, ndcg = results[0]['rmse'], results[0]['ndcg']
+        rmse, ndcg = results[0]['rmse'], results[0]['ndcg@100']
 
     else:
         X = np.array(user_item_affinities)
@@ -666,7 +704,7 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
                                          prepare_data_mappers, rating_scale, algos,
                                          enable_error_analysis=False, enable_baselines=enable_baselines)
 
-            rmse, ndcg = res[0]['rmse'], res[0]['ndcg']
+            rmse, ndcg = res[0]['rmse'], res[0]['ndcg@100']
             report({"rmse": rmse, "ndcg": ndcg}, step)
             step += 1
             user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
@@ -679,15 +717,9 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
         results = display_results(results)
         results.to_csv("overall_results.csv")
         visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
-        for rec in recs:
-            c = rec.__class__
-            c.persist(rec)
-            rec = c.load()
-            rec.find_items_for_user(df_user.user.values[0])
-
 
     else:
         results = pd.DataFrame.from_records(results)
         results = results.groupby(["algo"]).mean().reset_index()
-        rmse, ndcg = results["rmse"].values[0], results["ndcg"].values[0]
+        rmse, ndcg = results["rmse"].values[0], results["ndcg@100"].values[0]
     return rmse, ndcg
