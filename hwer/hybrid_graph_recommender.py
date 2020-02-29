@@ -37,7 +37,7 @@ class HybridGCNRec(SVDppHybrid):
         from gensim.models import Word2Vec
         walk_length = 10
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
-        iter = hyperparams["iter"] if "iter" in hyperparams else 2
+        iter = hyperparams["iter"] if "iter" in hyperparams else 3
         p = 1.0
         q = hyperparams["q"] if "q" in hyperparams else 0.5
 
