@@ -120,7 +120,7 @@ def get_data_reader(dataset="100K"):
         ratings = ratings[["user", "item", "rating"]]
         # Based on Paper https://arxiv.org/pdf/1605.09477.pdf (CF-NADE GC-MC)
         train = ratings.sample(frac=0.9)
-        test = ratings.sample(frac=0.9)
+        test = ratings[~ratings.index.isin(train.index)]
         train["is_test"] = False
         test["is_test"] = True
         ratings = pd.concat((train, test))
