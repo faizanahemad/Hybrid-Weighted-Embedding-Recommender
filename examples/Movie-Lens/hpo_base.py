@@ -37,7 +37,7 @@ def init_args():
                     choices=["100K", "1M", "20M"],
                     help='')
     ap.add_argument('--conv_arch', type=int, default=1, metavar='N',
-                    choices=[1, 2, 3, 4, 5],
+                    choices=[1, 2, 3, 4],
                     help='')
     args = vars(ap.parse_args())
     algo = args["algo"]
