@@ -451,7 +451,7 @@ def display_results(results: List[Dict[str, Any]]):
     df['retrieval_time'] = df['retrieval_time'].apply(lambda s: str(datetime.timedelta(seconds=s)))
     from tabulate import tabulate
     from more_itertools import chunked
-    col_lists = list(chunked(df.columns, 9))
+    col_lists = list(chunked(df.columns, 8))
     for c in col_lists:
         print(tabulate(df[c], headers='keys', tablefmt='psql'))
     df['retrieval_time'] = time

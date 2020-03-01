@@ -72,7 +72,7 @@ def get_best_params(dataset, gcn_conv_variant):
     return hyperparamters_dict
 
 
-n_neighbors = 400
+n_neighbors = 500
 knn_params=dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, })
 enable_node2vec = True
 use_content = True

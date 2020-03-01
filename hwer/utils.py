@@ -108,7 +108,7 @@ def binary_ndcg(y_true: Dict[str, float], y_pred: List[str]):
 def recall(y_true: Dict[str, float], y_pred: List[str]):
     norm = min(len(y_pred), len(y_true))
     recall = sum([1 if i in y_true else 0 for i in y_pred])
-    return recall/norm
+    return recall/max(norm, 1.0)
 
 
 
