@@ -107,35 +107,40 @@ class GraphSageConvWithSamplingBase(nn.Module):
             init_weight(W.weight, 'xavier_uniform_', 'linear')
         init_bias(W.bias)
         self.W = nn.Sequential(*layers)
+        
+        W_out =  nn.Linear(feature_size, feature_size)
+        init_weight(W_out.weight, 'xavier_uniform_', 'leaky_relu')
+        init_bias(W_out.bias)
+        self.W_out = nn.Sequential(GaussianNoise(gaussian_noise), W_out, nn.LeakyReLU(negative_slope=0.1))
 
     def pre_process(self, nodes):
         h_agg = nodes.data['h_agg']
         h = nodes.data['h']
-        h_max = nodes.data['h_max']
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
-        return h, h_agg, h_max
+        return h, h_agg
 
     def process_node_data(self, h):
         h = self.noise(h)
         return h
 
-    def process_neighbourhood_data(self, h_agg, h_max):
-        return h_agg, h_max
+    def process_neighbourhood_data(self, h_agg):
+        return h_agg
 
-    def post_process(self, h_concat, h, h_agg, h_max):
+    def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
         if self.prediction_layer:
-            return {'h': h_new}
-        return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
+            return {'h': h_new, 'h_out': h_new}
+        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
+        return {'h': h_new, 'h_out': self.W_out(h_new)}
 
     def forward(self, nodes):
-        h, h_agg, h_max = self.pre_process(nodes)
+        h, h_agg = self.pre_process(nodes)
         h = self.process_node_data(h)
-        h_agg, h_max = self.process_neighbourhood_data(h_agg, h_max)
+        h_agg = self.process_neighbourhood_data(h_agg)
         h_concat = torch.cat([h, h_agg], 1)
         h_concat = self.drop(h_concat)
-        return self.post_process(h_concat, h, h_agg, h_max)
+        return self.post_process(h_concat, h, h_agg)
 
 
 class GraphSageConvWithSamplingV1(GraphSageConvWithSamplingBase):
@@ -153,8 +158,8 @@ class GraphSageConvWithSamplingV2(GraphSageConvWithSamplingBase):
         init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu')
         self.Wagg = nn.Sequential(*Wagg)
 
-    def process_neighbourhood_data(self, h_agg, h_max):
-        return self.Wagg(h_agg), h_max
+    def process_neighbourhood_data(self, h_agg):
+        return self.Wagg(h_agg)
 
 
 class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingBase):
@@ -180,15 +185,15 @@ class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingBase):
         init_weight(Wh1.weight, 'xavier_uniform_', 'leaky_relu')
 
         #
-    def process_neighbourhood_data(self, h_agg, h_max):
-        return self.Wagg(h_agg), h_max
+    def process_neighbourhood_data(self, h_agg):
+        return self.Wagg(h_agg)
 
     def process_node_data(self, h):
         h = self.noise(h)
         h = self.Wh(h)
         return h
 
-    def post_process(self, h_concat, h, h_agg, h_max):
+    def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
         h_new = h_new + h_agg
         if self.prediction_layer:
@@ -256,9 +261,9 @@ class GraphSageWithSampling(nn.Module):
             # self.node_emb.weight = nn.Parameter(init_node_vectors)
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
 
-    msg = [FN.copy_src('h', 'h'),
+    msg = [FN.copy_src('h_out', 'h'),
            FN.copy_src('one', 'one')]
-    red = [FN.sum('h', 'h_agg'), FN.sum('one', 'w'), FN.max('h', 'h_max')]
+    red = [FN.sum('h', 'h_agg'), FN.sum('one', 'w')]
 
     def forward(self, nf):
         '''
@@ -266,6 +271,7 @@ class GraphSageWithSampling(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
+            nf.layers[i].data['h_out'] = self.node_emb(nf.layer_parent_nid(i) + 1)
             nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
@@ -494,8 +500,8 @@ class GraphSageConvWithSamplingV5(GraphSageConvWithSamplingV4):
         self.W = nn.Sequential(*layers)
 
         #
-    def process_neighbourhood_data(self, h_agg, h_max):
-        return self.Wagg(h_agg), h_max
+    def process_neighbourhood_data(self, h_agg):
+        return self.Wagg(h_agg)
 
     def process_node_data(self, h):
         h = self.noise(h)
