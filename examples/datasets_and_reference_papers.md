@@ -19,6 +19,8 @@ Interactions Modeling](https://arxiv.org/pdf/1810.12027.pdf)
 - [Node2Vec](https://cs.stanford.edu/~jure/pubs/node2vec-kdd16.pdf)
 - [A Neural Autoregressive Approach to Collaborative Filtering (CF-NADE)](https://arxiv.org/pdf/1605.09477.pdf)
 - [Graph Convolutional Matrix Completion](https://arxiv.org/pdf/1706.02263.pdf)
+- [Neural Collaborative Filtering](https://arxiv.org/pdf/1708.05031.pdf)
+- [GraphSage](https://cs.stanford.edu/people/jure/pubs/graphsage-nips17.pdf)
 
 
 

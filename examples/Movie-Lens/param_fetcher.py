@@ -39,7 +39,16 @@ def fetch_gcn_params(dataset, algo, conv_arch):
     p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["use_content"] = use_content
     p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_gcn
-    p["collaborative_params"]["user_item_params"]["enable_node2vec"] = enable_node2vec
+
+    p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_node2vec if "enable_gcn" not in \
+                                                                                     p["collaborative_params"][
+                                                                                         "user_item_params"] else \
+        p["collaborative_params"]["user_item_params"]["enable_gcn"]
+
+    p["collaborative_params"]["user_item_params"]["enable_node2vec"] = enable_node2vec if "enable_node2vec" not in \
+                                                                                          p["collaborative_params"][
+                                                                                              "user_item_params"] else \
+    p["collaborative_params"]["user_item_params"]["enable_node2vec"]
     return p
 
 
@@ -60,7 +69,7 @@ def get_best_params(dataset, gcn_conv_variant):
 
     hyperparameters_gcn = fetch_gcn_params(dataset, "gcn", gcn_conv_variant)
 
-    hyperparameters_gcn_ncf = fetch_gcn_params(dataset, "gcn_ncf", gcn_conv_variant)
+    hyperparameters_gcn_ncf = None
 
     hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
                                 "svd": {"biased": True, "n_factors": 20},
