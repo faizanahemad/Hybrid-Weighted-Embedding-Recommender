@@ -304,69 +304,6 @@ class GraphSAGERecommenderImplicit(nn.Module):
         return score
 
 
-class NCFScorer(nn.Module):
-    def __init__(self, feature_size, dropout, gaussian_noise, scorer_depth):
-        super(NCFScorer, self).__init__()
-        noise = GaussianNoise(gaussian_noise)
-        self.noise = noise
-        w1 = nn.Linear(feature_size * 2, feature_size * 2)
-        pipeline_1 = nn.Sequential(w1, nn.LeakyReLU(negative_slope=0.1))
-        self.pipeline_1 = pipeline_1
-        w4 = nn.Linear(feature_size * 2, feature_size * 2)
-        self.uvd_pipeline = nn.Sequential(w4, nn.LeakyReLU(negative_slope=0.1))
-        w7 = nn.Linear(feature_size * 4, 1)
-
-        layers = [LinearResnet(feature_size * 4, feature_size * 4, gaussian_noise)]
-        for i in range(scorer_depth - 1):
-            layers.append(LinearResnet(feature_size * 4, feature_size * 4, gaussian_noise))
-        layers.append(w7)
-        self.layers = nn.Sequential(*layers)
-
-        # init weights
-        init_weight(w7.weight, 'xavier_uniform_', 'linear')
-        init_bias(w7.bias)
-        weights = [w1, w4]
-        for w in weights:
-            init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(w.bias)
-
-    def forward(self, src, dst, mu, node_biases, h_dst, h_src):
-        user_item_vec_dot = h_src * h_dst
-        user_item_vec_dist = (h_src - h_dst) ** 2
-        user_bias = node_biases[src + 1]
-        item_bias = node_biases[dst + 1]
-        uvd = torch.cat([user_item_vec_dot, user_item_vec_dist], 1)
-        uvd = self.uvd_pipeline(uvd)
-
-        p1_out = self.pipeline_1(torch.cat([h_src, h_dst], 1))
-        mains = torch.cat([uvd, p1_out], 1)
-        score = self.layers(mains).flatten()
-        return user_bias + item_bias + score
-
-
-class GraphSAGERecommenderNCF(GraphSAGERecommenderImplicit):
-    def __init__(self, gcn: GraphSageWithSampling, mu, node_biases, zeroed_indices, ncf: NCFScorer):
-        super(GraphSAGERecommenderNCF, self).__init__(gcn, mu, node_biases, zeroed_indices)
-        self.ncf = ncf
-
-    def forward(self, nf, src, dst):
-        h_output = self.gcn(nf)
-        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
-        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        score = self.ncf(src, dst, self.mu, self.node_biases,
-                          h_dst, h_src)
-
-        return score
-
-
-class VAENCFScorer(nn.Module):
-    pass
-
-
-class GraphSAGERecommenderVAENCF(nn.Module):
-    pass
-
-
 class GraphSAGETripletEmbedding(nn.Module):
     def __init__(self, gcn, margin=0.1):
         super(GraphSAGETripletEmbedding, self).__init__()

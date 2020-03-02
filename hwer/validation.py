@@ -48,7 +48,7 @@ def model_get_all(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
     return predictions
 
 
-model_get_topk = model_get_all
+model_get_topk = model_get_topk_knn
 
 
 def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):

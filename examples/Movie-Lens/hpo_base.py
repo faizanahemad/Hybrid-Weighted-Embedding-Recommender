@@ -2,7 +2,6 @@ from hwer.validation import *
 from sklearn.model_selection import StratifiedKFold
 from sklearn.model_selection import train_test_split
 import argparse
-from param_fetcher import get_best_params
 
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
@@ -12,13 +11,15 @@ import warnings
 
 warnings.filterwarnings('ignore')
 import numpy as np
-import movielens_data_reader as mdr
+from .movielens_data_reader import *
+from .param_fetcher import get_best_params
+from hwer.utils import str2bool
 
 enable_kfold = False
 
 
 def optimisation_objective(hyperparameters, algo, report, dataset):
-    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = mdr.build_dataset(dataset)
+    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = build_dataset(dataset)
     rmse, ndcg = run_model_for_hpo(df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale,
                                    hyperparameters, algo, report,
                                    enable_kfold=enable_kfold)
@@ -36,14 +37,17 @@ def init_args():
     ap.add_argument('--dataset', type=str, default="100K", metavar='N',
                     choices=["100K", "1M", "20M"],
                     help='')
+    ap.add_argument('--use_content', type=str2bool, default=False, metavar='N',
+                    help='')
     ap.add_argument('--conv_arch', type=int, default=1, metavar='N',
-                    choices=[1, 2, 3, 4],
+                    choices=[-1, 0, 1, 2, 3, 4],
                     help='')
     args = vars(ap.parse_args())
     algo = args["algo"]
     objective = args["objective"]
     dataset = args["dataset"]
     conv_arch = int(args["conv_arch"])
-    hyperparamters_dict = get_best_params(dataset, conv_arch)
+    use_content = args["use_content"]
+    hyperparamters_dict = get_best_params(dataset, conv_arch, use_content)
     params = copy.deepcopy(hyperparamters_dict[algo])
     return params, dataset, objective, algo
