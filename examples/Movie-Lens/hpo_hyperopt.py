@@ -28,7 +28,6 @@ def build_params(args, objective, params):
         params["collaborative_params"]["prediction_network_params"]["lr"] = args["lr"]
         params["collaborative_params"]["prediction_network_params"]["epochs"] = int(args["epochs"])
         params["collaborative_params"]["prediction_network_params"]["kernel_l2"] = args["kernel_l2"]
-        params["collaborative_params"]["prediction_network_params"]["dropout"] = args["dropout"]
         params["collaborative_params"]["prediction_network_params"]["batch_size"] = int(args["batch_size"])
         params["collaborative_params"]["prediction_network_params"]["conv_depth"] = int(args["conv_depth"])
         params["collaborative_params"]["prediction_network_params"]["gaussian_noise"] = args["gaussian_noise"]
@@ -68,7 +67,6 @@ def define_search_space(objective, starting_params):
                               prediction["epochs"] - 20,
                               prediction["epochs"] + 20, 5),
         'kernel_l2': hp.choice('kernel_l2', [0.0, hp.qloguniform('kernel_l2_choice', np.log(1e-9), np.log(1e-6), 1e-9)]),
-        'dropout': hp.choice('dropout', [0.0, hp.quniform('drop', 0.05, 0.2, 0.05)]),
         'batch_size': hp.qloguniform('batch_size', np.log(512), np.log(2048), 512),
         'conv_depth': hp.quniform('conv_depth', 1, 6, 1),
         'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(prediction["gaussian_noise"]),
