@@ -31,12 +31,24 @@ def surprise_get_topk(model, users, items) -> Dict[str, List[Tuple[str, float]]]
     return predictions
 
 
-def model_get_topk(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
+def model_get_topk_knn(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
         p = model.find_items_for_user(u)
         predictions[u] = p
     return predictions
+
+
+def model_get_all(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
+    predictions = defaultdict(list)
+    for u in users:
+        p = list(zip(items, model.predict([(u, i) for i in items])))
+        p = list(sorted(p, key=operator.itemgetter(1), reverse=True))
+        predictions[u] = p
+    return predictions
+
+
+model_get_topk = model_get_all
 
 
 def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):

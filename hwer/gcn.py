@@ -197,7 +197,9 @@ class GraphSageWithSampling(nn.Module):
 
         self.feature_size = feature_size
         self.n_layers = n_layers
-        if conv_arch == 1:
+        if conv_arch == 0:
+            GraphSageConvWithSampling = GraphSageConvWithSamplingBase
+        elif conv_arch == 1:
             GraphSageConvWithSampling = GraphSageConvWithSamplingV1
         elif conv_arch == 2:
             GraphSageConvWithSampling = GraphSageConvWithSamplingV2

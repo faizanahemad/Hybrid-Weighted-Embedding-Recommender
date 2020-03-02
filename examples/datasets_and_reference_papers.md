@@ -21,7 +21,10 @@ Interactions Modeling](https://arxiv.org/pdf/1810.12027.pdf)
 - [Neural Collaborative Filtering](https://arxiv.org/pdf/1708.05031.pdf)
 - [GraphSage](https://cs.stanford.edu/people/jure/pubs/graphsage-nips17.pdf)
 - [Variational Autoencoders for Collaborative Filtering](https://arxiv.org/pdf/1802.05814.pdf)
-
+- [Hybrid Recommender System based on Autoencoders](https://arxiv.org/pdf/1606.07659.pdf)
+- [Factorization Meets the Neighborhood: a Multifaceted
+Collaborative Filtering Model](https://www.cs.rochester.edu/twiki/pub/Main/HarpSeminar/Factorization_Meets_the_Neighborhood-_a_Multifaceted_Collaborative_Filtering_Model.pdf)
+- [Content-Boosted Collaborative Filtering for Improved Recommendations](https://www.cs.utexas.edu/~ml/papers/cbcf-aaai-02.pdf)
 
 
 

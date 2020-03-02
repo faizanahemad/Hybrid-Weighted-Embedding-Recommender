@@ -71,9 +71,9 @@ def get_best_params(dataset, gcn_conv_variant):
 
     hyperparameters_gcn_ncf = None
 
-    hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20},
+    hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20, "reg_all": 0.025},
                                 "svd": {"biased": True, "n_factors": 20},
-                                "algos": ["svd"]}
+                                "algos": ["svdpp"]}
     hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn,
                                content_only=hyperparameter_content,
                                gcn_ncf=hyperparameters_gcn_ncf,
