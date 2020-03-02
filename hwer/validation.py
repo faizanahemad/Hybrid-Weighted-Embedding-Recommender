@@ -643,10 +643,12 @@ def get_small_subset(df_user, df_item, ratings,
 
 def run_model_for_hpo(df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale,
                       hyperparameters, algo, report,
-                      enable_kfold=False):
+                      enable_kfold=False, provided_test_set=True):
+    if enable_kfold:
+        provided_test_set = False
     rmse, ndcg = run_models_for_testing(df_user, df_item, user_item_affinities,
                                         prepare_data_mappers, rating_scale,
-                                        [algo], {algo: hyperparameters},
+                                        [algo], {algo: hyperparameters}, provided_test_set=provided_test_set,
                                         enable_kfold=enable_kfold, display=False, report=report)
 
     return rmse, ndcg
