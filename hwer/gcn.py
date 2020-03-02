@@ -39,12 +39,12 @@ def mix_embeddings(ndata, proj):
     ndata['h'] = ndata['h'] + proj(ndata['content'])
 
 
-def init_weight(param, initializer, nonlinearity):
+def init_weight(param, initializer, nonlinearity, nonlinearity_param=None):
     initializer = getattr(nn.init, initializer)
-    if nonlinearity is not None:
+    if nonlinearity is None:
         initializer(param)
     else:
-        initializer(param, nn.init.calculate_gain(nonlinearity))
+        initializer(param, nn.init.calculate_gain(nonlinearity, nonlinearity_param))
 
 
 def init_bias(param):
@@ -62,7 +62,7 @@ class GraphSageConvWithSamplingVanilla(nn.Module):
         self.prediction_layer = prediction_layer
 
         if self.activation is not None:
-            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
+            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
         else:
             init_weight(W.weight, 'xavier_uniform_', 'linear')
@@ -89,7 +89,7 @@ class GraphSageConvWithSamplingBase(nn.Module):
         self.drop = nn.Dropout(dropout)
         for i in range(depth - 1):
             weights = nn.Linear(feature_size * 2, feature_size * 2)
-            init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu')
+            init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
             init_bias(weights.bias)
             layers.append(weights)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
@@ -101,7 +101,7 @@ class GraphSageConvWithSamplingBase(nn.Module):
         self.noise = GaussianNoise(gaussian_noise)
 
         if self.activation is not None:
-            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
+            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
         else:
             init_weight(W.weight, 'xavier_uniform_', 'linear')
@@ -109,7 +109,7 @@ class GraphSageConvWithSamplingBase(nn.Module):
         self.W = nn.Sequential(*layers)
         
         W_out =  nn.Linear(feature_size, feature_size)
-        init_weight(W_out.weight, 'xavier_uniform_', 'leaky_relu')
+        init_weight(W_out.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(W_out.bias)
         self.W_out = nn.Sequential(GaussianNoise(gaussian_noise), W_out, nn.LeakyReLU(negative_slope=0.1))
 
@@ -150,7 +150,7 @@ class GraphSageConvWithSamplingV1(GraphSageConvWithSamplingBase):
         Wagg_1 = nn.Linear(feature_size, feature_size)
         Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
         init_bias(Wagg_1.bias)
-        init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu')
+        init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         self.Wagg = nn.Sequential(*Wagg)
 
     def process_neighbourhood_data(self, h_agg):
@@ -176,8 +176,8 @@ class GraphSageConvWithSamplingV2(GraphSageConvWithSamplingBase):
 
         init_bias(Wh1.bias)
         init_bias(Wagg_1.bias)
-        init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu')
-        init_weight(Wh1.weight, 'xavier_uniform_', 'leaky_relu')
+        init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_weight(Wh1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
 
         #
     def process_neighbourhood_data(self, h_agg):
@@ -225,7 +225,7 @@ class GraphSageWithSampling(nn.Module):
             w1 = nn.Linear(n_content_dims, n_content_dims)
             w = nn.Linear(n_content_dims, feature_size)
             proj = [noise, w1, nn.LeakyReLU(negative_slope=0.1), w, nn.LeakyReLU(negative_slope=0.1)]
-            init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu')
+            init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
             init_bias(w1.bias)
         elif conv_arch == 3 or conv_arch == 4:
             w = nn.Linear(n_content_dims, n_content_dims)
@@ -236,7 +236,7 @@ class GraphSageWithSampling(nn.Module):
             w = nn.Linear(n_content_dims, feature_size)
             proj = [noise, w, nn.LeakyReLU(negative_slope=0.1)]
 
-        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
+        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(w.bias)
         self.proj = nn.Sequential(*proj)
 
@@ -318,7 +318,7 @@ class GraphSAGETripletEmbedding(nn.Module):
         h_neg = h_output[nf.map_from_parent_nid(-1, neg, True)]
         d_a_b = 1.0 - (h_src * h_dst).sum(1)
         d_a_c = 1.0 - (h_src * h_neg).sum(1)
-        score = F.relu(d_a_b + self.margin - d_a_c)
+        score = F.leaky_relu(d_a_b + self.margin - d_a_c)
         return score
 
 
@@ -355,7 +355,7 @@ class LinearResnet(nn.Module):
         bn1 = torch.nn.BatchNorm1d(output_size)
         noise = GaussianNoise(gaussian_noise)
 
-        init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu')
+        init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(W1.bias)
 
         self.W = nn.Sequential(noise, W1, nn.LeakyReLU(negative_slope=0.1))
@@ -386,12 +386,12 @@ class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingV1):
 
         Wagg_1 = nn.Linear(feature_size, feature_size)
         init_bias(Wagg_1.bias)
-        init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu')
+        init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size, feature_size, gaussian_noise)]
         self.Wagg = nn.Sequential(*Wagg)
 
         W_out = nn.Linear(feature_size, feature_size)
-        init_weight(W_out.weight, 'xavier_uniform_', 'leaky_relu')
+        init_weight(W_out.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(W_out.bias)
         self.W_out = nn.Sequential(GaussianNoise(gaussian_noise), W_out, nn.LeakyReLU(negative_slope=0.1),
                                    LinearResnet(feature_size, feature_size, gaussian_noise))
@@ -412,7 +412,7 @@ class GraphSageConvWithSamplingV4(GraphSageConvWithSamplingV3):
         self.Wh = nn.Sequential(*Wh)
 
         init_bias(Wh1.bias)
-        init_weight(Wh1.weight, 'xavier_uniform_', 'leaky_relu')
+        init_weight(Wh1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
 
     def process_node_data(self, h):
         h = self.noise(h)

@@ -23,12 +23,12 @@ def get_data_mapper(df_user, df_item, dataset="100K"):
 
     def prepare_data_mappers_100K():
         embedding_mapper = {}
-        embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=16)
-        embedding_mapper['categorical_year'] = CategoricalEmbedding(n_dims=2)
+        embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=32)
+        embedding_mapper['categorical_year'] = CategoricalEmbedding(n_dims=4)
 
         embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
-        embedding_mapper['numeric'] = NumericEmbedding(8)
-        embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=8)
+        embedding_mapper['numeric'] = NumericEmbedding(16)
+        embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=32)
 
         u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL,
                      values=df_user[["gender", "age", "occupation", "zip"]].values)
@@ -46,11 +46,11 @@ def get_data_mapper(df_user, df_item, dataset="100K"):
 
     def prepare_data_mappers_1M():
         embedding_mapper = {}
-        embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=4)
+        embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=32)
 
         embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
-        embedding_mapper['numeric'] = NumericEmbedding(4)
-        embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=4)
+        embedding_mapper['numeric'] = NumericEmbedding(16)
+        embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=32)
 
         u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL, values=df_user[["gender", "age", "occupation", "zip"]].values)
         user_data = FeatureSet([u1])

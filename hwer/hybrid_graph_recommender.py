@@ -257,7 +257,7 @@ class HybridGCNRec(SVDppHybrid):
                         h_neg = h[n]
                         d_a_b = 1.0 - (h_src * h_dst).sum(1)
                         d_a_c = 1.0 - (h_src * h_neg).sum(1)
-                        res = F.relu(d_a_b + margin - d_a_c)
+                        res = F.leaky_relu(d_a_b + margin - d_a_c)
                         score[i:i + batch_size] = res
                     train_rmse = (score ** 2).mean().sqrt()
                 eval_total = time.time() - eval_start_time

@@ -270,7 +270,7 @@ class FlairGlove100Embedding(ContentEmbeddingBase):
         from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings
         super().__init__(n_dims=100, make_unit_length=make_unit_length)
         embeddings = [WordEmbeddings('glove')]
-        self.embeddings = DocumentPoolEmbeddings(embeddings)
+        self.embeddings = DocumentPoolEmbeddings(embeddings, fine_tune_mode='none')
         self.log = getLogger(type(self).__name__)
 
     def get_sentence_vector(self, text):
@@ -301,10 +301,10 @@ class FlairGlove100Embedding(ContentEmbeddingBase):
 
 class FlairGlove100AndBytePairEmbedding(ContentEmbeddingBase):
     def __init__(self, make_unit_length=True):
-        from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings
+        from flair.embeddings import WordEmbeddings, DocumentPoolEmbeddings, Sentence, BytePairEmbeddings, StackedEmbeddings
         super().__init__(n_dims=200, make_unit_length=make_unit_length)
         embeddings = [WordEmbeddings('glove'), BytePairEmbeddings('en')]
-        self.embeddings = DocumentPoolEmbeddings(embeddings)
+        self.embeddings = DocumentPoolEmbeddings(embeddings, fine_tune_mode='none')
         self.log = getLogger(type(self).__name__)
 
     # noinspection PyUnresolvedReferences
