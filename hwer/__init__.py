@@ -4,6 +4,5 @@ from .recommendation_base import Feature, FeatureSet, RecommendationBase, Featur
 from .content_recommender import ContentRecommendation
 from .svdpp_hybrid import SVDppHybrid
 from .hybrid_graph_recommender import HybridGCNRec
-from .hybrid_graph_recommender_ncf import HybridGCNRecNCF
 from .utils import build_item_user_dict, build_user_item_dict
 
