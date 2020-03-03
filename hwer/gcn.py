@@ -48,7 +48,7 @@ def init_weight(param, initializer, nonlinearity, nonlinearity_param=None):
 
 
 def init_bias(param):
-    nn.init.normal_(param, 0, 0.01)
+    nn.init.normal_(param, 0, 0.001)
 
 
 class GraphSageConvWithSamplingVanilla(nn.Module):
@@ -221,20 +221,14 @@ class GraphSageWithSampling(nn.Module):
         self.convs = nn.ModuleList(convs)
         noise = GaussianNoise(gaussian_noise)
 
-        if conv_arch == 1 or conv_arch == 2:
-            w1 = nn.Linear(n_content_dims, n_content_dims)
-            w = nn.Linear(n_content_dims, feature_size)
-            proj = [noise, w1, nn.LeakyReLU(negative_slope=0.1), w, nn.LeakyReLU(negative_slope=0.1)]
-            init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-            init_bias(w1.bias)
-        elif conv_arch == 3 or conv_arch == 4:
-            w = nn.Linear(n_content_dims, n_content_dims)
-            proj = [noise, w, nn.LeakyReLU(negative_slope=0.1)]
+        w1 = nn.Linear(n_content_dims, n_content_dims)
+        w = nn.Linear(n_content_dims, feature_size)
+        proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w, nn.LeakyReLU(negative_slope=0.1)]
+        init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_bias(w1.bias)
+        if conv_arch == 3 or conv_arch == 4:
             proj.append(LinearResnet(n_content_dims, n_content_dims, gaussian_noise))
             proj.append(LinearResnet(n_content_dims, feature_size, gaussian_noise))
-        else:
-            w = nn.Linear(n_content_dims, feature_size)
-            proj = [noise, w, nn.LeakyReLU(negative_slope=0.1)]
 
         init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(w.bias)
