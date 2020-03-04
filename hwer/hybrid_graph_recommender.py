@@ -108,13 +108,12 @@ class HybridGCNRec(SVDppHybrid):
         return user_vectors, item_vectors
 
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
-                                  conv_depth, network_width,
-                                  gcn_dropout, g_train, triplet_vectors, margin,
+                                  conv_depth, g_train, triplet_vectors, margin,
                                   conv_arch, gaussian_noise):
         from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling
         self.log.info("Getting Triplet Model for GCN")
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
-                                                                gcn_layers, gcn_dropout, False, g_train,
+                                                                gcn_layers, False, g_train,
                                                                 conv_arch, gaussian_noise, conv_depth, triplet_vectors),
                                           margin)
         return model
@@ -188,8 +187,7 @@ class HybridGCNRec(SVDppHybrid):
         g_train.readonly()
         n_content_dims = user_vectors.shape[1]
         model = self.__get_triplet_gcn_model__(n_content_dims, self.n_collaborative_dims, gcn_layers,
-                                               conv_depth, network_width,
-                                               gcn_dropout, g_train, triplet_vectors, margin,
+                                               conv_depth, g_train, triplet_vectors, margin,
                                                conv_arch, gaussian_noise)
         opt = torch.optim.Adam(model.parameters(), lr=gcn_lr, weight_decay=gcn_kernel_l2)
         generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
@@ -406,7 +404,7 @@ class HybridGCNRec(SVDppHybrid):
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicit(
-            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, dropout, False, g_train,
+            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, False, g_train,
                                   conv_arch, gaussian_noise, conv_depth),
             mu, biases, zeroed_indices=zeroed_indices)
         opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)

@@ -6,6 +6,15 @@ import dgl.function as FN
 dgl.load_backend('pytorch')
 
 
+class LambdaLayer(nn.Module):
+    def __init__(self, lambd):
+        super(LambdaLayer, self).__init__()
+        self.lambd = lambd
+
+    def forward(self, x):
+        return self.lambd(x)
+
+
 class GaussianNoise(nn.Module):
     """Gaussian noise regularizer.
 
@@ -52,18 +61,18 @@ def init_bias(param):
 
 
 class GraphSageConvWithSamplingVanilla(nn.Module):
-    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
+    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
         super(GraphSageConvWithSamplingVanilla, self).__init__()
         layers = []
 
         W = nn.Linear(feature_size * 2, feature_size)
         layers.append(W)
-        self.activation = activation
         self.prediction_layer = prediction_layer
 
-        if self.activation is not None:
+        if not prediction_layer:
             init_weight(W.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
+            layers.append(LambdaLayer(lambda h: h.norm(dim=1, keepdim=True).clamp(min=1e-6)))
         else:
             init_weight(W.weight, 'xavier_uniform_', 'linear')
         init_bias(W.bias)
@@ -76,17 +85,14 @@ class GraphSageConvWithSamplingVanilla(nn.Module):
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         h_concat = torch.cat([h, h_agg], 1)
         h_new = self.W(h_concat)
-        if self.prediction_layer:
-            return {'h': h_new}
-        return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
+        return {'h': h_new}
 
 
 class GraphSageConvWithSamplingBase(nn.Module):
-    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
+    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
         super(GraphSageConvWithSamplingBase, self).__init__()
         layers = []
         depth = min(1, depth)
-        self.drop = nn.Dropout(dropout)
         for i in range(depth - 1):
             weights = nn.Linear(feature_size * 2, feature_size * 2)
             init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
@@ -96,13 +102,13 @@ class GraphSageConvWithSamplingBase(nn.Module):
 
         W = nn.Linear(feature_size * 2, feature_size)
         layers.append(W)
-        self.activation = activation
         self.prediction_layer = prediction_layer
         self.noise = GaussianNoise(gaussian_noise)
 
-        if self.activation is not None:
+        if not prediction_layer:
             init_weight(W.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
+            layers.append(LambdaLayer(lambda h: h.norm(dim=1, keepdim=True).clamp(min=1e-6)))
         else:
             init_weight(W.weight, 'xavier_uniform_', 'linear')
         init_bias(W.bias)
@@ -131,7 +137,6 @@ class GraphSageConvWithSamplingBase(nn.Module):
         h_new = self.W(h_concat)
         if self.prediction_layer:
             return {'h': h_new, 'h_out': h_new}
-        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
         return {'h': h_new, 'h_out': self.W_out(h_new)}
 
     def forward(self, nodes):
@@ -139,13 +144,12 @@ class GraphSageConvWithSamplingBase(nn.Module):
         h = self.process_node_data(h)
         h_agg = self.process_neighbourhood_data(h_agg)
         h_concat = torch.cat([h, h_agg], 1)
-        h_concat = self.drop(h_concat)
         return self.post_process(h_concat, h, h_agg)
 
 
 class GraphSageConvWithSamplingV1(GraphSageConvWithSamplingBase):
-    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV1, self).__init__(feature_size, dropout, activation, prediction_layer, gaussian_noise, depth)
+    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
+        super(GraphSageConvWithSamplingV1, self).__init__(feature_size, prediction_layer, gaussian_noise, depth)
 
         Wagg_1 = nn.Linear(feature_size, feature_size)
         Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
@@ -158,8 +162,8 @@ class GraphSageConvWithSamplingV1(GraphSageConvWithSamplingBase):
 
 
 class GraphSageConvWithSamplingV2(GraphSageConvWithSamplingBase):
-    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV2, self).__init__(feature_size, dropout, activation, prediction_layer, gaussian_noise, depth)
+    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
+        super(GraphSageConvWithSamplingV2, self).__init__(feature_size, prediction_layer, gaussian_noise, depth)
 
         self.feature_size = feature_size
 
@@ -190,7 +194,7 @@ class GraphSageConvWithSamplingV2(GraphSageConvWithSamplingBase):
 
 
 class GraphSageWithSampling(nn.Module):
-    def __init__(self, n_content_dims, feature_size, n_layers, dropout, prediction_layer, G,
+    def __init__(self, n_content_dims, feature_size, n_layers, prediction_layer, G,
                  conv_arch, gaussian_noise, conv_depth,
                  init_node_vectors=None,):
         super(GraphSageWithSampling, self).__init__()
@@ -211,14 +215,9 @@ class GraphSageWithSampling(nn.Module):
             GraphSageConvWithSampling = GraphSageConvWithSamplingVanilla
             conv_depth = 1
 
-        convs = []
-        for i in range(n_layers):
-            if i >= n_layers - 1:
-                convs.append(GraphSageConvWithSampling(feature_size, dropout, None, prediction_layer, gaussian_noise, conv_depth))
-            else:
-                convs.append(GraphSageConvWithSampling(feature_size, dropout, F.leaky_relu, False, gaussian_noise, conv_depth))
-
-        self.convs = nn.ModuleList(convs)
+        self.convs = nn.ModuleList(
+            [GraphSageConvWithSampling(feature_size, i == n_layers - 1 and prediction_layer, gaussian_noise, conv_depth) for i in
+             range(n_layers)])
         noise = GaussianNoise(gaussian_noise)
 
         w1 = nn.Linear(n_content_dims, n_content_dims)
@@ -364,12 +363,11 @@ class LinearResnet(nn.Module):
 
 
 class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingV1):
-    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV3, self).__init__(feature_size, dropout, activation, prediction_layer, gaussian_noise, depth)
+    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
+        super(GraphSageConvWithSamplingV3, self).__init__(feature_size, prediction_layer, gaussian_noise, depth)
         #
         layers = []
         depth = min(1, depth)
-        self.drop = nn.Dropout(dropout)
         for i in range(depth - 1):
             weights = LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise)
             layers.append(weights)
@@ -392,8 +390,8 @@ class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingV1):
 
 
 class GraphSageConvWithSamplingV4(GraphSageConvWithSamplingV3):
-    def __init__(self, feature_size, dropout, activation, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV4, self).__init__(feature_size, dropout, activation, prediction_layer, gaussian_noise, depth)
+    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
+        super(GraphSageConvWithSamplingV4, self).__init__(feature_size, prediction_layer, gaussian_noise, depth)
 
         self.feature_size = feature_size
 

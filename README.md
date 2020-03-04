@@ -2,7 +2,6 @@
 A Hybrid Recommendation system which uses Content embeddings and augments them with collaborative features. Weighted Combination of embeddings enables solving cold start with fast training and serving
 
 # TODO:
-- Library the Test bench
 - Improve docs
 - Multi-item types
 - Users-Multiple_item_types-Other-things enabled graph
@@ -12,6 +11,7 @@ A Hybrid Recommendation system which uses Content embeddings and augments them w
     - Example of using content data and not using it
 - Make system independent of content so recsys with no content can be used.
 - Make a section in readme of how to reproduce
+- From Factorization meets the neighborhood paper take section 6 - `evaluation of a top-K recommender` and implement its metric system
 
 # TODO:
 - Paper: Figure out sections and relevant papers to take content arrangement hints.
