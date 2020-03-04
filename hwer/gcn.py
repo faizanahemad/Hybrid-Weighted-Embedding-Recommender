@@ -6,15 +6,6 @@ import dgl.function as FN
 dgl.load_backend('pytorch')
 
 
-class LambdaLayer(nn.Module):
-    def __init__(self, lambd):
-        super(LambdaLayer, self).__init__()
-        self.lambd = lambd
-
-    def forward(self, x):
-        return self.lambd(x)
-
-
 class GaussianNoise(nn.Module):
     """Gaussian noise regularizer.
 
@@ -72,7 +63,6 @@ class GraphSageConvWithSamplingVanilla(nn.Module):
         if not prediction_layer:
             init_weight(W.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
-            layers.append(LambdaLayer(lambda h: h.norm(dim=1, keepdim=True).clamp(min=1e-6)))
         else:
             init_weight(W.weight, 'xavier_uniform_', 'linear')
         init_bias(W.bias)
@@ -85,6 +75,7 @@ class GraphSageConvWithSamplingVanilla(nn.Module):
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         h_concat = torch.cat([h, h_agg], 1)
         h_new = self.W(h_concat)
+        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
         return {'h': h_new}
 
 
@@ -111,7 +102,6 @@ class GraphSageConvWithSamplingBase(nn.Module):
         else:
             init_weight(W.weight, 'xavier_uniform_', 'linear')
         init_bias(W.bias)
-        layers.append(LambdaLayer(lambda h: h.norm(dim=1, keepdim=True).clamp(min=1e-6)))
         self.W = nn.Sequential(*layers)
         
         W_out = nn.Linear(feature_size, feature_size)
@@ -140,9 +130,11 @@ class GraphSageConvWithSamplingBase(nn.Module):
 
     def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
+        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
         if self.prediction_layer:
             return {'h': h_new, 'h_out': h_new}
-        return {'h': h_new, 'h_out': self.W_out(h_new)}
+        h_out = self.W_out(h_new)
+        return {'h': h_new, 'h_out': h_out}
 
     def forward(self, nodes):
         h, h_agg = self.pre_process(nodes)
@@ -387,7 +379,6 @@ class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingV1):
             init_weight(W.weight, 'xavier_uniform_', 'linear')
         init_bias(W.bias)
 
-        layers.append(LambdaLayer(lambda h: h.norm(dim=1, keepdim=True).clamp(min=1e-6)))
         self.W = nn.Sequential(*layers)
 
         Wagg_1 = nn.Linear(feature_size, feature_size)
