@@ -404,7 +404,7 @@ class HybridGCNRec(SVDppHybrid):
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicit(
-            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, True, g_train,
+            GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, g_train,
                                   conv_arch, gaussian_noise, conv_depth),
             mu, biases, zeroed_indices=zeroed_indices)
         opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
