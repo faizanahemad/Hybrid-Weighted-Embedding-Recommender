@@ -182,3 +182,6 @@ pip install -r requirements.txt
 - https://docs.aws.amazon.com/codecommit/latest/userguide/setting-up-gc.html
 - https://github.com/eliorc/node2vec
 
+### Code
+- https://github.com/lorenzMuller/kernelNet_MovieLens/blob/master/dataLoader.py
+

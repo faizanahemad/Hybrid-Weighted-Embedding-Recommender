@@ -388,11 +388,6 @@ class HybridGCNRec(SVDppHybrid):
         else:
             user_vectors = np.zeros((user_vectors.shape[0], 1))
             item_vectors = np.zeros((item_vectors.shape[0], 1))
-        # user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
-        # item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
-
-        # user_vectors = user_content_vectors
-        # item_vectors = item_content_vectors
 
         edge_list = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                      user_item_affinities]

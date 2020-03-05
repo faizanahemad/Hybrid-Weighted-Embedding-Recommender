@@ -218,16 +218,19 @@ class GraphSageWithSampling(nn.Module):
         noise = GaussianNoise(gaussian_noise)
 
         w1 = nn.Linear(n_content_dims, n_content_dims)
-        w = nn.Linear(n_content_dims, feature_size)
-        proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w, nn.LeakyReLU(negative_slope=0.1)]
+
+        proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise]
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(w1.bias)
         if conv_arch == 3 or conv_arch == 4:
             proj.append(LinearResnet(n_content_dims, n_content_dims, gaussian_noise))
+            proj.append(LinearResnet(n_content_dims, n_content_dims, gaussian_noise))
             proj.append(LinearResnet(n_content_dims, feature_size, gaussian_noise))
-
-        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-        init_bias(w.bias)
+        else:
+            w = nn.Linear(n_content_dims, feature_size)
+            init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+            init_bias(w.bias)
+            proj.extend([w, nn.LeakyReLU(negative_slope=0.1)])
         self.proj = nn.Sequential(*proj)
 
         self.G = G
