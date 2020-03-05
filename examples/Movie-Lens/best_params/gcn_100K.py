@@ -1,4 +1,15 @@
-params = {0: dict(n_dims=112, combining_factor=0.1,
+params = {-1: dict(n_dims=112, combining_factor=0.1,
+                  collaborative_params=dict(
+                      prediction_network_params=dict(lr=0.05, epochs=70, batch_size=1536,
+                                                     network_depth=3,
+                                                     gaussian_noise=0, conv_depth=1,
+                                                     kernel_l2=1e-6,),
+                      user_item_params=dict(gcn_lr=0.001, gcn_epochs=35, gcn_layers=3, gcn_dropout=0.0,
+                                            gcn_kernel_l2=1e-9, gcn_batch_size=1024, conv_depth=1,
+                                            margin=1.0,
+                                            gaussian_noise=0,
+                                            node2vec_params=dict(num_walks=150, q=0.5)))),
+          0: dict(n_dims=112, combining_factor=0.1,
                   collaborative_params=dict(
                       prediction_network_params=dict(lr=0.05, epochs=100, batch_size=1536,
                                                      network_depth=3,
