@@ -223,8 +223,6 @@ class GraphSageWithSampling(nn.Module):
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(w1.bias)
         if conv_arch == 3 or conv_arch == 4:
-            proj.append(LinearResnet(n_content_dims, n_content_dims, gaussian_noise))
-            proj.append(LinearResnet(n_content_dims, n_content_dims, gaussian_noise))
             proj.append(LinearResnet(n_content_dims, feature_size, gaussian_noise))
         else:
             w = nn.Linear(n_content_dims, feature_size)
@@ -344,14 +342,16 @@ class LinearResnet(nn.Module):
             self.iscale = nn.Linear(input_size, output_size)
             init_weight(self.iscale.weight, 'xavier_uniform_', 'linear')
             init_bias(self.iscale.bias)
-        W1 = nn.Linear(input_size, output_size)
-        bn1 = torch.nn.BatchNorm1d(output_size)
+        W1 = nn.Linear(input_size, input_size)
         noise = GaussianNoise(gaussian_noise)
-
         init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(W1.bias)
 
-        self.W = nn.Sequential(noise, W1, nn.LeakyReLU(negative_slope=0.1))
+        W2 = nn.Linear(input_size, output_size)
+        init_weight(W2.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_bias(W2.bias)
+
+        self.W = nn.Sequential(noise, W1, nn.LeakyReLU(negative_slope=0.1), noise, W2, nn.LeakyReLU(negative_slope=0.1))
 
     def forward(self, h):
         identity = h
@@ -366,7 +366,10 @@ class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingV1):
     def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
         super(GraphSageConvWithSamplingV3, self).__init__(feature_size, prediction_layer, gaussian_noise, depth)
         #
-        layers = []
+        W1 = nn.Linear(feature_size * 2, feature_size * 2)
+        init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_bias(W1.bias)
+        layers = [W1, nn.LeakyReLU(negative_slope=0.1)]
         depth = min(1, depth)
         for i in range(depth):
             weights = LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise)
@@ -393,12 +396,9 @@ class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingV1):
         W_out = nn.Linear(feature_size, feature_size)
         init_weight(W_out.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(W_out.bias)
-        W_out2 = nn.Linear(feature_size, feature_size)
-        init_weight(W_out2.weight, 'xavier_uniform_', 'linear')
-        init_bias(W_out2.bias)
 
         self.W_out = nn.Sequential(GaussianNoise(gaussian_noise), W_out, nn.LeakyReLU(negative_slope=0.1),
-                                   LinearResnet(feature_size, feature_size, gaussian_noise), W_out2)
+                                   LinearResnet(feature_size, feature_size, gaussian_noise))
 
 
 class GraphSageConvWithSamplingV4(GraphSageConvWithSamplingV3):
