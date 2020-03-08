@@ -171,7 +171,7 @@ class HybridGCNRec(SVDppHybrid):
             self.w2v_item_vectors = w2v_item_vectors
             user_triplet_vectors, item_triplet_vectors = w2v_user_vectors, w2v_item_vectors
 
-        if not enable_gcn:
+        if not enable_gcn or gcn_epochs <= 0:
             return user_triplet_vectors, item_triplet_vectors
 
         triplet_vectors = None
