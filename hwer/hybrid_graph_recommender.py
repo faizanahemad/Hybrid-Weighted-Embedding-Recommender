@@ -213,17 +213,7 @@ class HybridGCNRec(SVDppHybrid):
             dst = torch.LongTensor(dst)
             neg = torch.LongTensor(neg)
 
-            def train(src, dst, neg):
-
-                shuffle_idx = torch.randperm(len(src))
-                src_shuffled = src[shuffle_idx]
-                dst_shuffled = dst[shuffle_idx]
-                neg_shuffled = neg[shuffle_idx]
-
-                src_batches = src_shuffled.split(gcn_batch_size)
-                dst_batches = dst_shuffled.split(gcn_batch_size)
-                neg_batches = neg_shuffled.split(gcn_batch_size)
-
+            def evaluate(src, dst, neg):
                 model.eval()
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,
@@ -259,7 +249,18 @@ class HybridGCNRec(SVDppHybrid):
                         score[i:i + batch_size] = res
                     train_rmse = (score ** 2).mean().sqrt()
                 eval_total = time.time() - eval_start_time
+                return train_rmse, eval_total
 
+            def train(src, dst, neg):
+
+                shuffle_idx = torch.randperm(len(src))
+                src_shuffled = src[shuffle_idx]
+                dst_shuffled = dst[shuffle_idx]
+                neg_shuffled = neg[shuffle_idx]
+
+                src_batches = src_shuffled.split(gcn_batch_size)
+                dst_batches = dst_shuffled.split(gcn_batch_size)
+                neg_batches = neg_shuffled.split(gcn_batch_size)
                 model.train()
                 seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
                 sampler = dgl.contrib.sampling.NeighborSampler(
@@ -280,15 +281,17 @@ class HybridGCNRec(SVDppHybrid):
                 for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
                     score = model.forward(nodeflow, s, d, n) if odd_even else model.forward(nodeflow, d, s, n)
                     odd_even = not odd_even
-                    loss = (score ** 2).mean()
+                    loss = score.mean()
                     total_loss = total_loss + loss
 
                     opt.zero_grad()
                     loss.backward()
                     opt.step()
-                return total_loss / len(src_batches), train_rmse, eval_total
+                return total_loss / len(src_batches)
 
-            loss, train_rmse, eval_total = train(src, dst, neg)
+            loss = train(src, dst, neg)
+            train_rmse, eval_total = evaluate(src, dst, neg)
+
 
             total_time = time.time() - start
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
