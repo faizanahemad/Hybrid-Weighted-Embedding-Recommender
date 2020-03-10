@@ -198,104 +198,103 @@ class HybridGCNRec(SVDppHybrid):
         generator = generate_training_samples(user_item_affinities)
         model.train()
         gc.collect()
+        from more_itertools import chunked
         for epoch in range(gcn_epochs):
             start = time.time()
-
-            start_gen = time.time()
-            src, dst, neg = [], [], []
-            for (u, v, w), r in generator():
-                src.append(u)
-                dst.append(v)
-                neg.append(w)
+            loss = 0.0
+            train_rmse = 0.0
+            for big_batch in chunked(generator(), gcn_batch_size * 10):
+                src, dst, neg = [], [], []
+                for (u, v, w), r in big_batch:
+                    src.append(u)
+                    dst.append(v)
+                    neg.append(w)
             #
-            total_gen = time.time() - start_gen
-            src = torch.LongTensor(src)
-            dst = torch.LongTensor(dst)
-            neg = torch.LongTensor(neg)
 
-            def evaluate(src, dst, neg):
-                model.eval()
-                sampler = dgl.contrib.sampling.NeighborSampler(
-                    g_train,
-                    gcn_batch_size,
-                    5,
-                    gcn_layers,
-                    seed_nodes=torch.arange(g_train.number_of_nodes()),
-                    prefetch=True,
-                    add_self_loop=True,
-                    shuffle=False,
-                    num_workers=self.cpu
-                )
+                src = torch.LongTensor(src)
+                dst = torch.LongTensor(dst)
+                neg = torch.LongTensor(neg)
 
-                eval_start_time = time.time()
-                with torch.no_grad():
-                    h = []
-                    for nf in sampler:
-                        h.append(model.gcn.forward(nf))
-                    h = torch.cat(h)
+                def evaluate(src, dst, neg):
+                    model.eval()
+                    sampler = dgl.contrib.sampling.NeighborSampler(
+                        g_train,
+                        gcn_batch_size,
+                        5,
+                        gcn_layers,
+                        seed_nodes=torch.arange(g_train.number_of_nodes()),
+                        prefetch=True,
+                        add_self_loop=True,
+                        shuffle=False,
+                        num_workers=self.cpu
+                    )
 
-                    score = torch.zeros(len(src))
-                    for i in range(0, len(src), batch_size):
-                        s = src[i:i + batch_size]
-                        d = dst[i:i + batch_size]
-                        n = neg[i:i + batch_size]
+                    with torch.no_grad():
+                        h = []
+                        for nf in sampler:
+                            h.append(model.gcn.forward(nf))
+                        h = torch.cat(h)
 
-                        h_src = h[s]
-                        h_dst = h[d]
-                        h_neg = h[n]
-                        d_a_b = 1.0 - (h_src * h_dst).sum(1)
-                        d_a_c = 1.0 - (h_src * h_neg).sum(1)
-                        res = F.leaky_relu(d_a_b + margin - d_a_c)
-                        score[i:i + batch_size] = res
-                    train_rmse = (score ** 2).mean().sqrt()
-                eval_total = time.time() - eval_start_time
-                return train_rmse, eval_total
+                        score = torch.zeros(len(src))
+                        for i in range(0, len(src), batch_size):
+                            s = src[i:i + batch_size]
+                            d = dst[i:i + batch_size]
+                            n = neg[i:i + batch_size]
 
-            def train(src, dst, neg):
+                            h_src = h[s]
+                            h_dst = h[d]
+                            h_neg = h[n]
+                            d_a_b = 1.0 - (h_src * h_dst).sum(1)
+                            d_a_c = 1.0 - (h_src * h_neg).sum(1)
+                            res = F.leaky_relu(d_a_b + margin - d_a_c)
+                            score[i:i + batch_size] = res
+                        train_rmse = (score ** 2).mean().sqrt()
+                    return train_rmse
 
-                shuffle_idx = torch.randperm(len(src))
-                src_shuffled = src[shuffle_idx]
-                dst_shuffled = dst[shuffle_idx]
-                neg_shuffled = neg[shuffle_idx]
+                def train(src, dst, neg):
 
-                src_batches = src_shuffled.split(gcn_batch_size)
-                dst_batches = dst_shuffled.split(gcn_batch_size)
-                neg_batches = neg_shuffled.split(gcn_batch_size)
-                model.train()
-                seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
-                sampler = dgl.contrib.sampling.NeighborSampler(
-                    g_train,  # the graph
-                    gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                    5,  # number of neighbors for each node
-                    gcn_layers,  # number of layers in GCN
-                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
-                    prefetch=True,  # whether to prefetch the NodeFlows
-                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
-                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
-                    num_workers=self.cpu,
-                )
+                    shuffle_idx = torch.randperm(len(src))
+                    src_shuffled = src[shuffle_idx]
+                    dst_shuffled = dst[shuffle_idx]
+                    neg_shuffled = neg[shuffle_idx]
 
-                # Training
-                total_loss = 0.0
-                odd_even = True
-                for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
-                    score = model.forward(nodeflow, s, d, n) if odd_even else model.forward(nodeflow, d, s, n)
-                    odd_even = not odd_even
-                    loss = score.mean()
-                    total_loss = total_loss + loss
+                    src_batches = src_shuffled.split(gcn_batch_size)
+                    dst_batches = dst_shuffled.split(gcn_batch_size)
+                    neg_batches = neg_shuffled.split(gcn_batch_size)
+                    model.train()
+                    seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
+                    sampler = dgl.contrib.sampling.NeighborSampler(
+                        g_train,  # the graph
+                        gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                        5,  # number of neighbors for each node
+                        gcn_layers,  # number of layers in GCN
+                        seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
+                        prefetch=True,  # whether to prefetch the NodeFlows
+                        add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
+                        shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
+                        num_workers=self.cpu,
+                    )
 
-                    opt.zero_grad()
-                    loss.backward()
-                    opt.step()
-                return total_loss / len(src_batches)
+                    # Training
+                    total_loss = 0.0
+                    odd_even = True
+                    for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
+                        score = model.forward(nodeflow, s, d, n) if odd_even else model.forward(nodeflow, d, s, n)
+                        odd_even = not odd_even
+                        loss = score.mean()
+                        total_loss = total_loss + loss
 
-            loss = train(src, dst, neg)
-            train_rmse, eval_total = evaluate(src, dst, neg)
+                        opt.zero_grad()
+                        loss.backward()
+                        opt.step()
+                    return total_loss / len(src_batches)
 
+                loss += train(src, dst, neg)
+                train_rmse += evaluate(src, dst, neg)
 
             total_time = time.time() - start
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
-                                               gcn_epochs) + ' Training loss: %.4f' % loss.item() + ' Training RMSE: %.4f' % train_rmse.item() + '|| Generator Time: %.1f' % total_gen + ' Eval Time: %.1f' % eval_total + ' Time Taken: %.1f' % total_time)
+                                               gcn_epochs) + ' Training loss: %.4f' % loss.item() + ' Training RMSE: %.4f' % train_rmse.item() + ' || Time Taken: %.1f' % total_time)
 
             #
         model.eval()
