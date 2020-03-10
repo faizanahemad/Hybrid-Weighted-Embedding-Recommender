@@ -118,6 +118,35 @@ class HybridGCNRec(SVDppHybrid):
                                           margin)
         return model
 
+    def __user_item_affinities_triplet_trainer_data_gen_fn__(self, user_ids, item_ids,
+                                                             user_id_to_index,
+                                                             item_id_to_index,
+                                                             affinities: List[Tuple[str, str, float]],
+                                                             hyperparams):
+
+        walk_length = 5
+        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
+        p = 1.0
+        q = hyperparams["q"] if "q" in hyperparams else 0.75
+
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        total_users = len(user_ids)
+        total_items = len(item_ids)
+        affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
+        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
+        walker = Walker(read_edgelist(affinities), p=p, q=q)
+        walker.preprocess_transition_probs()
+
+        from more_itertools import distinct_combinations
+
+        def sentences_generator():
+            g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
+            for w in g:
+                combinations = list(distinct_combinations(set(w), 2))
+                for c in combinations:
+                    yield (c[0], c[1], np.random.randint(0, total_users + total_items)), 0
+        return sentences_generator
+
     def __user_item_affinities_triplet_trainer__(self,
                                                  user_ids: List[str], item_ids: List[str],
                                                  user_item_affinities: List[Tuple[str, str, float]],
@@ -193,9 +222,9 @@ class HybridGCNRec(SVDppHybrid):
         generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
                                                                                               user_id_to_index,
                                                                                               item_id_to_index,
+                                                                                              user_item_affinities,
                                                                                               hyperparams)
 
-        generator = generate_training_samples(user_item_affinities)
         model.train()
         gc.collect()
         from more_itertools import chunked
@@ -203,7 +232,7 @@ class HybridGCNRec(SVDppHybrid):
             start = time.time()
             loss = 0.0
             train_rmse = 0.0
-            for big_batch in chunked(generator(), gcn_batch_size * 10):
+            for big_batch in chunked(generate_training_samples(), gcn_batch_size * 10):
                 src, dst, neg = [], [], []
                 for (u, v, w), r in big_batch:
                     src.append(u)

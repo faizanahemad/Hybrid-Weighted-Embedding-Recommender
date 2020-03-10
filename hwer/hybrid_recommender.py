@@ -56,33 +56,30 @@ class HybridRecommender(RecommendationBase):
         return user_vectors, item_vectors
 
     def __user_item_affinities_triplet_trainer_data_gen_fn__(self,
-                                                 user_ids: List[str], item_ids: List[str],
-                                                 user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                                 hyperparams: Dict):
+                                                             user_ids: List[str], item_ids: List[str],
+                                                             user_id_to_index: Dict[str, int],
+                                                             item_id_to_index: Dict[str, int],
+                                                             affinities: List[Tuple[str, str, float]],
+                                                             hyperparams: Dict):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         total_users = len(user_ids)
         total_items = len(item_ids)
+        affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
 
-        def generate_training_samples(affinities: List[Tuple[str, str, float]]):
-            affinities = [(user_id_to_index[i], item_id_to_index[j], r) for i, j, r in affinities]
+        def get_one_example(i, j, r):
+            distant_item = np.random.randint(0, total_users + total_items)
+            return (i, j, distant_item), 0
 
-            def get_one_example(i, j, r):
-                user = i
-                second_item = total_users + j
-                distant_item = np.random.randint(0, total_users + total_items)
-                return (user, second_item, distant_item), 0
+        def generator():
+            np.random.shuffle(affinities)
+            for i in range(0, len(affinities), batch_size * 4):
+                start = i
+                end = min(i + batch_size * 4, len(affinities))
+                generated = [get_one_example(u, v, w) for u, v, w in affinities[start:end]]
+                for g in generated:
+                    yield g
 
-            def generator():
-                for i in range(0, len(affinities), batch_size * 4):
-                    start = i
-                    end = min(i + batch_size * 4, len(affinities))
-                    generated = [get_one_example(u, v, w) for u, v, w in affinities[start:end]]
-                    for g in generated:
-                        yield g
-
-            return generator
-
-        return generate_training_samples
+        return generator
 
     def __user_item_affinities_triplet_trainer_data_gen__(self,
                                                  user_ids: List[str], item_ids: List[str],
@@ -95,8 +92,9 @@ class HybridRecommender(RecommendationBase):
         output_types = ((tf.int64, tf.int64, tf.int64), tf.float32)
         generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
                                                                                               user_id_to_index, item_id_to_index,
+                                                                                              user_item_affinities,
                                                                                               hyperparams)
-        train = tf.data.Dataset.from_generator(generate_training_samples(user_item_affinities),
+        train = tf.data.Dataset.from_generator(generate_training_samples,
                                                output_types=output_types, output_shapes=output_shapes, )
         return train
 
