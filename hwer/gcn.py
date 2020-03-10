@@ -313,6 +313,27 @@ class GraphSAGETripletEmbedding(nn.Module):
         return score
 
 
+class GraphSAGENegativeSamplingEmbedding(nn.Module):
+    def __init__(self, gcn, negative_samples=10):
+        super(GraphSAGENegativeSamplingEmbedding, self).__init__()
+
+        self.gcn = gcn
+        self.negative_samples = negative_samples
+
+    def forward(self, nf, src, dst, neg):
+        h_output = self.gcn(nf)
+        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
+        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
+        h_neg = h_output[nf.map_from_parent_nid(-1, neg, True)]
+        h_negs = h_neg[torch.randint(0, h_neg.shape[0], (h_neg.shape[0], 3))]
+        neg_loss = -1 * self.negative_samples * F.logsigmoid(
+            -1 * h_src.unsqueeze(1).expand(h_src.size(0), 1, h_src.size(1)).bmm(torch.transpose(h_negs, 1, 2))).sum(
+            1).sum(1)
+
+        pos_loss = -1 * F.logsigmoid((h_src * h_dst).sum(1))
+        return pos_loss + neg_loss
+
+
 def build_dgl_graph(ratings, total_nodes, content_vectors):
     g = dgl.DGLGraph(multigraph=True)
     g.add_nodes(total_nodes)

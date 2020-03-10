@@ -110,12 +110,11 @@ class HybridGCNRec(SVDppHybrid):
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
                                   conv_depth, g_train, triplet_vectors, margin,
                                   conv_arch, gaussian_noise):
-        from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling
+        from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling, GraphSAGENegativeSamplingEmbedding
         self.log.info("Getting Triplet Model for GCN")
-        model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
+        model = GraphSAGENegativeSamplingEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
                                                                 gcn_layers, g_train,
-                                                                conv_arch, gaussian_noise, conv_depth, triplet_vectors),
-                                          margin)
+                                                                conv_arch, gaussian_noise, conv_depth, triplet_vectors))
         return model
 
     def __user_item_affinities_triplet_trainer_data_gen_fn__(self, user_ids, item_ids,
@@ -125,11 +124,10 @@ class HybridGCNRec(SVDppHybrid):
                                                              hyperparams):
 
         walk_length = 5
-        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
+        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 100
         p = 1.0
-        q = hyperparams["q"] if "q" in hyperparams else 0.75
+        q = hyperparams["q"] if "q" in hyperparams else 1.0
 
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         total_users = len(user_ids)
         total_items = len(item_ids)
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
@@ -137,13 +135,14 @@ class HybridGCNRec(SVDppHybrid):
         walker = Walker(read_edgelist(affinities), p=p, q=q)
         walker.preprocess_transition_probs()
 
-        from more_itertools import distinct_combinations
+        from more_itertools import distinct_combinations, chunked, grouper
 
         def sentences_generator():
             g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
             for w in g:
-                combinations = list(distinct_combinations(set(w), 2))
-                for c in combinations:
+                walk = list(set(w))
+                np.random.shuffle(walk)
+                for c in grouper(walk, 2, walk[0]):
                     yield (c[0], c[1], np.random.randint(0, total_users + total_items)), 0
         return sentences_generator
 
