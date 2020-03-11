@@ -123,7 +123,7 @@ class HybridGCNRec(SVDppHybrid):
                                                              affinities: List[Tuple[str, str, float]],
                                                              hyperparams):
 
-        walk_length = 5
+        walk_length = 10
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 100
         p = 1.0
         q = hyperparams["q"] if "q" in hyperparams else 1.0
@@ -248,7 +248,7 @@ class HybridGCNRec(SVDppHybrid):
                     sampler = dgl.contrib.sampling.NeighborSampler(
                         g_train,
                         gcn_batch_size,
-                        5,
+                        10,
                         gcn_layers,
                         seed_nodes=torch.arange(g_train.number_of_nodes()),
                         prefetch=True,
@@ -276,7 +276,7 @@ class HybridGCNRec(SVDppHybrid):
                             d_a_c = 1.0 - (h_src * h_neg).sum(1)
                             res = F.leaky_relu(d_a_b + margin - d_a_c)
                             score[i:i + batch_size] = res
-                        train_rmse = (score ** 2).mean().sqrt()
+                        train_rmse = score.mean()
                     return train_rmse
 
                 def train(src, dst, neg):
@@ -294,7 +294,7 @@ class HybridGCNRec(SVDppHybrid):
                     sampler = dgl.contrib.sampling.NeighborSampler(
                         g_train,  # the graph
                         gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                        5,  # number of neighbors for each node
+                        10,  # number of neighbors for each node
                         gcn_layers,  # number of layers in GCN
                         seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
                         prefetch=True,  # whether to prefetch the NodeFlows
@@ -329,7 +329,7 @@ class HybridGCNRec(SVDppHybrid):
         sampler = dgl.contrib.sampling.NeighborSampler(
             g_train,
             gcn_batch_size,
-            5,
+            10,
             gcn_layers,
             seed_nodes=torch.arange(g_train.number_of_nodes()),
             prefetch=True,
