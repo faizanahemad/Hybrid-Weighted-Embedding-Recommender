@@ -215,13 +215,20 @@ class GraphSageWithSampling(nn.Module):
         self.proj = nn.Sequential(*proj)
 
         self.G = G
-
-        self.node_emb = nn.Embedding(G.number_of_nodes() + 1, feature_size)
+        import math
+        embedding_dim = 2 ** int(math.log2(feature_size/4))
+        self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
         if init_node_vectors is None:
-            nn.init.normal_(self.node_emb.weight, std=1 / self.feature_size)
+            nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
         else:
-            # self.node_emb.weight = nn.Parameter(init_node_vectors)
+            if embedding_dim != feature_size:
+                from sklearn.decomposition import PCA
+                init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
+        expansion = nn.Linear(embedding_dim, feature_size)
+        init_bias(expansion.bias)
+        init_weight(expansion.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1))
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -233,7 +240,7 @@ class GraphSageWithSampling(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
+            nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
