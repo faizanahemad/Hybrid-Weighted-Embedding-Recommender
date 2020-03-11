@@ -123,10 +123,10 @@ class HybridGCNRec(SVDppHybrid):
                                                              affinities: List[Tuple[str, str, float]],
                                                              hyperparams):
 
-        walk_length = 10
+        walk_length = 5
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 100
-        p = 1.0
-        q = hyperparams["q"] if "q" in hyperparams else 1.0
+        p = 0.25
+        q = hyperparams["q"] if "q" in hyperparams else 0.25
 
         total_users = len(user_ids)
         total_items = len(item_ids)
@@ -136,14 +136,29 @@ class HybridGCNRec(SVDppHybrid):
         walker.preprocess_transition_probs()
 
         from more_itertools import distinct_combinations, chunked, grouper
+        from joblib import Parallel, delayed
 
         def sentences_generator():
             g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
-            for w in g:
-                walk = list(set(w))
+
+            def iter_walk(walk):
+                data_pairs = []
+                walk = list(set(walk))
                 np.random.shuffle(walk)
                 for c in grouper(walk, 2, walk[0]):
-                    yield (c[0], c[1], np.random.randint(0, total_users + total_items)), 0
+                    data_pairs.append(((c[0], c[1], np.random.randint(0, total_users + total_items)), 0))
+                return data_pairs
+            for walks in chunked(g, 2048):
+                data_points = Parallel(n_jobs=4)(delayed(iter_walk)(walk) for walk in walks)
+                for d in data_points:
+                    for i in d:
+                        yield i
+
+            # for w in g:
+            #     walk = list(set(w))
+            #     np.random.shuffle(walk)
+            #     for c in grouper(walk, 2, walk[0]):
+            #         yield (c[0], c[1], np.random.randint(0, total_users + total_items)), 0
         return sentences_generator
 
     def __user_item_affinities_triplet_trainer__(self,

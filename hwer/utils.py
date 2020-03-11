@@ -310,14 +310,11 @@ def normalize_affinity_scores_by_user_item_bs(user_item_affinities: List[Tuple[s
     bu = {u: algo.bu[algo.trainset.to_inner_uid(u)] for u in set([u for u, i, r in user_item_affinities])}
     bi = {i: algo.bi[algo.trainset.to_inner_iid(i)] for i in set([i for u, i, r in user_item_affinities])}
     uid = [[p.uid, p.iid, p.r_ui - p.est] for p in predictions]
-    estimatates = [p.est for p in predictions]
-    estimates_2 = [p.r_ui - (mean + bu[p.uid] + bi[p.iid]) for p in predictions]
     uid = pd.DataFrame(uid, columns=["user", "item", "rating"])
     spread = max(uid["rating"].max(), np.abs(uid["rating"].min()))
     uid = list(zip(uid['user'], uid['item'], uid['rating']))
     bu = defaultdict(float, bu)
     bi = defaultdict(float, bi)
-    # assert estimatates == estimates_2
     return mean, bu, bi, spread, uid
 
 
