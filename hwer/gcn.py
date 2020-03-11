@@ -296,7 +296,7 @@ class GraphSAGERecommenderImplicit(nn.Module):
 
 
 class GraphSAGETripletEmbedding(nn.Module):
-    def __init__(self, gcn, margin=0.1):
+    def __init__(self, gcn, margin=1.0):
         super(GraphSAGETripletEmbedding, self).__init__()
 
         self.gcn = gcn
