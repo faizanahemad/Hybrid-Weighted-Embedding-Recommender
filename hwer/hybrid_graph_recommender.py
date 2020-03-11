@@ -112,7 +112,7 @@ class HybridGCNRec(SVDppHybrid):
                                   conv_arch, gaussian_noise):
         from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling, GraphSAGENegativeSamplingEmbedding
         self.log.info("Getting Triplet Model for GCN")
-        model = GraphSAGENegativeSamplingEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
+        model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
                                                                 gcn_layers, g_train,
                                                                 conv_arch, gaussian_noise, conv_depth, triplet_vectors))
         return model
@@ -123,8 +123,8 @@ class HybridGCNRec(SVDppHybrid):
                                                              affinities: List[Tuple[str, str, float]],
                                                              hyperparams):
 
-        walk_length = 5
-        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 100
+        walk_length = 3
+        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 150
         p = 0.25
         q = hyperparams["q"] if "q" in hyperparams else 0.25
 
@@ -245,7 +245,6 @@ class HybridGCNRec(SVDppHybrid):
         for epoch in range(gcn_epochs):
             start = time.time()
             loss = 0.0
-            train_rmse = 0.0
             for big_batch in chunked(generate_training_samples(), gcn_batch_size * 10):
                 src, dst, neg = [], [], []
                 for (u, v, w), r in big_batch:
@@ -257,42 +256,6 @@ class HybridGCNRec(SVDppHybrid):
                 src = torch.LongTensor(src)
                 dst = torch.LongTensor(dst)
                 neg = torch.LongTensor(neg)
-
-                def evaluate(src, dst, neg):
-                    model.eval()
-                    sampler = dgl.contrib.sampling.NeighborSampler(
-                        g_train,
-                        gcn_batch_size,
-                        10,
-                        gcn_layers,
-                        seed_nodes=torch.arange(g_train.number_of_nodes()),
-                        prefetch=True,
-                        add_self_loop=True,
-                        shuffle=False,
-                        num_workers=self.cpu
-                    )
-
-                    with torch.no_grad():
-                        h = []
-                        for nf in sampler:
-                            h.append(model.gcn.forward(nf))
-                        h = torch.cat(h)
-
-                        score = torch.zeros(len(src))
-                        for i in range(0, len(src), batch_size):
-                            s = src[i:i + batch_size]
-                            d = dst[i:i + batch_size]
-                            n = neg[i:i + batch_size]
-
-                            h_src = h[s]
-                            h_dst = h[d]
-                            h_neg = h[n]
-                            d_a_b = 1.0 - (h_src * h_dst).sum(1)
-                            d_a_c = 1.0 - (h_src * h_neg).sum(1)
-                            res = F.leaky_relu(d_a_b + margin - d_a_c)
-                            score[i:i + batch_size] = res
-                        train_rmse = score.mean()
-                    return train_rmse
 
                 def train(src, dst, neg):
 
@@ -333,11 +296,10 @@ class HybridGCNRec(SVDppHybrid):
                     return total_loss / len(src_batches)
 
                 loss += train(src, dst, neg)
-                train_rmse += evaluate(src, dst, neg)
 
             total_time = time.time() - start
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
-                                               gcn_epochs) + ' Training loss: %.4f' % loss.item() + ' Training RMSE: %.4f' % train_rmse.item() + ' || Time Taken: %.1f' % total_time)
+                                               gcn_epochs) + ' Training loss: %.4f' % loss.item() + ' || Time Taken: %.1f' % total_time)
 
             #
         model.eval()
