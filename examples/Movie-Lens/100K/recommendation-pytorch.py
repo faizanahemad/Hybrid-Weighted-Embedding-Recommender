@@ -285,3 +285,8 @@ for epoch in range(epochs):
     total_time = time.time() - start
 
     print('Epoch: %2d' % int(epoch+1), 'Training loss: %.4f ||' % loss.item(), 'Train RMSE: %.4f' % train_rmse.item(), 'Test RMSE: %.4f,' % test_rmse.item(), 'Time Taken: %.1f' % total_time)
+
+import numpy as np
+model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+params = sum([np.prod(p.size()) for p in model_parameters])
+print("Built Prediction Network, model params = %s", params)
