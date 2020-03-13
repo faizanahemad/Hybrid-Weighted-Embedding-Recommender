@@ -101,11 +101,12 @@ def ml100k_default_reader(directory):
         lambda x: " ".join(x))
     movie_extra_features[["overview", "tagline"]] = movie_extra_features[["overview", "tagline"]].fillna(" ")
     movie_extra_features["runtime"] = movie_extra_features["runtime"].fillna(movie_extra_features["runtime"].mean())
-    products = products.merge(movie_extra_features, right_on="id", left_index=True)
+    products = products.merge(movie_extra_features, right_on="id", left_index=True, how="inner")
+    products = products.set_index(keys="id", verify_integrity=True)
 
     genres = products.columns[products.dtypes == bool]
     products["title"] = products["title"] + " " + products["overview"] + " " + products["tagline"] + " " + products["keywords"]
-    products.drop(columns=["overview", "tagline", "keywords", "id"], inplace=True)
+    products.drop(columns=["overview", "tagline", "keywords"], inplace=True)
     return users, products, ratings, genres
 
 
