@@ -28,7 +28,7 @@ Interactions Modeling](https://arxiv.org/pdf/1810.12027.pdf)
 - [Factorization Meets the Neighborhood: a Multifaceted
 Collaborative Filtering Model](https://www.cs.rochester.edu/twiki/pub/Main/HarpSeminar/Factorization_Meets_the_Neighborhood-_a_Multifaceted_Collaborative_Filtering_Model.pdf)
 - [Content-Boosted Collaborative Filtering for Improved Recommendations](https://www.cs.utexas.edu/~ml/papers/cbcf-aaai-02.pdf)
-
+- [MATRIX FACTORIZATION TECHNIQUES FOR RECOMMENDER SYSTEMS](https://datajobs.com/data-science-repo/Recommender-Systems-[Netflix].pdf)
 
 
 ## Benchmarks

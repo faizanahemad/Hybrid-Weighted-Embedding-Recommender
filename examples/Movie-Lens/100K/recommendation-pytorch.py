@@ -15,7 +15,7 @@ import stanfordnlp
 # If you don't have stanfordnlp installed and the English models downloaded, please uncomment this statement
 # stanfordnlp.download('en', force=True)
 
-ml = movielens.MovieLens('ml-100k', directory="ml-100k")
+ml = movielens.MovieLens('ml-100k')
 
 
 def mix_embeddings(ndata, emb, proj):
@@ -30,38 +30,83 @@ def mix_embeddings(ndata, emb, proj):
         elif (value.dtype == torch.float32) and key in proj:
             result = proj[key](value)
             extra_repr.append(result)
-    ndata['h'] = ndata['h'] + torch.stack(extra_repr, 0).sum(0)
+    ndata['h'] = ndata['h'] + torch.stack(extra_repr, 0).mean(0)
 
 
 def init_weight(param, initializer, nonlinearity):
     initializer = getattr(nn.init, initializer)
-    if nonlinearity is not None:
+    if nonlinearity is None:
         initializer(param)
     else:
         initializer(param, nn.init.calculate_gain(nonlinearity))
 
 
 def init_bias(param):
+    # nn.init.normal_(param, 0, 0.001)
     nn.init.constant_(param, 0)
 
 
+class GaussianNoise(nn.Module):
+    """Gaussian noise regularizer.
+
+    Args:
+        sigma (float, optional): relative standard deviation used to generate the
+            noise. Relative means that it will be multiplied by the magnitude of
+            the value your are adding the noise to. This means that sigma can be
+            the same regardless of the scale of the vector.
+        is_relative_detach (bool, optional): whether to detach the variable before
+            computing the scale of the noise. If `False` then the scale of the noise
+            won't be seen as a constant but something to optimize: this will bias the
+            network to generate vectors with smaller values.
+    """
+
+    def __init__(self, sigma=0.1, is_relative_detach=True):
+        super().__init__()
+        self.sigma = sigma
+        self.is_relative_detach = is_relative_detach
+        self.noise = torch.tensor(0.0)
+
+    def forward(self, x):
+        if self.training and self.sigma != 0:
+            scale = self.sigma * x.detach() if self.is_relative_detach else self.sigma * x
+            sampled_noise = self.noise.repeat(*x.size()).normal_() * scale
+            x = x + sampled_noise
+        return x
+
+
 class GraphSageConvWithSampling(nn.Module):
-    def __init__(self, feature_size):
+    def __init__(self, feature_size, prediction_layer):
         super(GraphSageConvWithSampling, self).__init__()
 
         self.feature_size = feature_size
-        self.W = nn.Linear(feature_size * 2, feature_size)
-        init_weight(self.W.weight, 'xavier_uniform_', 'leaky_relu')
-        init_bias(self.W.bias)
+
+        layers = [GaussianNoise(gaussian_noise)]
+        for i in range(depth -1):
+            nn_layer = nn.Linear(feature_size * 2, feature_size * 2)
+            init_weight(nn_layer.weight, 'xavier_uniform_', 'leaky_relu')
+            init_bias(nn_layer.bias)
+            layers.extend([nn_layer, nn.LeakyReLU(), GaussianNoise(gaussian_noise)])
+
+        W = nn.Linear(feature_size * 2, feature_size)
+        init_bias(W.bias)
+        layers.append(W)
+        if prediction_layer:
+            init_weight(W.weight, 'xavier_uniform_', 'linear')
+        else:
+            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
+            layers.append(nn.LeakyReLU())
+        self.W = nn.Sequential(*layers)
 
     def forward(self, nodes):
         h_agg = nodes.data['h_agg']
         h = nodes.data['h']
+        hash = nodes.data['hash']
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         h_concat = torch.cat([h, h_agg], 1)
-        h_new = F.leaky_relu(self.W(h_concat))
-        return {'h': h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)}
+        h_new = self.W(h_concat)
+        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
+        return {'h': h_new}
 
 
 class GraphSageWithSampling(nn.Module):
@@ -71,7 +116,7 @@ class GraphSageWithSampling(nn.Module):
         self.feature_size = feature_size
         self.n_layers = n_layers
 
-        self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size) for _ in range(n_layers)])
+        self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size, i == n_layers - 1) for i in range(n_layers)])
 
         self.emb = nn.ModuleDict()
         self.proj = nn.ModuleDict()
@@ -79,16 +124,17 @@ class GraphSageWithSampling(nn.Module):
         for key, scheme in G.node_attr_schemes().items():
             if scheme.dtype == torch.int64:
                 n_items = G.ndata[key].max().item()
-                self.emb[key] = nn.Embedding(
+                em = nn.Embedding(
                     n_items + 1,
                     self.feature_size,
                     padding_idx=0)
-                nn.init.normal_(self.emb[key].weight, 1 / self.feature_size)
+                self.emb[key] = nn.Sequential(em, GaussianNoise(gaussian_noise))
+                nn.init.normal_(em.weight, 1 / self.feature_size)
             elif scheme.dtype == torch.float32:
                 w = nn.Linear(scheme.shape[0], self.feature_size)
                 init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
                 init_bias(w.bias)
-                self.proj[key] = nn.Sequential(w, nn.LeakyReLU())
+                self.proj[key] = nn.Sequential(w, nn.LeakyReLU(), GaussianNoise(gaussian_noise))
 
         self.G = G
 
@@ -142,23 +188,29 @@ g = ml.g
 g_train = g.edge_subgraph(g.filter_edges(lambda edges: edges.data['train']), True)
 g_train.copy_from_parent()
 g_train.readonly()
-eid_valid = g.filter_edges(lambda edges: edges.data['valid'])
 eid_test = g.filter_edges(lambda edges: edges.data['test'])
-src_valid, dst_valid = g.find_edges(eid_valid)
 src_test, dst_test = g.find_edges(eid_test)
 src, dst = g_train.all_edges()
 rating = g_train.edata['rating']
-rating_valid = g.edges[eid_valid].data['rating']
 rating_test = g.edges[eid_test].data['rating']
 
-model = GraphSAGERecommender(GraphSageWithSampling(100, 2, g_train))
-opt = torch.optim.Adam(model.parameters(), lr=0.002, weight_decay=1e-9)
-
+gaussian_noise = 0.2
 batch_size = 1024
+epochs = 50
+n_dims = 128
+weight_decay = 1e-8
+lr = 0.002
+layers = 3
+depth = 1
+
+model = GraphSAGERecommender(GraphSageWithSampling(n_dims, layers, g_train))
+opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+
 n_users = len(ml.user_ids)
 n_products = len(ml.product_ids)
 
-for epoch in range(50):
+for epoch in range(epochs):
     start = time.time()
     model.eval()
 
@@ -167,7 +219,7 @@ for epoch in range(50):
         g_train,
         batch_size,
         5,
-        2,
+        layers,
         seed_nodes=torch.arange(g.number_of_nodes()),
         prefetch=True,
         add_self_loop=True,
@@ -184,12 +236,12 @@ for epoch in range(50):
         h = torch.cat(h)
 
         # Compute validation RMSE
-        score = torch.zeros(len(src_valid))
-        for i in range(0, len(src_valid), batch_size):
-            s = src_valid[i:i + batch_size]
-            d = dst_valid[i:i + batch_size]
+        score = torch.zeros(len(src))
+        for i in range(0, len(src), batch_size):
+            s = src[i:i + batch_size]
+            d = dst[i:i + batch_size]
             score[i:i + batch_size] = (h[s] * h[d]).sum(1) + model.node_biases[s + 1] + model.node_biases[d + 1]
-        valid_rmse = ((score - rating_valid) ** 2).mean().sqrt()
+        train_rmse = ((score - rating) ** 2).mean().sqrt()
 
         # Compute test RMSE
         score = torch.zeros(len(src_test))
@@ -215,7 +267,7 @@ for epoch in range(50):
         g_train,  # the graph
         batch_size * 2,  # number of nodes to compute at a time, HACK 2
         5,  # number of neighbors for each node
-        2,  # number of layers in GCN
+        layers,  # number of layers in GCN
         seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
         prefetch=True,  # whether to prefetch the NodeFlows
         add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
@@ -233,4 +285,4 @@ for epoch in range(50):
         opt.step()
     total_time = time.time() - start
 
-    print('Epoch: %2d' % int(epoch+1), 'Training loss: %.4f ||' % loss.item(), 'Validation RMSE: %.4f' % valid_rmse.item(), 'Test RMSE: %.4f,' % test_rmse.item(), 'Time Taken: %.1f' % total_time)
+    print('Epoch: %2d' % int(epoch+1), 'Training loss: %.4f ||' % loss.item(), 'Train RMSE: %.4f' % train_rmse.item(), 'Test RMSE: %.4f,' % test_rmse.item(), 'Time Taken: %.1f' % total_time)

@@ -10,29 +10,44 @@ import tqdm
 from functools import partial
 
 
+def reduce_zip(zip):
+    try:
+        zip = int(int(zip)/100)
+    except ValueError:
+        zip = 0
+    return zip
+
+
+def reduce_year(year):
+    try:
+        year = int(int(year)/5)
+    except ValueError:
+        year = 0
+    return year
+
+
 def ml100k_default_reader(directory):
     def read_user_line(l):
         id_, age, gender, occupation, zip_ = l.strip().split('|')
-        age = np.searchsorted([10, 20, 30, 40, 50, 60], age)  # bin the ages into <20, 20-30, 30-40, ..., >60
-        return {'id': int(id_), 'gender': gender, 'age': age, 'occupation': occupation, 'zip': zip_}
+        age = np.searchsorted([20, 30, 40, 50, 60], age)  # bin the ages into <20, 20-30, 30-40, ..., >60
+        return {'id': int(id_), 'gender': gender, 'age': age, 'occupation': occupation, 'zip': reduce_zip(zip_)}
 
     def read_product_line(l):
         fields = l.strip().split('|')
         id_ = fields[0]
         title = fields[1]
         genres = fields[-19:]
-        genres = np.array(list(map(int, genres)))
 
         # extract year
         if re.match(r'.*\([0-9]{4}\)$', title):
-            year = title[-5:-1]
+            year = reduce_year(title[-5:-1])
             title = title[:-6].strip()
         else:
             year = 0
 
         data = {'id': int(id_), 'title': title, 'year': year}
         for i, g in enumerate(genres):
-            data['genre' + str(i)] = (g != 0)
+            data['genre' + str(i)] = (int(g) != 0)
         return data
 
     def read_rating_line(l):
@@ -45,13 +60,17 @@ def ml100k_default_reader(directory):
     ratings = []
 
     # read ratings
-    with open(os.path.join(directory, 'ua.base')) as f:
+    with open(os.path.join(directory, 'u1.base')) as f:
         for l in f:
             rating = read_rating_line(l)
+            rating["test"] = False
+            rating["train"] = True
             ratings.append(rating)
-    with open(os.path.join(directory, 'ua.test')) as f:
+    with open(os.path.join(directory, 'u1.test')) as f:
         for l in f:
             rating = read_rating_line(l)
+            rating["test"] = True
+            rating["train"] = False
             ratings.append(rating)
 
     ratings = pd.DataFrame(ratings)
@@ -75,22 +94,31 @@ def ml100k_default_reader(directory):
         pd.DataFrame(products)
             .set_index('id')
             .astype({'year': 'category'}))
+    movie_extra_features = pd.read_csv("movies.csv", engine="python", sep="\t")
+    movie_extra_features = movie_extra_features[["id", "overview", "keywords", "tagline", "runtime"]]
+    from ast import literal_eval
+    movie_extra_features["keywords"] = movie_extra_features["keywords"].fillna("[]").apply(literal_eval).apply(
+        lambda x: " ".join(x))
+    movie_extra_features[["overview", "tagline"]] = movie_extra_features[["overview", "tagline"]].fillna(" ")
+    movie_extra_features["runtime"] = movie_extra_features["runtime"].fillna(movie_extra_features["runtime"].mean())
+    products = products.merge(movie_extra_features, right_on="id", left_index=True)
+
     genres = products.columns[products.dtypes == bool]
+    products["title"] = products["title"] + " " + products["overview"] + " " + products["tagline"] + " " + products["keywords"]
+    products.drop(columns=["overview", "tagline", "keywords", "id"], inplace=True)
     return users, products, ratings, genres
 
 
 class MovieLens(object):
 
-    def __init__(self, dataset, directory, split_by_time=None):
+    def __init__(self, directory, split_by_time=None):
         """
 
         :param directory:
         :param split_by_time: Set this to 'timestamp' to perform a user-based temporal split of the dataset.
         """
         self.split_by_time = split_by_time
-        if dataset == 'ml-100k':
-            users, products, ratings, genres = ml100k_default_reader(directory)
-
+        users, products, ratings, genres = ml100k_default_reader(directory)
         self.genres = genres
         self.products = products
         self.users = users
@@ -125,14 +153,7 @@ class MovieLens(object):
             return df_new
 
     def data_split(self, ratings):
-        ratings = ratings.groupby('user_id', group_keys=False).apply(
-                partial(self.split_user, filter_counts=10, timestamp=self.split_by_time))
-        ratings['train'] = ratings['prob'] <= 0.8
-        ratings['valid'] = (ratings['prob'] > 0.8) & (ratings['prob'] <= 0.9)
-        ratings['test'] = ratings['prob'] > 0.9
-        ratings.drop(['prob'], axis=1, inplace=True)
         return ratings
-
 
     # process the features and build the DGL graph
     def build_graph(self):
@@ -210,11 +231,9 @@ class MovieLens(object):
     # Assign masks of training, validation and test set onto the DGL graph
     # according to the rating table.
     def generate_mask(self):
-        valid_tensor = torch.from_numpy(self.ratings['valid'].values.astype('uint8'))
         test_tensor = torch.from_numpy(self.ratings['test'].values.astype('uint8'))
         train_tensor = torch.from_numpy(self.ratings['train'].values.astype('uint8'))
         edge_data = {
-                'valid': valid_tensor,
                 'test': test_tensor,
                 'train': train_tensor,
                 }
@@ -225,13 +244,10 @@ class MovieLens(object):
     # Generate the list of products for each user in training/validation/test set.
     def generate_candidates(self):
         self.p_train = []
-        self.p_valid = []
         self.p_test = []
         for uid in tqdm.tqdm(self.user_ids):
             user_ratings = self.ratings[self.ratings['user_id'] == uid]
             self.p_train.append(np.array(
                 [self.product_ids_invmap[i] for i in user_ratings[user_ratings['train']]['product_id'].values]))
-            self.p_valid.append(np.array(
-                [self.product_ids_invmap[i] for i in user_ratings[user_ratings['valid']]['product_id'].values]))
             self.p_test.append(np.array(
                 [self.product_ids_invmap[i] for i in user_ratings[user_ratings['test']]['product_id'].values]))
