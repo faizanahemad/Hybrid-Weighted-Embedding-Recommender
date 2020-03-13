@@ -66,9 +66,10 @@ def define_search_space(objective, starting_params):
         'epochs': hp.quniform('epochs',
                               prediction["epochs"] - 20,
                               prediction["epochs"] + 20, 5),
-        'kernel_l2': hp.choice('kernel_l2', [0.0, hp.qloguniform('kernel_l2_choice', np.log(1e-9), np.log(1e-6), 1e-9)]),
-        'batch_size': hp.qloguniform('batch_size', np.log(512), np.log(2048), 512),
-        'conv_depth': hp.quniform('conv_depth', 1, 6, 1),
+        'kernel_l2': hp.choice('kernel_l2', [0.0, hp.qloguniform('kernel_l2_choice', np.log(1e-9), np.log(1e-5), 5e-9)]),
+        'batch_size': hp.qloguniform('batch_size', np.log(512), np.log(1023), 512),
+        # 'batch_size': hp.choice('batch_size', [512]),
+        'conv_depth': hp.qlognormal('conv_depth', np.log(prediction["conv_depth"]),0.5 * prediction["conv_depth"], 1),
         'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(prediction["gaussian_noise"]),
                                        0.5 * prediction["gaussian_noise"], 0.005),
         'network_depth': hp.quniform('network_depth', 2, prediction['network_depth'] + 2, 1),
@@ -156,6 +157,7 @@ def print_trial_details(trials):
         if trial['result']['status'] == 'ok':
             loss = trial['result']['loss']
             val = dict(copy.deepcopy(trial['misc']['vals']))
+            val = {k: v[0] if len(v)>0 else "-" for k, v in val.items()}
             val['loss'] = loss
             vals.append(val)
             if loss < best_loss:
