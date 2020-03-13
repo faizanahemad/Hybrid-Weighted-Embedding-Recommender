@@ -100,7 +100,6 @@ class GraphSageConvWithSampling(nn.Module):
     def forward(self, nodes):
         h_agg = nodes.data['h_agg']
         h = nodes.data['h']
-        hash = nodes.data['hash']
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         h_concat = torch.cat([h, h_agg], 1)
