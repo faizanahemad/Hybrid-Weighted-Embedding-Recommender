@@ -194,11 +194,11 @@ src, dst = g_train.all_edges()
 rating = g_train.edata['rating']
 rating_test = g.edges[eid_test].data['rating']
 
-gaussian_noise = 0.2
+gaussian_noise = 0.25
 batch_size = 1024
 epochs = 50
 n_dims = 128
-weight_decay = 1e-8
+weight_decay = 1e-7
 lr = 0.002
 layers = 3
 depth = 1
