@@ -18,7 +18,7 @@ import stanfordnlp
 ml = movielens.MovieLens('ml-100k')
 
 
-def mix_embeddings(ndata, emb, proj):
+def mix_embeddings(ndata, emb, proj, dense):
     """Adds external (categorical and numeric) features into node representation G.ndata['h']"""
     extra_repr = []
     for key, value in ndata.items():
@@ -30,82 +30,22 @@ def mix_embeddings(ndata, emb, proj):
         elif (value.dtype == torch.float32) and key in proj:
             result = proj[key](value)
             extra_repr.append(result)
-    ndata['h'] = ndata['h'] + torch.stack(extra_repr, 0).mean(0)
+    ndata['h'] = ndata['h'] + dense(torch.stack(extra_repr, 0).sum(0))
 
 
-def init_weight(param, initializer, nonlinearity):
+def init_weight(param, initializer, nonlinearity, nonlinearity_param=None):
     initializer = getattr(nn.init, initializer)
     if nonlinearity is None:
         initializer(param)
     else:
-        initializer(param, nn.init.calculate_gain(nonlinearity))
+        initializer(param, nn.init.calculate_gain(nonlinearity, nonlinearity_param))
 
 
 def init_bias(param):
-    # nn.init.normal_(param, 0, 0.001)
-    nn.init.constant_(param, 0)
-
-
-class GaussianNoise(nn.Module):
-    """Gaussian noise regularizer.
-
-    Args:
-        sigma (float, optional): relative standard deviation used to generate the
-            noise. Relative means that it will be multiplied by the magnitude of
-            the value your are adding the noise to. This means that sigma can be
-            the same regardless of the scale of the vector.
-        is_relative_detach (bool, optional): whether to detach the variable before
-            computing the scale of the noise. If `False` then the scale of the noise
-            won't be seen as a constant but something to optimize: this will bias the
-            network to generate vectors with smaller values.
-    """
-
-    def __init__(self, sigma=0.1, is_relative_detach=True):
-        super().__init__()
-        self.sigma = sigma
-        self.is_relative_detach = is_relative_detach
-        self.noise = torch.tensor(0.0)
-
-    def forward(self, x):
-        if self.training and self.sigma != 0:
-            scale = self.sigma * x.detach() if self.is_relative_detach else self.sigma * x
-            sampled_noise = self.noise.repeat(*x.size()).normal_() * scale
-            x = x + sampled_noise
-        return x
-
-
-class GraphSageConvWithSampling(nn.Module):
-    def __init__(self, feature_size, prediction_layer):
-        super(GraphSageConvWithSampling, self).__init__()
-
-        self.feature_size = feature_size
-
-        layers = [GaussianNoise(gaussian_noise)]
-        for i in range(depth -1):
-            nn_layer = nn.Linear(feature_size * 2, feature_size * 2)
-            init_weight(nn_layer.weight, 'xavier_uniform_', 'leaky_relu')
-            init_bias(nn_layer.bias)
-            layers.extend([nn_layer, nn.LeakyReLU(), GaussianNoise(gaussian_noise)])
-
-        W = nn.Linear(feature_size * 2, feature_size)
-        init_bias(W.bias)
-        layers.append(W)
-        if prediction_layer:
-            init_weight(W.weight, 'xavier_uniform_', 'linear')
-        else:
-            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu')
-            layers.append(nn.LeakyReLU())
-        self.W = nn.Sequential(*layers)
-
-    def forward(self, nodes):
-        h_agg = nodes.data['h_agg']
-        h = nodes.data['h']
-        w = nodes.data['w'][:, None]
-        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
-        h_concat = torch.cat([h, h_agg], 1)
-        h_new = self.W(h_concat)
-        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
-        return {'h': h_new}
+    nn.init.normal_(param, 0, 0.001)
+    
+from hwer.gcn import GaussianNoise
+from hwer.gcn import GraphSageConvWithSamplingBase as GraphSageConvWithSampling
 
 
 class GraphSageWithSampling(nn.Module):
@@ -115,10 +55,22 @@ class GraphSageWithSampling(nn.Module):
         self.feature_size = feature_size
         self.n_layers = n_layers
 
-        self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size, i == n_layers - 1) for i in range(n_layers)])
-
+        self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size, i == n_layers - 1, gaussian_noise, conv_depth) for i in range(n_layers)])
+        noise = GaussianNoise(gaussian_noise)
         self.emb = nn.ModuleDict()
         self.proj = nn.ModuleDict()
+        
+        w1 = nn.Linear(feature_size, feature_size)
+
+        dense = [w1, nn.LeakyReLU(negative_slope=0.1), noise]
+        init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_bias(w1.bias)
+        
+        w = nn.Linear(feature_size, feature_size)
+        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_bias(w.bias)
+        dense.extend([w, nn.LeakyReLU(negative_slope=0.1)])
+        self.dense = nn.Sequential(*dense)
 
         for key, scheme in G.node_attr_schemes().items():
             if scheme.dtype == torch.int64:
@@ -136,9 +88,14 @@ class GraphSageWithSampling(nn.Module):
                 self.proj[key] = nn.Sequential(w, nn.LeakyReLU(), GaussianNoise(gaussian_noise))
 
         self.G = G
-
-        self.node_emb = nn.Embedding(G.number_of_nodes() + 1, feature_size)
-        nn.init.normal_(self.node_emb.weight, std=1 / self.feature_size)
+        import math
+        embedding_dim = 2 ** int(math.log2(feature_size/4))
+        expansion = nn.Linear(embedding_dim, feature_size)
+        init_bias(expansion.bias)
+        init_weight(expansion.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1))
+        self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
+        nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -150,9 +107,9 @@ class GraphSageWithSampling(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
+            nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
-            mix_embeddings(nf.layers[i].data, model.gcn.emb, model.gcn.proj)
+            mix_embeddings(nf.layers[i].data, model.gcn.emb, model.gcn.proj, model.gcn.dense)
         if self.n_layers == 0:
             return nf.layers[i].data['h']
         for i in range(self.n_layers):
@@ -193,14 +150,14 @@ src, dst = g_train.all_edges()
 rating = g_train.edata['rating']
 rating_test = g.edges[eid_test].data['rating']
 
-gaussian_noise = 0.25
-batch_size = 1024
-epochs = 50
+gaussian_noise = 0.2
+batch_size = 512
+epochs = 100
 n_dims = 128
-weight_decay = 1e-7
-lr = 0.002
+weight_decay = 1e-8
+lr = 0.001
 layers = 3
-depth = 1
+conv_depth = 2
 
 model = GraphSAGERecommender(GraphSageWithSampling(n_dims, layers, g_train))
 opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
