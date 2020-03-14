@@ -135,7 +135,7 @@ class HybridGCNRec(SVDppHybrid):
         walker = Walker(read_edgelist(affinities), p=p, q=q)
         walker.preprocess_transition_probs()
 
-        from more_itertools import distinct_combinations, chunked, grouper
+        from more_itertools import distinct_combinations, chunked, grouper, interleave_longest
         from joblib import Parallel, delayed
 
         def sentences_generator():
@@ -148,17 +148,20 @@ class HybridGCNRec(SVDppHybrid):
                 for c in grouper(walk, 2, walk[0]):
                     data_pairs.append(((c[0], c[1], np.random.randint(0, total_users + total_items)), 0))
                 return data_pairs
-            for walks in chunked(g, 2048):
-                data_points = Parallel(n_jobs=4)(delayed(iter_walk)(walk) for walk in walks)
-                for d in data_points:
-                    for i in d:
-                        yield i
 
-            # for w in g:
-            #     walk = list(set(w))
-            #     np.random.shuffle(walk)
-            #     for c in grouper(walk, 2, walk[0]):
-            #         yield (c[0], c[1], np.random.randint(0, total_users + total_items)), 0
+            def node2vec_generator():
+                for walks in chunked(g, 2048):
+                    data_points = Parallel(n_jobs=4)(delayed(iter_walk)(walk) for walk in walks)
+                    for d in data_points:
+                        for i in d:
+                            yield i
+
+            def affinities_generator():
+                np.random.shuffle(affinities)
+                for i, j, r in affinities:
+                    yield (i, j, np.random.randint(0, total_users + total_items)), 0
+            return interleave_longest(node2vec_generator(), affinities_generator())
+
         return sentences_generator
 
     def __user_item_affinities_triplet_trainer__(self,
