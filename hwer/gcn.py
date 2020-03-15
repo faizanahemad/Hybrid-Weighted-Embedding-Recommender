@@ -143,7 +143,6 @@ class GraphSageConvWithSamplingBase(nn.Module):
         return self.post_process(h_concat, h, h_agg)
 
 
-
 class GraphSageWithSampling(nn.Module):
     def __init__(self, n_content_dims, feature_size, n_layers, G,
                  conv_arch, gaussian_noise, conv_depth,
@@ -153,9 +152,9 @@ class GraphSageWithSampling(nn.Module):
         self.feature_size = feature_size
         self.n_layers = n_layers
         if conv_arch == 0:
-            GraphSageConvWithSampling = GraphSageConvWithSamplingV2
+            GraphSageConvWithSampling = GraphSageConvWithSamplingBase
         elif conv_arch == 3:
-            GraphSageConvWithSampling = GraphSageConvWithSamplingV4
+            GraphSageConvWithSampling = GraphSageConvWithSamplingV3
         else:
             GraphSageConvWithSampling = GraphSageConvWithSamplingVanilla
             conv_depth = 1
@@ -368,5 +367,3 @@ class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingBase):
             init_bias(W_out.bias)
             self.W_out = nn.Sequential(GaussianNoise(gaussian_noise), W_out, nn.LeakyReLU(negative_slope=0.1),
                                        LinearResnet(feature_size, feature_size, gaussian_noise))
-
-
