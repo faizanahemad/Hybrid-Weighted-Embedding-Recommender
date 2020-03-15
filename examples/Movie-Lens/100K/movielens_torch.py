@@ -60,6 +60,7 @@ def ml100k_default_reader(directory):
     ratings = []
 
     # read ratings
+    print("Current dir = ", os.getcwd())
     with open(os.path.join(directory, 'u1.base')) as f:
         for l in f:
             rating = read_rating_line(l)

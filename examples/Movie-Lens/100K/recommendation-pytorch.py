@@ -71,25 +71,28 @@ class GraphSageWithSampling(nn.Module):
         init_bias(w.bias)
         dense.extend([w, nn.LeakyReLU(negative_slope=0.1)])
         self.dense = nn.Sequential(*dense)
-
+        import math
+        embedding_dim = 2 ** int(math.log2(feature_size/4))
         for key, scheme in G.node_attr_schemes().items():
             if scheme.dtype == torch.int64:
                 n_items = G.ndata[key].max().item()
+                w = nn.Linear(embedding_dim, self.feature_size)
+                init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+                init_bias(w.bias)
                 em = nn.Embedding(
                     n_items + 1,
-                    self.feature_size,
+                    embedding_dim,
                     padding_idx=0)
-                self.emb[key] = nn.Sequential(em, GaussianNoise(gaussian_noise))
-                nn.init.normal_(em.weight, 1 / self.feature_size)
+                self.emb[key] = nn.Sequential(em, GaussianNoise(gaussian_noise), w, nn.LeakyReLU(negative_slope=0.1))
+                nn.init.normal_(em.weight, 1 / embedding_dim)
             elif scheme.dtype == torch.float32:
                 w = nn.Linear(scheme.shape[0], self.feature_size)
-                init_weight(w.weight, 'xavier_uniform_', 'leaky_relu')
+                init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
                 init_bias(w.bias)
-                self.proj[key] = nn.Sequential(w, nn.LeakyReLU(), GaussianNoise(gaussian_noise))
+                self.proj[key] = nn.Sequential(w, nn.LeakyReLU(negative_slope=0.1), GaussianNoise(gaussian_noise))
 
         self.G = G
-        import math
-        embedding_dim = 2 ** int(math.log2(feature_size/4))
+        
         expansion = nn.Linear(embedding_dim, feature_size)
         init_bias(expansion.bias)
         init_weight(expansion.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
@@ -150,17 +153,27 @@ src, dst = g_train.all_edges()
 rating = g_train.edata['rating']
 rating_test = g.edges[eid_test].data['rating']
 
-gaussian_noise = 0.2
+gaussian_noise = 0.3
 batch_size = 512
 epochs = 100
 n_dims = 128
-weight_decay = 1e-8
-lr = 0.001
+weight_decay = 2e-8
+lr = 0.05
 layers = 3
 conv_depth = 2
 
 model = GraphSAGERecommender(GraphSageWithSampling(n_dims, layers, g_train))
-opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+# opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+
+import numpy as np
+model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+params = sum([np.prod(p.size()) for p in model_parameters])
+print("Built Prediction Network, model params = %s", params)
+
+opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9, nesterov=True)
+scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
+                                                steps_per_epoch=int(np.ceil(len(rating) / batch_size)),
+                                                div_factor=25, final_div_factor=100)
 
 
 n_users = len(ml.user_ids)
@@ -243,7 +256,6 @@ for epoch in range(epochs):
 
     print('Epoch: %2d' % int(epoch+1), 'Training loss: %.4f ||' % loss.item(), 'Train RMSE: %.4f' % train_rmse.item(), 'Test RMSE: %.4f,' % test_rmse.item(), 'Time Taken: %.1f' % total_time)
 
-import numpy as np
-model_parameters = filter(lambda p: p.requires_grad, model.parameters())
-params = sum([np.prod(p.size()) for p in model_parameters])
-print("Built Prediction Network, model params = %s", params)
+
+# Built Prediction Network, model params = %s 1967874
+print('Train RMSE: %.4f' % train_rmse.item(), 'Test RMSE: %.4f,' % test_rmse.item())
