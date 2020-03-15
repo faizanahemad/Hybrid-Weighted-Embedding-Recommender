@@ -143,37 +143,6 @@ class GraphSageConvWithSamplingBase(nn.Module):
         return self.post_process(h_concat, h, h_agg)
 
 
-class GraphSageConvWithSamplingV2(GraphSageConvWithSamplingBase):
-    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV2, self).__init__(feature_size, prediction_layer, gaussian_noise, depth)
-
-        self.feature_size = feature_size
-
-        #
-        noise = GaussianNoise(gaussian_noise)
-        self.noise = noise
-        Wagg_1 = nn.Linear(feature_size, feature_size)
-        Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1)]
-        self.Wagg = nn.Sequential(*Wagg)
-
-        Wh1 = nn.Linear(feature_size, feature_size)
-        Wh = [Wh1, nn.LeakyReLU(negative_slope=0.1)]
-        self.Wh = nn.Sequential(*Wh)
-
-        init_bias(Wh1.bias)
-        init_bias(Wagg_1.bias)
-        init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-        init_weight(Wh1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-
-        #
-    def process_neighbourhood_data(self, h_agg):
-        return self.Wagg(h_agg)
-
-    def process_node_data(self, h):
-        h = self.noise(h)
-        h = self.Wh(h)
-        return h
-
 
 class GraphSageWithSampling(nn.Module):
     def __init__(self, n_content_dims, feature_size, n_layers, G,
@@ -184,12 +153,8 @@ class GraphSageWithSampling(nn.Module):
         self.feature_size = feature_size
         self.n_layers = n_layers
         if conv_arch == 0:
-            GraphSageConvWithSampling = GraphSageConvWithSamplingBase
-        elif conv_arch == 2:
             GraphSageConvWithSampling = GraphSageConvWithSamplingV2
         elif conv_arch == 3:
-            GraphSageConvWithSampling = GraphSageConvWithSamplingV3
-        elif conv_arch == 4:
             GraphSageConvWithSampling = GraphSageConvWithSamplingV4
         else:
             GraphSageConvWithSampling = GraphSageConvWithSamplingVanilla
@@ -205,7 +170,7 @@ class GraphSageWithSampling(nn.Module):
         proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise]
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(w1.bias)
-        if conv_arch == 3 or conv_arch == 4:
+        if conv_arch == 3:
             proj.append(LinearResnet(n_content_dims, feature_size, gaussian_noise))
         else:
             w = nn.Linear(n_content_dims, feature_size)
@@ -404,32 +369,4 @@ class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingBase):
             self.W_out = nn.Sequential(GaussianNoise(gaussian_noise), W_out, nn.LeakyReLU(negative_slope=0.1),
                                        LinearResnet(feature_size, feature_size, gaussian_noise))
 
-
-class GraphSageConvWithSamplingV4(GraphSageConvWithSamplingV3):
-    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV4, self).__init__(feature_size, prediction_layer, gaussian_noise, depth)
-
-        self.feature_size = feature_size
-
-        #
-        noise = GaussianNoise(gaussian_noise)
-        self.noise = noise
-
-        Wagg_1 = nn.Linear(feature_size, feature_size)
-        init_bias(Wagg_1.bias)
-        init_weight(Wagg_1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-        Wagg = [Wagg_1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size, feature_size, gaussian_noise)]
-        self.Wagg = nn.Sequential(*Wagg)
-
-        Wh1 = nn.Linear(feature_size, feature_size)
-        Wh = [Wh1, nn.LeakyReLU(negative_slope=0.1), LinearResnet(feature_size, feature_size, gaussian_noise)]
-        self.Wh = nn.Sequential(*Wh)
-
-        init_bias(Wh1.bias)
-        init_weight(Wh1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-
-    def process_node_data(self, h):
-        h = self.noise(h)
-        h = self.Wh(h)
-        return h
 

@@ -37,8 +37,6 @@ def init_args():
     ap.add_argument('--dataset', type=str, default="100K", metavar='N',
                     choices=["100K", "1M", "20M"],
                     help='')
-    ap.add_argument('--use_content', type=str2bool, default=False, metavar='N',
-                    help='')
     ap.add_argument('--conv_arch', type=int, default=1, metavar='N',
                     choices=[-1, 0, 1, 2, 3, 4],
                     help='')
@@ -47,7 +45,6 @@ def init_args():
     objective = args["objective"]
     dataset = args["dataset"]
     conv_arch = int(args["conv_arch"])
-    use_content = args["use_content"]
-    hyperparamters_dict = get_best_params(dataset, conv_arch, use_content)
+    hyperparamters_dict = get_best_params(dataset, conv_arch)
     params = copy.deepcopy(hyperparamters_dict[algo])
     return params, dataset, objective, algo

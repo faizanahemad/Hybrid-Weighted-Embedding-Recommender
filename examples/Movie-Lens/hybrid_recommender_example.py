@@ -30,8 +30,6 @@ if __name__ == '__main__':
     ap.add_argument('--conv_arch', type=int, default=1, metavar='N',
                     choices=[-1, 0, 1, 2, 3, 4],
                     help='')
-    ap.add_argument('--use_content', type=str2bool, default=False, metavar='N',
-                    help='')
     ap.add_argument('--enable_kfold', type=str2bool, default=False, metavar='N',
                     help='')
     ap.add_argument('--enable_baselines', type=str2bool, default=False, metavar='N',
@@ -42,8 +40,7 @@ if __name__ == '__main__':
     conv_arch = int(args["conv_arch"])
     enable_kfold = args["enable_kfold"]
     enable_baselines = args["enable_baselines"]
-    use_content = args["use_content"]
-    hyperparamters_dict = get_best_params(dataset, conv_arch, use_content)
+    hyperparamters_dict = get_best_params(dataset, conv_arch)
 
     df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = build_dataset(dataset, fold=1)
     #

@@ -4,20 +4,20 @@ import argparse
 from pprint import pprint
 
 
-def read_params(location, dataset, algo, use_content):
+def read_params(location, dataset, algo):
     import importlib
     pkg = importlib.import_module('best_params')
     loc = os.path.join(location, "%s_%s.json" %(algo, dataset))
     if dataset == "100K":
         if algo == "gcn":
-            return pkg.params_gcn_100K if use_content else pkg.params_gcn_100K_no_content
+            return pkg.params_gcn_100K
         if algo == "svdpp":
-            return pkg.params_svdpp_100K if use_content else pkg.params_svdpp_100K_no_content
+            return pkg.params_svdpp_100K
     if dataset == "1M":
         if algo == "gcn":
-            return pkg.params_gcn_1M if use_content else pkg.params_gcn_1M_no_content
+            return pkg.params_gcn_1M
         if algo == "svdpp":
-            return pkg.params_svdpp_1M if use_content else pkg.params_svdpp_1M_no_content
+            return pkg.params_svdpp_1M
     if dataset == "20M":
         if algo == "gcn":
             pass
@@ -29,8 +29,8 @@ def fetch_content_params():
     return dict(n_dims=64, combining_factor=0.1, knn_params=knn_params)
 
 
-def fetch_gcn_params(dataset, algo, conv_arch, use_content):
-    p = read_params("best_params/", dataset, algo, use_content)
+def fetch_gcn_params(dataset, algo, conv_arch):
+    p = read_params("best_params/", dataset, algo)
     p = p[conv_arch]
     p["knn_params"] = knn_params
     p["collaborative_params"]["user_item_params"]["conv_arch"] = conv_arch
@@ -38,7 +38,7 @@ def fetch_gcn_params(dataset, algo, conv_arch, use_content):
 
     p["collaborative_params"]["user_item_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
-    p["collaborative_params"]["prediction_network_params"]["use_content"] = use_content
+    p["collaborative_params"]["prediction_network_params"]["use_content"] = True
     p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_gcn
 
     p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_node2vec if "enable_gcn" not in \
@@ -53,24 +53,24 @@ def fetch_gcn_params(dataset, algo, conv_arch, use_content):
     return p
 
 
-def fetch_svdpp_params(dataset, use_content):
-    p = read_params("best_params/", dataset, "svdpp", use_content)
+def fetch_svdpp_params(dataset):
+    p = read_params("best_params/", dataset, "svdpp")
     p["knn_params"] = knn_params
     p["collaborative_params"]["user_item_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
-    p["collaborative_params"]["prediction_network_params"]["use_content"] = use_content
+    p["collaborative_params"]["prediction_network_params"]["use_content"] = True
     return p
 
 
-def get_best_params(dataset, gcn_conv_variant, use_content):
+def get_best_params(dataset, gcn_conv_variant):
 
     hyperparameter_content = fetch_content_params()
 
-    hyperparameters_svdpp = fetch_svdpp_params(dataset, use_content)
+    hyperparameters_svdpp = fetch_svdpp_params(dataset)
 
-    hyperparameters_gcn = fetch_gcn_params(dataset, "gcn", gcn_conv_variant, use_content)
+    hyperparameters_gcn = fetch_gcn_params(dataset, "gcn", gcn_conv_variant)
 
-    hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20, "reg_all": 0.025},
+    hyperparameters_surprise = {"svdpp": {"n_factors": 64, "n_epochs": 40, "reg_all": 0.1},
                                 "svd": {"biased": True, "n_factors": 20},
                                 "algos": ["svdpp"]}
     hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn,
@@ -95,8 +95,5 @@ if __name__ == '__main__':
     args = vars(ap.parse_args())
     dataset = args['dataset']
     from hwer.utils import str2bool
-    ap.add_argument('--use_content', type=str2bool, default=False, metavar='N',
-                    help='')
-    use_content = args["use_content"]
     algo = args['algo']
-    pprint(read_params("best_params/", dataset, algo, use_content))
+    pprint(read_params("best_params/", dataset, algo))
