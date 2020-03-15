@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import dgl
 import dgl.function as FN
 import time
+import argparse
 
 # Load Pytorch as backend
 dgl.load_backend('pytorch')
@@ -14,8 +15,12 @@ import stanfordnlp
 
 # If you don't have stanfordnlp installed and the English models downloaded, please uncomment this statement
 # stanfordnlp.download('en', force=True)
-
-ml = movielens.MovieLens('ml-100k')
+ap = argparse.ArgumentParser()
+ap.add_argument('--data', type=str, metavar='N', required=True,
+                    help='MovieLens 100K data location')
+args = vars(ap.parse_args())
+data = args["data"]
+ml = movielens.MovieLens(data)
 
 
 def mix_embeddings(ndata, emb, proj, dense):
@@ -65,14 +70,10 @@ class GraphSageWithSampling(nn.Module):
         dense = [w1, nn.LeakyReLU(negative_slope=0.1), noise]
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(w1.bias)
-        
-        w = nn.Linear(feature_size, feature_size)
-        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-        init_bias(w.bias)
-        dense.extend([w, nn.LeakyReLU(negative_slope=0.1)])
+
         self.dense = nn.Sequential(*dense)
         import math
-        embedding_dim = 2 ** int(math.log2(feature_size/4))
+        embedding_dim = 2 ** int(math.log2(feature_size/8))
         for key, scheme in G.node_attr_schemes().items():
             if scheme.dtype == torch.int64:
                 n_items = G.ndata[key].max().item()
@@ -86,10 +87,16 @@ class GraphSageWithSampling(nn.Module):
                 self.emb[key] = nn.Sequential(em, GaussianNoise(gaussian_noise), w, nn.LeakyReLU(negative_slope=0.1))
                 nn.init.normal_(em.weight, 1 / embedding_dim)
             elif scheme.dtype == torch.float32:
-                w = nn.Linear(scheme.shape[0], self.feature_size)
-                init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-                init_bias(w.bias)
-                self.proj[key] = nn.Sequential(w, nn.LeakyReLU(negative_slope=0.1), GaussianNoise(gaussian_noise))
+                w0 = nn.Linear(scheme.shape[0], embedding_dim)
+                init_weight(w0.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+                init_bias(w0.bias)
+
+                w1 = nn.Linear(embedding_dim, self.feature_size)
+                init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+                init_bias(w1.bias)
+
+                self.proj[key] = nn.Sequential(w0, nn.LeakyReLU(negative_slope=0.1), GaussianNoise(gaussian_noise),
+                                               w1, nn.LeakyReLU(negative_slope=0.1), GaussianNoise(gaussian_noise),)
 
         self.G = G
         
@@ -166,9 +173,9 @@ model = GraphSAGERecommender(GraphSageWithSampling(n_dims, layers, g_train))
 # opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
 import numpy as np
-model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
 params = sum([np.prod(p.size()) for p in model_parameters])
-print("Built Prediction Network, model params = %s", params)
+print("Built Prediction Network, model params = ", params)
 
 opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9, nesterov=True)
 scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
