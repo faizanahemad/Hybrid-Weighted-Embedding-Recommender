@@ -243,6 +243,9 @@ class HybridGCNRec(SVDppHybrid):
                                                                                               hyperparams)
 
         model.train()
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.log.info("Built KNN Network, model params = %s", params)
         gc.collect()
         from more_itertools import chunked
         for epoch in range(gcn_epochs):
@@ -261,6 +264,8 @@ class HybridGCNRec(SVDppHybrid):
                 neg = torch.LongTensor(neg)
 
                 def train(src, dst, neg):
+                    import gc
+                    gc.collect()
 
                     shuffle_idx = torch.randperm(len(src))
                     src_shuffled = src[shuffle_idx]
@@ -275,7 +280,7 @@ class HybridGCNRec(SVDppHybrid):
                     sampler = dgl.contrib.sampling.NeighborSampler(
                         g_train,  # the graph
                         gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                        10,  # number of neighbors for each node
+                        5,  # number of neighbors for each node
                         gcn_layers,  # number of layers in GCN
                         seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
                         prefetch=True,  # whether to prefetch the NodeFlows
@@ -309,7 +314,7 @@ class HybridGCNRec(SVDppHybrid):
         sampler = dgl.contrib.sampling.NeighborSampler(
             g_train,
             gcn_batch_size,
-            10,
+            5,
             gcn_layers,
             seed_nodes=torch.arange(g_train.number_of_nodes()),
             prefetch=True,
@@ -474,6 +479,8 @@ class HybridGCNRec(SVDppHybrid):
             model.train()
 
             def train(src, dst, rating):
+                import gc
+                gc.collect()
                 shuffle_idx = torch.randperm(len(src))
                 src_shuffled = src[shuffle_idx]
                 dst_shuffled = dst[shuffle_idx]
@@ -549,7 +556,7 @@ class HybridGCNRec(SVDppHybrid):
         prediction_artifacts = {"vectors": h, "mu": mu,
                                 "bias": bias,
                                 "total_users": total_users}
-        model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
         params = sum([np.prod(p.size()) for p in model_parameters])
         self.log.info("Built Prediction Network, model params = %s", params)
         gc.collect()

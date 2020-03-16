@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 import dgl
 import dgl.function as FN
 dgl.load_backend('pytorch')
@@ -180,21 +181,34 @@ class TrueGraphConvWithSamplingBase(nn.Module):
 
 
 class TrueGraphLearnedHasingFilter(nn.Module):
-    def __init__(self, n_filters, n_channels, n_hases):
+    def __init__(self, n_filters, n_channels, n_hashes):
         super(TrueGraphLearnedHasingFilter, self).__init__()
-        self.selectors = torch.tensor(torch.randn((n_filters, 2 * n_channels, n_hases), requires_grad=True))
-        self.filters = torch.tensor(torch.randn((n_filters, n_channels, n_hases)), requires_grad=True)
+        from torch.nn.parameter import Parameter
+        self.selectors = Parameter(torch.Tensor(n_filters, 2 * n_channels, n_hashes), requires_grad=True)
+        self.filters = Parameter(torch.Tensor(n_filters, n_channels, n_hashes), requires_grad=True)
+        fan_in, fan_out = nn.init._calculate_fan_in_and_fan_out(self.filters)
+        self.fan_in = fan_in
+        self.fan_out = fan_out
+        self.n_filters = n_filters
+        self.n_channels = n_channels
+        self.n_hashes = n_hashes
         init_weight(self.selectors, 'xavier_uniform_', 'linear', 0.1)
-        init_weight(self.filters, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_weight(self.filters, 'xavier_uniform_', 'linear', 0.1)
 
     def forward(self, b_n_2c, b_n_c):
-        b_n_2c = b_n_2c.unsqueeze(1)
+        b_n_2c = b_n_2c.unsqueeze(1).unsqueeze(1)
         selections = torch.matmul(b_n_2c, self.selectors)
-        selections = torch.softmax(selections, dim=3)
+        selections = torch.softmax(selections, dim=3).squeeze(2)
 
-        b_n_c = b_n_c.unsqueeze(1)
-        filtered = F.leaky_relu((selections * torch.matmul(b_n_c, self.filters)).sum(3).sum(2), 0.1)
+        b_n_c = b_n_c.unsqueeze(1).unsqueeze(1)
+        filtered = selections * torch.matmul(b_n_c, self.filters).squeeze(2)
+        filtered = filtered.sum(2)
         return filtered
+
+    def extra_repr(self):
+        return 'n_filters={}, n_channels={}, n_hashes={}, parameters = {}'.format(
+            self.n_filters, self.n_channels, self.n_hashes, np.prod(self.selectors.shape)+np.prod(self.filters.shape)
+        )
 
 
 class GraphSageWithSampling(nn.Module):
@@ -269,13 +283,14 @@ class GraphSageWithSampling(nn.Module):
                 h_src = edges.src['h']
                 h_dst = edges.dst['h']
                 h_s_d = torch.cat((h_dst, h_src), dim=1)
-                return {'h_s': h_src, 'h_s_d': h_s_d}
+                b_n_2c = h_s_d
+                b_n_c = h_src
+                h_n = self.filters[i](b_n_2c, b_n_c)
+                return {'h': h_n}
 
             def reduce_func(nodes, **kwargs):
-                b_n_2c = nodes.mailbox['h_s_d']
-                b_n_c = nodes.mailbox['h_s']
-                h_n = self.filters[i](b_n_2c, b_n_c)
-                return {'h_n': h_n}
+                h_agg = F.leaky_relu(torch.sum(nodes.mailbox['h'], dim=1), 0.1)
+                return {'h_n': h_agg}
 
             msgs.append(message_func)
             reds.append(reduce_func)
