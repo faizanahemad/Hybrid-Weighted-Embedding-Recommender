@@ -143,6 +143,49 @@ class GraphSageConvWithSamplingBase(nn.Module):
         return self.post_process(h_concat, h, h_agg)
 
 
+class TrueGraphConvWithSamplingBase(nn.Module):
+    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
+        super(TrueGraphConvWithSamplingBase, self).__init__()
+        layers = []
+        depth = min(1, depth)
+        weights = nn.Linear(feature_size * 4, feature_size * 2)
+        init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_bias(weights.bias)
+        layers.append(weights)
+        layers.append(nn.LeakyReLU(negative_slope=0.1))
+
+        for i in range(depth - 1):
+            weights = nn.Linear(feature_size * 2, feature_size * 2)
+            init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+            init_bias(weights.bias)
+            layers.append(weights)
+            layers.append(nn.LeakyReLU(negative_slope=0.1))
+
+        W = nn.Linear(feature_size * 2, feature_size)
+        layers.append(W)
+        self.prediction_layer = prediction_layer
+        self.noise = GaussianNoise(gaussian_noise)
+
+        if not prediction_layer:
+            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+            layers.append(nn.LeakyReLU(negative_slope=0.1))
+        else:
+            init_weight(W.weight, 'xavier_uniform_', 'linear')
+        init_bias(W.bias)
+        self.W = nn.Sequential(*layers)
+
+    def forward(self, nodes):
+        h_agg = nodes.data['h_agg']
+        h_n = nodes.data['h_n']
+        h = nodes.data['h']
+        w = nodes.data['w'][:, None]
+        h_agg = (h_agg - h) / (w - 1).clamp(min=1)
+        h_concat = torch.cat([h, h_agg, h_n], 1)
+        h_new = self.W(h_concat)
+        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
+        return {'h': h_new}
+
+
 class GraphSageWithSampling(nn.Module):
     def __init__(self, n_content_dims, feature_size, n_layers, G,
                  conv_arch, gaussian_noise, conv_depth,
@@ -155,9 +198,12 @@ class GraphSageWithSampling(nn.Module):
             GraphSageConvWithSampling = GraphSageConvWithSamplingBase
         elif conv_arch == 3:
             GraphSageConvWithSampling = GraphSageConvWithSamplingV3
+        elif conv_arch == 4:
+            GraphSageConvWithSampling = TrueGraphConvWithSamplingBase
         else:
             GraphSageConvWithSampling = GraphSageConvWithSamplingVanilla
             conv_depth = 1
+        GraphSageConvWithSampling = TrueGraphConvWithSamplingBase
 
         self.convs = nn.ModuleList(
             [GraphSageConvWithSampling(feature_size, i == n_layers - 1, gaussian_noise, conv_depth) for i in
@@ -194,9 +240,52 @@ class GraphSageWithSampling(nn.Module):
         init_weight(expansion.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1))
 
-    msg = [FN.copy_src('h', 'h'),
-           FN.copy_src('one', 'one')]
-    red = [FN.sum('h', 'h_agg'), FN.sum('one', 'w')]
+        msg = [FN.copy_src('h', 'h'),
+               FN.copy_src('one', 'one')]
+        red = [FN.sum('h', 'h_agg'), FN.sum('one', 'w')]
+        self.msg = msg
+        self.red = red
+        n_filters = feature_size * 2
+
+        assigns = []
+        filters = []
+        msgs = []
+        reds = []
+        for i in range(self.n_layers):
+            assign = nn.Linear(2*feature_size, n_filters)
+            filter = nn.Linear(feature_size, n_filters)
+            init_weight(assign.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+            init_weight(filter.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+            init_bias(assign.bias)
+            init_bias(filter.bias)
+            assigns.append(assign)
+            filters.append(filter)
+
+        self.assigns = nn.ModuleList(assigns)
+        self.filters = nn.ModuleList(filters)
+
+        for i in range(self.n_layers):
+            def message_func(edges, **kwargs):
+                h_src = edges.src['h']
+                h_dst = edges.dst['h']
+                h_s_d = torch.cat((h_dst, h_src), dim=1)
+                return {'h': h_src, 'h_s_d': h_s_d, 'one': edges.src['one']}
+
+            def reduce_func(nodes, **kwargs):
+                b_n_2c = nodes.mailbox['h_s_d']
+                selector = F.leaky_relu(assigns[i](b_n_2c), 0.1)
+                b_n_c = nodes.mailbox['h']
+                features = F.leaky_relu(filters[i](b_n_c), 0.1)
+                selector = torch.softmax(selector, dim=2)
+                features = (features * selector).sum(1).squeeze(1)
+                h_agg = torch.sum(nodes.mailbox['h'], dim=1)
+                w = torch.sum(nodes.mailbox['one'], dim=1)
+                return {'h_agg': h_agg, 'w': w, 'h_n': features}
+
+            msgs.append(message_func)
+            reds.append(reduce_func)
+        self.msgs = msgs
+        self.reds = reds
 
     def forward(self, nf):
         '''
@@ -210,7 +299,7 @@ class GraphSageWithSampling(nn.Module):
         if self.n_layers == 0:
             return nf.layers[i].data['h']
         for i in range(self.n_layers):
-            nf.block_compute(i, self.msg, self.red, self.convs[i])
+            nf.block_compute(i, self.msgs[i], self.reds[i], self.convs[i])
 
         result = nf.layers[self.n_layers].data['h']
         assert (result != result).sum() == 0
