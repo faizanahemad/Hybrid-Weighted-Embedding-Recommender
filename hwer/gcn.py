@@ -148,11 +148,6 @@ class TrueGraphConvWithSamplingBase(nn.Module):
         super(TrueGraphConvWithSamplingBase, self).__init__()
         layers = []
         depth = min(1, depth)
-        weights = nn.Linear(feature_size * 4, feature_size * 2)
-        init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-        init_bias(weights.bias)
-        layers.append(weights)
-        layers.append(nn.LeakyReLU(negative_slope=0.1))
 
         for i in range(depth - 1):
             weights = nn.Linear(feature_size * 2, feature_size * 2)
@@ -175,15 +170,31 @@ class TrueGraphConvWithSamplingBase(nn.Module):
         self.W = nn.Sequential(*layers)
 
     def forward(self, nodes):
-        h_agg = nodes.data['h_agg']
         h_n = nodes.data['h_n']
         h = nodes.data['h']
-        w = nodes.data['w'][:, None]
-        h_agg = (h_agg - h) / (w - 1).clamp(min=1)
-        h_concat = torch.cat([h, h_agg, h_n], 1)
+        h_concat = torch.cat([h, h_n], 1)
         h_new = self.W(h_concat)
-        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
+        if not self.prediction_layer:
+            h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
         return {'h': h_new}
+
+
+class TrueGraphLearnedHasingFilter(nn.Module):
+    def __init__(self, n_filters, n_channels, n_hases):
+        super(TrueGraphLearnedHasingFilter, self).__init__()
+        self.selectors = torch.tensor(torch.randn((n_filters, 2 * n_channels, n_hases), requires_grad=True))
+        self.filters = torch.tensor(torch.randn((n_filters, n_channels, n_hases)), requires_grad=True)
+        init_weight(self.selectors, 'xavier_uniform_', 'linear', 0.1)
+        init_weight(self.filters, 'xavier_uniform_', 'leaky_relu', 0.1)
+
+    def forward(self, b_n_2c, b_n_c):
+        b_n_2c = b_n_2c.unsqueeze(1)
+        selections = torch.matmul(b_n_2c, self.selectors)
+        selections = torch.softmax(selections, dim=3)
+
+        b_n_c = b_n_c.unsqueeze(1)
+        filtered = F.leaky_relu((selections * torch.matmul(b_n_c, self.filters)).sum(3).sum(2), 0.1)
+        return filtered
 
 
 class GraphSageWithSampling(nn.Module):
@@ -240,28 +251,17 @@ class GraphSageWithSampling(nn.Module):
         init_weight(expansion.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1))
 
-        msg = [FN.copy_src('h', 'h'),
-               FN.copy_src('one', 'one')]
-        red = [FN.sum('h', 'h_agg'), FN.sum('one', 'w')]
-        self.msg = msg
-        self.red = red
-        n_filters = feature_size * 2
+        n_filters = feature_size * 1
+        n_channels = feature_size
+        n_hashes = 32
 
-        assigns = []
         filters = []
         msgs = []
         reds = []
         for i in range(self.n_layers):
-            assign = nn.Linear(2*feature_size, n_filters)
-            filter = nn.Linear(feature_size, n_filters)
-            init_weight(assign.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-            init_weight(filter.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-            init_bias(assign.bias)
-            init_bias(filter.bias)
-            assigns.append(assign)
-            filters.append(filter)
+            f = TrueGraphLearnedHasingFilter(n_filters, n_channels, n_hashes)
+            filters.append(f)
 
-        self.assigns = nn.ModuleList(assigns)
         self.filters = nn.ModuleList(filters)
 
         for i in range(self.n_layers):
@@ -269,18 +269,13 @@ class GraphSageWithSampling(nn.Module):
                 h_src = edges.src['h']
                 h_dst = edges.dst['h']
                 h_s_d = torch.cat((h_dst, h_src), dim=1)
-                return {'h': h_src, 'h_s_d': h_s_d, 'one': edges.src['one']}
+                return {'h_s': h_src, 'h_s_d': h_s_d}
 
             def reduce_func(nodes, **kwargs):
                 b_n_2c = nodes.mailbox['h_s_d']
-                selector = F.leaky_relu(assigns[i](b_n_2c), 0.1)
-                b_n_c = nodes.mailbox['h']
-                features = F.leaky_relu(filters[i](b_n_c), 0.1)
-                selector = torch.softmax(selector, dim=2)
-                features = (features * selector).sum(1).squeeze(1)
-                h_agg = torch.sum(nodes.mailbox['h'], dim=1)
-                w = torch.sum(nodes.mailbox['one'], dim=1)
-                return {'h_agg': h_agg, 'w': w, 'h_n': features}
+                b_n_c = nodes.mailbox['h_s']
+                h_n = self.filters[i](b_n_2c, b_n_c)
+                return {'h_n': h_n}
 
             msgs.append(message_func)
             reds.append(reduce_func)
@@ -294,7 +289,6 @@ class GraphSageWithSampling(nn.Module):
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
             nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
-            nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
             return nf.layers[i].data['h']
