@@ -160,27 +160,27 @@ src, dst = g_train.all_edges()
 rating = g_train.edata['rating']
 rating_test = g.edges[eid_test].data['rating']
 
-gaussian_noise = 0.3
+gaussian_noise = 0.2
 batch_size = 512
-epochs = 100
+epochs = 50
 n_dims = 128
-weight_decay = 2e-8
-lr = 0.05
+weight_decay = 1e-9
+lr = 0.003
 layers = 3
 conv_depth = 2
 
 model = GraphSAGERecommender(GraphSageWithSampling(n_dims, layers, g_train))
-# opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
 import numpy as np
 model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
 params = sum([np.prod(p.size()) for p in model_parameters])
 print("Built Prediction Network, model params = ", params)
 
-opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9, nesterov=True)
-scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
-                                                steps_per_epoch=int(np.ceil(len(rating) / batch_size)),
-                                                div_factor=25, final_div_factor=100)
+# opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=weight_decay, momentum=0.9, nesterov=True)
+# scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
+#                                                 steps_per_epoch=int(np.ceil(len(rating) / batch_size)),
+#                                                 div_factor=25, final_div_factor=100)
 
 
 n_users = len(ml.user_ids)
@@ -266,3 +266,5 @@ for epoch in range(epochs):
 
 # Built Prediction Network, model params = %s 1967874
 print('Train RMSE: %.4f' % train_rmse.item(), 'Test RMSE: %.4f,' % test_rmse.item())
+loss = test_rmse.item()
+print("loss: %f" % loss)

@@ -60,7 +60,7 @@ def ml100k_default_reader(directory):
     ratings = []
 
     # read ratings
-    print("Current dir = ", os.getcwd())
+    print("Current dir = ", os.getcwd(), "Data dir =", directory)
     with open(os.path.join(directory, 'u1.base')) as f:
         for l in f:
             rating = read_rating_line(l)
@@ -95,7 +95,7 @@ def ml100k_default_reader(directory):
         pd.DataFrame(products)
             .set_index('id')
             .astype({'year': 'category'}))
-    movie_extra_features = pd.read_csv("movies.csv", engine="python", sep="\t")
+    movie_extra_features = pd.read_csv(os.path.join(directory, 'movies.csv'), engine="python", sep="\t")
     movie_extra_features = movie_extra_features[["id", "overview", "keywords", "tagline", "runtime"]]
     from ast import literal_eval
     movie_extra_features["keywords"] = movie_extra_features["keywords"].fillna("[]").apply(literal_eval).apply(
