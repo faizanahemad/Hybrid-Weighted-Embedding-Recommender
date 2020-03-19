@@ -11,7 +11,7 @@ params = {-1: dict(n_dims=112, combining_factor=0.1,
                   collaborative_params=dict(
                       prediction_network_params=dict(lr=0.055, epochs=80, batch_size=512,
                                                      network_depth=5,
-                                                     gaussian_noise=0.38, conv_depth=4,
+                                                     gaussian_noise=0.37, conv_depth=4,
                                                      kernel_l2=8.73e-7, ),
                       user_item_params=dict(gcn_lr=0.001, gcn_epochs=5, gcn_layers=3,
                                             gcn_kernel_l2=1e-8, gcn_batch_size=512, conv_depth=2,
