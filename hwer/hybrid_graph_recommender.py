@@ -427,6 +427,9 @@ class HybridGCNRec(SVDppHybrid):
         dst = torch.LongTensor(dst) + total_users
         rating = torch.DoubleTensor(rating)
         model.to(device)
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.log.info("Built Prediction Network, model params = %s", params)
 
         for epoch in range(epochs):
             gc.collect()
