@@ -150,11 +150,9 @@ class HybridGCNRec(SVDppHybrid):
                 return data_pairs
 
             def node2vec_generator():
-                for walks in chunked(g, 1024):
-                    data_points = Parallel(n_jobs=1)(delayed(iter_walk)(walk) for walk in walks)
-                    for d in data_points:
-                        for i in d:
-                            yield i
+                for walk in g:
+                    for i in iter_walk(walk):
+                        yield i
 
             def affinities_generator():
                 np.random.shuffle(affinities)
@@ -477,6 +475,8 @@ class HybridGCNRec(SVDppHybrid):
             model.train()
 
             def train(src, dst, rating):
+                import gc
+                gc.collect()
                 shuffle_idx = torch.randperm(len(src))
                 src_shuffled = src[shuffle_idx]
                 dst_shuffled = dst[shuffle_idx]
