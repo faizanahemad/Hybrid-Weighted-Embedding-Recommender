@@ -241,6 +241,9 @@ class HybridGCNRec(SVDppHybrid):
                                                                                               hyperparams)
 
         model.train()
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.log.info("Built User-Item Affinities Network, model params = %s", params)
         gc.collect()
         from more_itertools import chunked
         for epoch in range(gcn_epochs):
