@@ -431,7 +431,7 @@ class HybridGCNRec(SVDppHybrid):
         model.to(device)
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
         params = sum([np.prod(p.size()) for p in model_parameters])
-        self.log.info("Built Prediction Network, model params = %s, model = \n%s", params, model)
+        self.log.info("Built Prediction Network, model params = %s, examples = %s, model = \n%s", params, len(src), model)
 
         for epoch in range(epochs):
             gc.collect()
@@ -480,6 +480,8 @@ class HybridGCNRec(SVDppHybrid):
             model.train()
 
             def train(src, dst, rating):
+                import gc
+                gc.collect()
                 shuffle_idx = torch.randperm(len(src))
                 src_shuffled = src[shuffle_idx]
                 dst_shuffled = dst[shuffle_idx]
