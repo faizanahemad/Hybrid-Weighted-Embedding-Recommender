@@ -15,7 +15,6 @@ class SVDppHybrid(HybridRecommender):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
                  n_content_dims: int = 32, n_collaborative_dims: int = 32, fast_inference: bool = False,
                  super_fast_inference: bool = False):
-        assert n_content_dims == n_collaborative_dims
         super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims,
                          n_collaborative_dims, fast_inference, super_fast_inference)
         self.log = getLogger(type(self).__name__)

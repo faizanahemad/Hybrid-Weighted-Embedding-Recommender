@@ -230,7 +230,7 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
         recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
                               rating_scale=rating_scale,
-                              n_content_dims=hyperparameters["n_dims"],
+                              n_content_dims=hyperparameters["n_content_dims"],
                               n_collaborative_dims=hyperparameters["n_dims"],
                               fast_inference=False, super_fast_inference=False)
 

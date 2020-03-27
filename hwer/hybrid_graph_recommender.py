@@ -23,7 +23,6 @@ class HybridGCNRec(SVDppHybrid):
                          fast_inference, super_fast_inference)
         self.log = getLogger(type(self).__name__)
         assert n_collaborative_dims % 2 == 0
-        assert n_content_dims == n_collaborative_dims
         self.cpu = int(os.cpu_count() / 2)
 
     def __word2vec_trainer__(self,
@@ -243,6 +242,9 @@ class HybridGCNRec(SVDppHybrid):
                                                                                               hyperparams)
 
         model.train()
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.log.info("Built KNN Network, model params = %s, model = \n%s", params, model)
         gc.collect()
         from more_itertools import chunked
         for epoch in range(gcn_epochs):
@@ -426,6 +428,9 @@ class HybridGCNRec(SVDppHybrid):
         dst = torch.LongTensor(dst) + total_users
         rating = torch.DoubleTensor(rating)
         model.to(device)
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.log.info("Built Prediction Network, model params = %s, model = \n%s", params, model)
 
         for epoch in range(epochs):
             gc.collect()
@@ -630,3 +635,20 @@ class HybridGCNRec(SVDppHybrid):
         model.item_knn = item_knn
         logger.info("load_model:: Loaded Full Model.")
         return model
+
+    def prepare_for_knn(self, alpha, content_data_used,
+                        user_content_vectors, item_content_vectors,
+                        user_vectors, item_vectors):
+        from .utils import unit_length
+        from sklearn.decomposition import PCA
+        user_vectors_length = len(user_vectors)
+        all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)
+        if user_vectors.shape[1] > self.n_collaborative_dims:
+            pca = PCA(n_components=self.n_collaborative_dims, )
+            all_vectors = pca.fit_transform(all_vectors)
+        elif user_vectors.shape[1] < self.n_collaborative_dims:
+            raise ValueError()
+        all_vectors = unit_length(all_vectors, axis=1)
+        user_vectors = all_vectors[:user_vectors_length]
+        item_vectors = all_vectors[user_vectors_length:]
+        return user_vectors, item_vectors
