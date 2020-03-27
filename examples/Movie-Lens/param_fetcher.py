@@ -13,16 +13,22 @@ def read_params(location, dataset, algo):
             return pkg.params_gcn_100K
         if algo == "svdpp":
             return pkg.params_svdpp_100K
+        if algo == "gcn_retriever":
+            return pkg.params_gcn_retriever_100K
     if dataset == "1M":
         if algo == "gcn":
             return pkg.params_gcn_1M
         if algo == "svdpp":
             return pkg.params_svdpp_1M
+        if algo == "gcn_retriever":
+            return pkg.params_gcn_retriever_1M
     if dataset == "20M":
         if algo == "gcn":
             pass
         if algo == "svdpp":
             pass
+        if algo == "gcn_retriever":
+            return pkg.params_gcn_retriever_20M
 
 
 def fetch_content_params():
@@ -39,9 +45,28 @@ def fetch_gcn_params(dataset, algo, conv_arch):
     p["collaborative_params"]["user_item_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["use_content"] = True
-    p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_gcn
 
-    p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_node2vec if "enable_gcn" not in \
+    p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_gcn if "enable_gcn" not in \
+                                                                                     p["collaborative_params"][
+                                                                                         "user_item_params"] else \
+        p["collaborative_params"]["user_item_params"]["enable_gcn"]
+
+    p["collaborative_params"]["user_item_params"]["enable_node2vec"] = enable_node2vec if "enable_node2vec" not in \
+                                                                                          p["collaborative_params"][
+                                                                                              "user_item_params"] else \
+    p["collaborative_params"]["user_item_params"]["enable_node2vec"]
+    return p
+
+
+def fetch_retriever_params(dataset, algo, conv_arch):
+    p = read_params("best_params/", dataset, algo)
+    p = p[conv_arch]
+    p["knn_params"] = knn_params
+    p["collaborative_params"]["user_item_params"]["conv_arch"] = conv_arch
+
+    p["collaborative_params"]["user_item_params"]["verbose"] = verbose
+
+    p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_gcn if "enable_gcn" not in \
                                                                                      p["collaborative_params"][
                                                                                          "user_item_params"] else \
         p["collaborative_params"]["user_item_params"]["enable_gcn"]
@@ -70,10 +95,13 @@ def get_best_params(dataset, gcn_conv_variant):
 
     hyperparameters_gcn = fetch_gcn_params(dataset, "gcn", gcn_conv_variant)
 
+    hyperparameters_gcn_retriever = fetch_retriever_params(dataset, "gcn_retriever", gcn_conv_variant)
+
     hyperparameters_surprise = {"svdpp": {"n_factors": 64, "n_epochs": 40, "reg_all": 0.1},
                                 "svd": {"biased": True, "n_factors": 20},
                                 "algos": ["svdpp"]}
     hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn,
+                               gcn_retriever=hyperparameters_gcn_retriever,
                                content_only=hyperparameter_content,
                                svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise)
     return hyperparamters_dict

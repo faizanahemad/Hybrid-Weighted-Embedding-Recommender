@@ -216,7 +216,7 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
 def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
                 get_data_mappers, rating_scale, algo,
                 enable_error_analysis=False, enable_baselines=False):
-    from . import SVDppHybrid, HybridGCNRec
+    from . import SVDppHybrid, HybridGCNRec, GCNRetriever
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
     if algo == "svdpp_hybrid":
@@ -228,6 +228,13 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
                              fast_inference=False, super_fast_inference=False)
     elif algo in ["gcn_hybrid"]:
         recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
+                              knn_params=hyperparameters["knn_params"],
+                              rating_scale=rating_scale,
+                              n_content_dims=hyperparameters["n_content_dims"],
+                              n_collaborative_dims=hyperparameters["n_dims"],
+                              fast_inference=False, super_fast_inference=False)
+    elif algo in ["gcn_retriever"]:
+        recsys = GCNRetriever(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
                               rating_scale=rating_scale,
                               n_content_dims=hyperparameters["n_content_dims"],
@@ -324,7 +331,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
     recs = []
     assert len(algos) > 0
     algos = set(algos)
-    assert len(algos - {"surprise", "content_only", "svdpp_hybrid", "gcn_hybrid"}) == 0
+    assert len(algos - {"surprise", "content_only", "svdpp_hybrid", "gcn_hybrid", "gcn_retriever"}) == 0
     user_rating_count_metrics = pd.DataFrame([],
                                              columns=["algo", "user_rating_count", "rmse", "mae", "train_map", "map",
                                                       "train_rmse", "train_mae"])
@@ -369,6 +376,18 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
                                                                         items, hyperparameters, get_data_mappers,
                                                                         rating_scale,
                                                                         algo="gcn_hybrid",
+                                                                        enable_error_analysis=enable_error_analysis,
+                                                                        enable_baselines=enable_baselines)
+        results.extend(res)
+        recs.append(gcn_rec)
+        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
+
+    if "gcn_retriever" in algos:
+        hyperparameters = hyperparamters_dict["gcn_retriever"]
+        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+                                                                        items, hyperparameters, get_data_mappers,
+                                                                        rating_scale,
+                                                                        algo="gcn_retriever",
                                                                         enable_error_analysis=enable_error_analysis,
                                                                         enable_baselines=enable_baselines)
         results.extend(res)

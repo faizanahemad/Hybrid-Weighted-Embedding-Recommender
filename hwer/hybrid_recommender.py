@@ -301,7 +301,8 @@ class HybridRecommender(RecommendationBase):
                                                                      user_vectors, item_vectors,
                                                                      self.user_id_to_index, self.item_id_to_index,
                                                                      self.rating_scale, prediction_network_params)
-        self.prediction_artifacts.update(dict(prediction_artifacts))
+        if prediction_artifacts is not None:
+            self.prediction_artifacts.update(dict(prediction_artifacts))
         gc.collect()
         self.log.debug("Hybrid Base: Built Prediction Network.")
         self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
