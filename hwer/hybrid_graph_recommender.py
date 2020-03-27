@@ -149,11 +149,9 @@ class HybridGCNRec(SVDppHybrid):
                 return data_pairs
 
             def node2vec_generator():
-                for walks in chunked(g, 2048):
-                    data_points = Parallel(n_jobs=4)(delayed(iter_walk)(walk) for walk in walks)
-                    for d in data_points:
-                        for i in d:
-                            yield i
+                for walk in g:
+                    for i in iter_walk(walk):
+                        yield i
 
             def affinities_generator():
                 np.random.shuffle(affinities)
@@ -241,70 +239,75 @@ class HybridGCNRec(SVDppHybrid):
                                                                                               user_item_affinities,
                                                                                               hyperparams)
 
+        def get_samples():
+            src, dst, neg = [], [], []
+            for (u, v, w), r in generate_training_samples():
+                src.append(u)
+                dst.append(v)
+                neg.append(w)
+
+            src = torch.LongTensor(src)
+            dst = torch.LongTensor(dst)
+            neg = torch.LongTensor(neg)
+            shuffle_idx = torch.randperm(len(src))
+            src = src[shuffle_idx]
+            dst = dst[shuffle_idx]
+            neg = neg[shuffle_idx]
+            return src, dst, neg
+
+        src, dst, neg = get_samples()
+
         model.train()
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
         params = sum([np.prod(p.size()) for p in model_parameters])
-        self.log.info("Built KNN Network, model params = %s, model = \n%s", params, model)
+        self.log.info("Built KNN Network, model params = %s, examples = %s, model = \n%s", params, len(src), model)
         gc.collect()
-        from more_itertools import chunked
         for epoch in range(gcn_epochs):
             start = time.time()
             loss = 0.0
-            for big_batch in chunked(generate_training_samples(), gcn_batch_size * 10):
-                src, dst, neg = [], [], []
-                for (u, v, w), r in big_batch:
-                    src.append(u)
-                    dst.append(v)
-                    neg.append(w)
-            #
+            def train(src, dst, neg):
 
-                src = torch.LongTensor(src)
-                dst = torch.LongTensor(dst)
-                neg = torch.LongTensor(neg)
+                src_batches = src.split(gcn_batch_size)
+                dst_batches = dst.split(gcn_batch_size)
+                neg_batches = neg.split(gcn_batch_size)
+                model.train()
+                seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
+                sampler = dgl.contrib.sampling.NeighborSampler(
+                    g_train,  # the graph
+                    gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                    10,  # number of neighbors for each node
+                    gcn_layers,  # number of layers in GCN
+                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
+                    prefetch=True,  # whether to prefetch the NodeFlows
+                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
+                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
+                    num_workers=self.cpu,
+                )
 
-                def train(src, dst, neg):
+                # Training
+                total_loss = 0.0
+                odd_even = True
+                for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
+                    score = model.forward(nodeflow, s, d, n) if odd_even else model.forward(nodeflow, d, s, n)
+                    odd_even = not odd_even
+                    loss = score.mean()
+                    total_loss = total_loss + loss
 
-                    shuffle_idx = torch.randperm(len(src))
-                    src_shuffled = src[shuffle_idx]
-                    dst_shuffled = dst[shuffle_idx]
-                    neg_shuffled = neg[shuffle_idx]
+                    opt.zero_grad()
+                    loss.backward()
+                    opt.step()
+                return total_loss / len(src_batches)
 
-                    src_batches = src_shuffled.split(gcn_batch_size)
-                    dst_batches = dst_shuffled.split(gcn_batch_size)
-                    neg_batches = neg_shuffled.split(gcn_batch_size)
-                    model.train()
-                    seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
-                    sampler = dgl.contrib.sampling.NeighborSampler(
-                        g_train,  # the graph
-                        gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                        10,  # number of neighbors for each node
-                        gcn_layers,  # number of layers in GCN
-                        seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
-                        prefetch=True,  # whether to prefetch the NodeFlows
-                        add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
-                        shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
-                        num_workers=self.cpu,
-                    )
-
-                    # Training
-                    total_loss = 0.0
-                    odd_even = True
-                    for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
-                        score = model.forward(nodeflow, s, d, n) if odd_even else model.forward(nodeflow, d, s, n)
-                        odd_even = not odd_even
-                        loss = score.mean()
-                        total_loss = total_loss + loss
-
-                        opt.zero_grad()
-                        loss.backward()
-                        opt.step()
-                    return total_loss / len(src_batches)
-
-                loss += train(src, dst, neg)
+            loss += train(src, dst, neg)
+            gen_time = time.time()
+            if epoch < gcn_epochs - 1:
+                src, dst, neg = get_samples()
+            gen_time = time.time() - gen_time
 
             total_time = time.time() - start
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
-                                               gcn_epochs) + ' Training loss: %.4f' % loss.item() + ' || Time Taken: %.1f' % total_time)
+                                               gcn_epochs) + ' Training loss: %.4f' % loss.item() +
+                          ' || Time Taken: %.1f' % total_time + " Generator time: %.1f" % gen_time)
 
             #
         model.eval()
