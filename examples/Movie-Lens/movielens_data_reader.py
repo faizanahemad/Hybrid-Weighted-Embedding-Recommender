@@ -143,6 +143,9 @@ def get_data_reader(dataset="100K"):
         users.rename(columns={"user_id": "user"}, inplace=True)
         return users, movies, ratings
 
+    def read_data_1M_leave_one_out(**kwargs):
+        pass
+
     if dataset == "100K":
         return read_data_100K
     elif dataset == "1M":

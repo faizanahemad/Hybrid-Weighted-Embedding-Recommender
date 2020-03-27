@@ -18,15 +18,4 @@ params = {-1: dict(n_dims=112, combining_factor=0.1,
                                             margin=1.0,
                                             gaussian_noise=0.0025,
                                             node2vec_params=dict(num_walks=150, q=0.75)))),
-          3: dict(n_dims=160, combining_factor=0.1,
-                  collaborative_params=dict(
-                      prediction_network_params=dict(lr=0.05, epochs=85, batch_size=1536,
-                                                     network_depth=4,
-                                                     gaussian_noise=0.23, conv_depth=3,
-                                                     kernel_l2=1e-9,),
-                      user_item_params=dict(gcn_lr=0.0001, gcn_epochs=2, gcn_layers=2,
-                                            gcn_kernel_l2=1e-5, gcn_batch_size=512, conv_depth=2,
-                                            margin=1.0,
-                                            gaussian_noise=1.0, num_walks=20,
-                                            node2vec_params=dict(num_walks=80, q=0.75))))
           }

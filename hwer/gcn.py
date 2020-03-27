@@ -153,8 +153,6 @@ class GraphSageWithSampling(nn.Module):
         self.n_layers = n_layers
         if conv_arch == 0:
             GraphSageConvWithSampling = GraphSageConvWithSamplingBase
-        elif conv_arch == 3:
-            GraphSageConvWithSampling = GraphSageConvWithSamplingV3
         else:
             GraphSageConvWithSampling = GraphSageConvWithSamplingVanilla
             conv_depth = 1
@@ -165,17 +163,13 @@ class GraphSageWithSampling(nn.Module):
         noise = GaussianNoise(gaussian_noise)
 
         w1 = nn.Linear(n_content_dims, n_content_dims)
-
         proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise]
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(w1.bias)
-        if conv_arch == 3:
-            proj.append(LinearResnet(n_content_dims, feature_size, gaussian_noise))
-        else:
-            w = nn.Linear(n_content_dims, feature_size)
-            init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-            init_bias(w.bias)
-            proj.extend([w, nn.LeakyReLU(negative_slope=0.1)])
+        w = nn.Linear(n_content_dims, feature_size)
+        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_bias(w.bias)
+        proj.extend([w, nn.LeakyReLU(negative_slope=0.1)])
         self.proj = nn.Sequential(*proj)
 
         self.G = G
@@ -306,64 +300,3 @@ def build_dgl_graph(ratings, total_nodes, content_vectors):
               'rating': torch.FloatTensor(ratings)})
     return g
 
-
-class LinearResnet(nn.Module):
-    def __init__(self, input_size, output_size, gaussian_noise):
-        super(LinearResnet, self).__init__()
-        self.scaling = False
-        if input_size != output_size:
-            self.scaling = True
-            self.iscale = nn.Linear(input_size, output_size)
-            init_weight(self.iscale.weight, 'xavier_uniform_', 'linear')
-            init_bias(self.iscale.bias)
-        W1 = nn.Linear(input_size, input_size)
-        noise = GaussianNoise(gaussian_noise)
-        init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-        init_bias(W1.bias)
-
-        W2 = nn.Linear(input_size, output_size)
-        init_weight(W2.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-        init_bias(W2.bias)
-
-        self.W = nn.Sequential(noise, W1, nn.LeakyReLU(negative_slope=0.1), noise, W2, nn.LeakyReLU(negative_slope=0.1))
-
-    def forward(self, h):
-        identity = h
-        if self.scaling:
-            identity = self.iscale(identity)
-        out = self.W(h)
-        out = out + identity
-        return out
-
-
-class GraphSageConvWithSamplingV3(GraphSageConvWithSamplingBase):
-    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingV3, self).__init__(feature_size, prediction_layer, gaussian_noise, depth)
-        #
-        W1 = nn.Linear(feature_size * 2, feature_size * 2)
-        init_weight(W1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-        init_bias(W1.bias)
-        layers = [W1, nn.LeakyReLU(negative_slope=0.1)]
-        depth = min(1, depth)
-        for i in range(depth):
-            weights = LinearResnet(feature_size * 2, feature_size * 2, gaussian_noise)
-            layers.append(weights)
-
-        W = nn.Linear(feature_size * 2, feature_size)
-        layers.append(W)
-
-        if not prediction_layer:
-            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.append(nn.LeakyReLU(negative_slope=0.1))
-        else:
-            init_weight(W.weight, 'xavier_uniform_', 'linear')
-        init_bias(W.bias)
-
-        self.W = nn.Sequential(*layers)
-
-        if not prediction_layer:
-            W_out = nn.Linear(feature_size, feature_size)
-            init_weight(W_out.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-            init_bias(W_out.bias)
-            self.W_out = nn.Sequential(GaussianNoise(gaussian_noise), W_out, nn.LeakyReLU(negative_slope=0.1),
-                                       LinearResnet(feature_size, feature_size, gaussian_noise))
