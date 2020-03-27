@@ -55,11 +55,9 @@ class HybridGCNRec(SVDppHybrid):
         def sentences_generator():
             g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
             save_list_per_line([[""]], sfile, 'w')
-            total_sentences = 0
-            for w in chunked(g, 128):
-                total_sentences += len(w)
-                save_list_per_line(w, sfile, 'a')
-            return total_sentences
+            sentences = [w for w in g]
+            save_list_per_line(sentences, sfile, 'a')
+            return len(sentences)
 
         gts = time.time()
         start = gts
