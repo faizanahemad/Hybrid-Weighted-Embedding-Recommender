@@ -162,11 +162,11 @@ class GraphSageWithSampling(nn.Module):
              range(n_layers)])
         noise = GaussianNoise(gaussian_noise)
 
-        w1 = nn.Linear(n_content_dims, n_content_dims)
+        w1 = nn.Linear(n_content_dims, min(n_content_dims, feature_size*2))
         proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise]
         init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(w1.bias)
-        w = nn.Linear(n_content_dims, feature_size)
+        w = nn.Linear(min(n_content_dims, feature_size*2), feature_size)
         init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_bias(w.bias)
         proj.extend([w, nn.LeakyReLU(negative_slope=0.1)])
