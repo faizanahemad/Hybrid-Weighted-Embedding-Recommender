@@ -83,7 +83,7 @@ class GraphSageConvWithSamplingBase(nn.Module):
     def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
         super(GraphSageConvWithSamplingBase, self).__init__()
         layers = []
-        depth = min(1, depth)
+        depth = max(1, depth)
         for i in range(depth - 1):
             weights = nn.Linear(feature_size * 2, feature_size * 2)
             init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu', 0.1)

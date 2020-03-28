@@ -49,7 +49,6 @@ class HybridGCNRec(SVDppHybrid):
         walker.preprocess_transition_probs()
 
         sfile = "sentences-%s.txt" % str(np.random.randint(int(1e8)))
-        from more_itertools import chunked
         from .utils import save_list_per_line
 
         def sentences_generator():
@@ -137,7 +136,6 @@ class HybridGCNRec(SVDppHybrid):
         affinities = [(i, j, r - 1) for i, j, r in affinities]
 
         from more_itertools import distinct_combinations, chunked, grouper, interleave_longest
-        from joblib import Parallel, delayed
 
         def sentences_generator():
             g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
@@ -174,13 +172,9 @@ class HybridGCNRec(SVDppHybrid):
             "Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
             len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
 
-        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         gcn_lr = hyperparams["gcn_lr"] if "gcn_lr" in hyperparams else 0.1
-        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 1
         gcn_epochs = hyperparams["gcn_epochs"] if "gcn_epochs" in hyperparams else 1
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 5
-        gcn_dropout = hyperparams["gcn_dropout"] if "gcn_dropout" in hyperparams else 0.0
-        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         gcn_batch_size = hyperparams["gcn_batch_size"] if "gcn_batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         margin = hyperparams["margin"] if "margin" in hyperparams else 1.0
@@ -188,7 +182,6 @@ class HybridGCNRec(SVDppHybrid):
         enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
         enable_gcn = hyperparams["enable_gcn"] if "enable_gcn" in hyperparams else False
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
-        network_width = hyperparams["network_width"] if "network_width" in hyperparams else 128
         node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
         conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
@@ -358,11 +351,9 @@ class HybridGCNRec(SVDppHybrid):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 2
-        bias_regularizer = hyperparams["bias_regularizer"] if "bias_regularizer" in hyperparams else 0.0
         use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
-        dropout = hyperparams["dropout"] if "dropout" in hyperparams else 0.0
         conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
