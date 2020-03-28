@@ -80,20 +80,22 @@ class GraphSageConvWithSamplingVanilla(nn.Module):
 
 
 class GraphSageConvWithSamplingBase(nn.Module):
-    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
+    def __init__(self, feature_size, prediction_layer, first_layer, gaussian_noise, depth):
         super(GraphSageConvWithSamplingBase, self).__init__()
         layers = []
         depth = min(1, depth)
+        fs = 2 if first_layer else 3
         for i in range(depth - 1):
-            weights = nn.Linear(feature_size * 2, feature_size * 2)
+            weights = nn.Linear(feature_size * fs, feature_size * fs)
             init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
             init_bias(weights.bias)
             layers.append(weights)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
-        W = nn.Linear(feature_size * 2, feature_size)
+        W = nn.Linear(feature_size * fs, feature_size)
         layers.append(W)
         self.prediction_layer = prediction_layer
+        self.first_layer = first_layer
         self.noise = GaussianNoise(gaussian_noise)
 
         if not prediction_layer:
@@ -113,20 +115,6 @@ class GraphSageConvWithSamplingBase(nn.Module):
             init_bias(W_out2.bias)
             self.W_out = nn.Sequential(GaussianNoise(gaussian_noise), W_out, nn.LeakyReLU(negative_slope=0.1), W_out2)
 
-    def pre_process(self, nodes):
-        h_agg = nodes.data['h_agg']
-        h = nodes.data['h']
-        w = nodes.data['w'][:, None]
-        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
-        return h, h_agg
-
-    def process_node_data(self, h):
-        h = self.noise(h)
-        return h
-
-    def process_neighbourhood_data(self, h_agg):
-        return h_agg
-
     def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
@@ -136,11 +124,24 @@ class GraphSageConvWithSamplingBase(nn.Module):
         return {'h': h_new}
 
     def forward(self, nodes):
-        h, h_agg = self.pre_process(nodes)
-        h = self.process_node_data(h)
-        h_agg = self.process_neighbourhood_data(h_agg)
-        h_concat = torch.cat([h, h_agg], 1)
-        return self.post_process(h_concat, h, h_agg)
+        h_agg = nodes.data['h_agg']
+        h = nodes.data['h']
+        w = nodes.data['w'][:, None]
+        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+        h = self.noise(h)
+
+        if self.first_layer:
+            h_concat = torch.cat([h, h_agg], 1)
+        else:
+            h_residue = nodes.data['h_residue']
+            h_concat = torch.cat([h, h_agg, h_residue], 1)
+
+        h_new = self.W(h_concat)
+        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
+        if self.prediction_layer:
+            return {'h': h_new}
+        h_new = self.W_out(h_new)
+        return {'h': h_new, 'h_residue': h_agg}
 
 
 class GraphSageWithSampling(nn.Module):
@@ -158,7 +159,7 @@ class GraphSageWithSampling(nn.Module):
             conv_depth = 1
 
         self.convs = nn.ModuleList(
-            [GraphSageConvWithSampling(feature_size, i == n_layers - 1, gaussian_noise, conv_depth) for i in
+            [GraphSageConvWithSampling(feature_size, i == n_layers - 1, i == 0, gaussian_noise, conv_depth) for i in
              range(n_layers)])
         noise = GaussianNoise(gaussian_noise)
 
@@ -189,8 +190,9 @@ class GraphSageWithSampling(nn.Module):
         self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1))
 
     msg = [FN.copy_src('h', 'h'),
+           FN.copy_src('h_residue', 'h_residue'),
            FN.copy_src('one', 'one')]
-    red = [FN.sum('h', 'h_agg'), FN.sum('one', 'w')]
+    red = [FN.sum('h', 'h_agg'), FN.sum('h_residue', 'h_residue'), FN.sum('one', 'w')]
 
     def forward(self, nf):
         '''
@@ -199,6 +201,7 @@ class GraphSageWithSampling(nn.Module):
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
             nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
+            nf.layers[i].data['h_residue'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
