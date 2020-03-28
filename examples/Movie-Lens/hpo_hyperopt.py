@@ -38,6 +38,7 @@ def build_params(args, objective, params):
         params["collaborative_params"]["user_item_params"]["gcn_epochs"] = int(args["gcn_epochs"])
         params["collaborative_params"]["user_item_params"]["gaussian_noise"] = args["gaussian_noise"]
         params["collaborative_params"]["user_item_params"]["margin"] = args["margin"]
+        params["n_dims"] = int(args["n_dims"])
 
     return params
 
@@ -58,40 +59,46 @@ def run_trial(args):
 
 
 def define_search_space(objective, starting_params):
-    prediction = starting_params["collaborative_params"]["prediction_network_params"]
-    rmse_space = {
-        'lr': hp.qlognormal("lr", np.log(prediction["lr"]),
-                           0.5 * prediction["lr"],
-                            0.05 * prediction["lr"]),
-        'epochs': hp.quniform('epochs',
-                              prediction["epochs"] - 20,
-                              prediction["epochs"] + 20, 5),
-        'kernel_l2': hp.choice('kernel_l2', [0.0, hp.qloguniform('kernel_l2_choice', np.log(1e-9), np.log(1e-5), 5e-9)]),
-        'batch_size': hp.qloguniform('batch_size', np.log(512), np.log(1023), 512),
-        # 'batch_size': hp.choice('batch_size', [512]),
-        'conv_depth': hp.qlognormal('conv_depth', np.log(prediction["conv_depth"]),0.5 * prediction["conv_depth"], 1),
-        'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(prediction["gaussian_noise"]),
-                                       0.5 * prediction["gaussian_noise"], 0.005),
-        'network_depth': hp.quniform('network_depth', 2, prediction['network_depth'] + 2, 1),
-        'n_dims': hp.quniform('n_dims',
-                              starting_params["n_dims"] - 32,
-                              starting_params["n_dims"] + 64, 16),
-    }
+    if objective == "rmse":
+        prediction = starting_params["collaborative_params"]["prediction_network_params"]
+        rmse_space = {
+            'lr': hp.qlognormal("lr", np.log(prediction["lr"]),
+                               0.5 * prediction["lr"],
+                                0.05 * prediction["lr"]),
+            'epochs': hp.quniform('epochs',
+                                  prediction["epochs"] - 20,
+                                  prediction["epochs"] + 20, 5),
+            'kernel_l2': hp.choice('kernel_l2', [0.0, hp.qloguniform('kernel_l2_choice', np.log(1e-9), np.log(1e-5), 5e-9)]),
+            'batch_size': hp.qloguniform('batch_size', np.log(512), np.log(1023), 512),
+            # 'batch_size': hp.choice('batch_size', [512]),
+            'conv_depth': hp.quniform('conv_depth', 1, prediction["conv_depth"] + 1, 1),
+            'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(prediction["gaussian_noise"]),
+                                           0.5 * prediction["gaussian_noise"], 0.005),
+            'network_depth': hp.quniform('network_depth', 1, prediction['network_depth'] + 1, 1),
+            'n_dims': hp.quniform('n_dims',
+                                  starting_params["n_dims"] - 32,
+                                  starting_params["n_dims"] + 64, 16),
+        }
+        return rmse_space
+    if objective == "ndcg":
 
-    embedding = starting_params["collaborative_params"]["user_item_params"]
-    ndcg_space = {
-        'gcn_lr': hp.qlognormal("gcn_lr", np.log(embedding["gcn_lr"]),
-                           0.5 * embedding["gcn_lr"],
-                                0.05 * embedding["gcn_lr"]),
-        'gcn_epochs': hp.quniform('gcn_epochs',
-                              embedding["gcn_epochs"] - 10,
-                              embedding["gcn_epochs"] + 20, 5),
-        'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(embedding["gaussian_noise"]),
-                                       0.5 * embedding["gaussian_noise"], 0.005),
-        'margin': hp.quniform('margin', 0.8, 1.8, 0.2)
-    }
+        embedding = starting_params["collaborative_params"]["user_item_params"]
+        ndcg_space = {
+            'gcn_lr': hp.qlognormal("gcn_lr", np.log(embedding["gcn_lr"]),
+                               0.5 * embedding["gcn_lr"],
+                                    0.05 * embedding["gcn_lr"]),
+            'gcn_epochs': hp.quniform('gcn_epochs',
+                                  embedding["gcn_epochs"],
+                                  embedding["gcn_epochs"] + 20, 5),
+            'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(embedding["gaussian_noise"]),
+                                           1.0 * embedding["gaussian_noise"], 0.005),
+            'margin': hp.quniform('margin', 0.8, 1.8, 0.2),
+            'n_dims': hp.quniform('n_dims',
+                                  starting_params["n_dims"],
+                                  starting_params["n_dims"] + 96, 16),
+        }
 
-    return rmse_space if objective == "rmse" else ndcg_space
+        return ndcg_space
 
 
 def merge_trials(trials1, trials2_slice):
@@ -169,7 +176,10 @@ def print_trial_details(trials):
 
 if __name__ == '__main__':
     params, dataset, objective, algo = init_args()
-    conv_arch = params["collaborative_params"]["prediction_network_params"]["conv_arch"]
+    try:
+        conv_arch = params["collaborative_params"]["prediction_network_params"]["conv_arch"]
+    except KeyError as e:
+        conv_arch = 0
     # Run new hyperparameter trials until killed
     while True:
         np.random.seed()

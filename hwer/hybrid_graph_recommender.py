@@ -120,7 +120,7 @@ class HybridGCNRec(SVDppHybrid):
                                                              affinities: List[Tuple[str, str, float]],
                                                              hyperparams):
 
-        walk_length = 3
+        walk_length = 3 # Fixed
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 150
         p = 0.25
         q = hyperparams["q"] if "q" in hyperparams else 0.25
@@ -129,7 +129,7 @@ class HybridGCNRec(SVDppHybrid):
         total_items = len(item_ids)
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
         affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-        walker = Walker(read_edgelist(affinities), p=p, q=q)
+        walker = Walker(read_edgelist(affinities, weighted=True), p=p, q=q)
         walker.preprocess_transition_probs()
 
         from more_itertools import distinct_combinations, chunked, grouper, interleave_longest
@@ -143,7 +143,7 @@ class HybridGCNRec(SVDppHybrid):
                 walk = list(set(walk))
                 np.random.shuffle(walk)
                 for c in grouper(walk, 2, walk[0]):
-                    data_pairs.append(((c[0], c[1], np.random.randint(0, total_users + total_items)), 0))
+                    data_pairs.append(((c[0], c[1]), 1))
                 return data_pairs
 
             def node2vec_generator():
@@ -154,7 +154,7 @@ class HybridGCNRec(SVDppHybrid):
             def affinities_generator():
                 np.random.shuffle(affinities)
                 for i, j, r in affinities:
-                    yield (i, j, np.random.randint(0, total_users + total_items)), 0
+                    yield (i, j), r + 1
             return interleave_longest(node2vec_generator(), affinities_generator())
 
         return sentences_generator
@@ -194,6 +194,8 @@ class HybridGCNRec(SVDppHybrid):
         node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
         conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
+        total_users = len(user_ids)
+        total_items = len(item_ids)
 
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
@@ -238,22 +240,23 @@ class HybridGCNRec(SVDppHybrid):
                                                                                               hyperparams)
 
         def get_samples():
-            src, dst, neg = [], [], []
-            for (u, v, w), r in generate_training_samples():
+            src, dst, neg, weights = [], [], [], []
+            for (u, v), r in generate_training_samples():
                 src.append(u)
                 dst.append(v)
-                neg.append(w)
+                weights.append(r)
 
             src = torch.LongTensor(src)
             dst = torch.LongTensor(dst)
-            neg = torch.LongTensor(neg)
+            weights = torch.LongTensor(weights)
             shuffle_idx = torch.randperm(len(src))
             src = src[shuffle_idx]
             dst = dst[shuffle_idx]
-            neg = neg[shuffle_idx]
-            return src, dst, neg
+            neg = torch.randint(0, total_users+total_items, (len(src),))
+            weights = weights[shuffle_idx]
+            return src, dst, neg, weights
 
-        src, dst, neg = get_samples()
+        src, dst, neg, weights = get_samples()
 
         model.train()
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -268,6 +271,7 @@ class HybridGCNRec(SVDppHybrid):
                 src_batches = src.split(gcn_batch_size)
                 dst_batches = dst.split(gcn_batch_size)
                 neg_batches = neg.split(gcn_batch_size)
+                weights_batches = weights.split(gcn_batch_size)
                 model.train()
                 seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
                 sampler = dgl.contrib.sampling.NeighborSampler(
@@ -285,8 +289,9 @@ class HybridGCNRec(SVDppHybrid):
                 # Training
                 total_loss = 0.0
                 odd_even = True
-                for s, d, n, nodeflow in zip(src_batches, dst_batches, neg_batches, sampler):
+                for s, d, n, nodeflow, ws in zip(src_batches, dst_batches, neg_batches, sampler, weights_batches):
                     score = model.forward(nodeflow, s, d, n) if odd_even else model.forward(nodeflow, d, s, n)
+                    score = score * ws
                     odd_even = not odd_even
                     loss = score.mean()
                     total_loss = total_loss + loss
@@ -299,7 +304,7 @@ class HybridGCNRec(SVDppHybrid):
             loss += train(src, dst, neg)
             gen_time = time.time()
             if epoch < gcn_epochs - 1:
-                src, dst, neg = get_samples()
+                src, dst, neg, weights = get_samples()
             gen_time = time.time() - gen_time
 
             total_time = time.time() - start
