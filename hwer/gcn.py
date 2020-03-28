@@ -88,9 +88,11 @@ class GraphSageConvWithSamplingBase(nn.Module):
             weights = nn.Linear(feature_size * 2, feature_size * 2)
             init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
             init_bias(weights.bias)
+            layers.append(GaussianNoise(gaussian_noise))
             layers.append(weights)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
+        layers.append(GaussianNoise(gaussian_noise))
         W = nn.Linear(feature_size * 2, feature_size)
         layers.append(W)
         self.prediction_layer = prediction_layer
@@ -104,15 +106,6 @@ class GraphSageConvWithSamplingBase(nn.Module):
         init_bias(W.bias)
         self.W = nn.Sequential(*layers)
 
-        if not prediction_layer:
-            W_out = nn.Linear(feature_size, feature_size)
-            init_weight(W_out.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-            init_bias(W_out.bias)
-            W_out2 = nn.Linear(feature_size, feature_size)
-            init_weight(W_out2.weight, 'xavier_uniform_', 'linear')
-            init_bias(W_out2.bias)
-            self.W_out = nn.Sequential(GaussianNoise(gaussian_noise), W_out, nn.LeakyReLU(negative_slope=0.1), W_out2)
-
     def pre_process(self, nodes):
         h_agg = nodes.data['h_agg']
         h = nodes.data['h']
@@ -121,7 +114,6 @@ class GraphSageConvWithSamplingBase(nn.Module):
         return h, h_agg
 
     def process_node_data(self, h):
-        h = self.noise(h)
         return h
 
     def process_neighbourhood_data(self, h_agg):
@@ -130,9 +122,6 @@ class GraphSageConvWithSamplingBase(nn.Module):
     def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
-        if self.prediction_layer:
-            return {'h': h_new}
-        h_new = self.W_out(h_new)
         return {'h': h_new}
 
     def forward(self, nodes):
@@ -186,7 +175,7 @@ class GraphSageWithSampling(nn.Module):
         expansion = nn.Linear(embedding_dim, feature_size)
         init_bias(expansion.bias)
         init_weight(expansion.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
-        self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1))
+        self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1), noise)
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
