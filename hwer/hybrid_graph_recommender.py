@@ -120,17 +120,21 @@ class HybridGCNRec(SVDppHybrid):
                                                              affinities: List[Tuple[str, str, float]],
                                                              hyperparams):
 
-        walk_length = 3 # Fixed
+        walk_length = 3 # Fixed, change node2vec_generator if changed, see grouper from more itertools or commit 0a7d3b0755ae3ccafec5077edb4c8bf1ed1e3b34
+        # for a generic implementation
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 150
         p = 0.25
         q = hyperparams["q"] if "q" in hyperparams else 0.25
 
         total_users = len(user_ids)
         total_items = len(item_ids)
-        affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in affinities]
+        ratings = np.array([r for i, j, r in affinities])
+        min_rating, max_rating = np.min(ratings), np.max(ratings)
+        affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], 1 + r - min_rating) for i, j, r in affinities]
         affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
         walker = Walker(read_edgelist(affinities, weighted=True), p=p, q=q)
         walker.preprocess_transition_probs()
+        affinities = [(i, j, r - 1) for i, j, r in affinities]
 
         from more_itertools import distinct_combinations, chunked, grouper, interleave_longest
         from joblib import Parallel, delayed
@@ -138,18 +142,12 @@ class HybridGCNRec(SVDppHybrid):
         def sentences_generator():
             g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
 
-            def iter_walk(walk):
-                data_pairs = []
-                walk = list(set(walk))
-                np.random.shuffle(walk)
-                for c in grouper(walk, 2, walk[0]):
-                    data_pairs.append(((c[0], c[1]), 1))
-                return data_pairs
-
             def node2vec_generator():
                 for walk in g:
-                    for i in iter_walk(walk):
-                        yield i
+                    np.random.shuffle(walk)
+                    yield (walk[0], walk[1]), 1
+                    yield (walk[1], walk[2]), 1
+                    yield (walk[0], walk[2]), 1
 
             def affinities_generator():
                 np.random.shuffle(affinities)
