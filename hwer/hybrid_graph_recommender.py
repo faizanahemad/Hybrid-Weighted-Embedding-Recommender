@@ -119,7 +119,7 @@ class HybridGCNRec(SVDppHybrid):
                                                              affinities: List[Tuple[str, str, float]],
                                                              hyperparams):
 
-        walk_length = 3 # Fixed, change node2vec_generator if changed, see grouper from more itertools or commit 0a7d3b0755ae3ccafec5077edb4c8bf1ed1e3b34
+        walk_length = 3  # Fixed, change node2vec_generator if changed, see grouper from more itertools or commit 0a7d3b0755ae3ccafec5077edb4c8bf1ed1e3b34
         # for a generic implementation
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 150
         p = 0.25
@@ -130,27 +130,31 @@ class HybridGCNRec(SVDppHybrid):
         ratings = np.array([r for i, j, r in affinities])
         min_rating, max_rating = np.min(ratings), np.max(ratings)
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], 1 + r - min_rating) for i, j, r in affinities]
+        affinities_gen_data = [(i, j, r - 1) for i, j, r in affinities]
+
+        def affinities_generator():
+            np.random.shuffle(affinities_gen_data)
+            for i, j, r in affinities_gen_data:
+                yield (i, j), r + 1
+
+        if num_walks == 0:
+            return affinities_generator
+
         affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
         walker = Walker(read_edgelist(affinities, weighted=True), p=p, q=q)
         walker.preprocess_transition_probs()
-        affinities = [(i, j, r - 1) for i, j, r in affinities]
+
+        def node2vec_generator():
+            g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
+            for walk in g:
+                np.random.shuffle(walk)
+                yield (walk[0], walk[1]), 1
+                yield (walk[1], walk[2]), 1
+                yield (walk[0], walk[2]), 1
 
         from more_itertools import distinct_combinations, chunked, grouper, interleave_longest
 
         def sentences_generator():
-            g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
-
-            def node2vec_generator():
-                for walk in g:
-                    np.random.shuffle(walk)
-                    yield (walk[0], walk[1]), 1
-                    yield (walk[1], walk[2]), 1
-                    yield (walk[0], walk[2]), 1
-
-            def affinities_generator():
-                np.random.shuffle(affinities)
-                for i, j, r in affinities:
-                    yield (i, j), r + 1
             return interleave_longest(node2vec_generator(), affinities_generator())
 
         return sentences_generator
