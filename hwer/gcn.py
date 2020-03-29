@@ -166,7 +166,7 @@ class GraphSageWithSampling(nn.Module):
         embedding_dim = 2 ** int(math.log2(feature_size/4))
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
         if init_node_vectors is None:
-            nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
+            nn.init.normal_(self.node_emb.weight, std=1 / (100 * embedding_dim))
         else:
             if embedding_dim != feature_size:
                 from sklearn.decomposition import PCA

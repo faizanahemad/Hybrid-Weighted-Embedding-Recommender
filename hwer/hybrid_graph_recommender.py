@@ -272,7 +272,7 @@ class HybridGCNRec(SVDppHybrid):
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
                     gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                    10,  # number of neighbors for each node
+                    5,  # number of neighbors for each node
                     gcn_layers,  # number of layers in GCN
                     seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
                     prefetch=True,  # whether to prefetch the NodeFlows
@@ -312,7 +312,7 @@ class HybridGCNRec(SVDppHybrid):
         sampler = dgl.contrib.sampling.NeighborSampler(
             g_train,
             gcn_batch_size,
-            10,
+            5,
             gcn_layers,
             seed_nodes=torch.arange(g_train.number_of_nodes()),
             prefetch=True,
