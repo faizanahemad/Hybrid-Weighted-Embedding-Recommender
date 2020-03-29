@@ -6,38 +6,63 @@ import random
 # from time import time
 
 
+class DiGraph:
+    def __init__(self):
+        self.e = dict()
+        self.n = dict()
+
+    def add_edge(self, src, dst, weight):
+        self.e[(src, dst)] = weight
+        self.e[(dst, src)] = weight
+        if src in self.n:
+            self.n[src][dst] = dict(weight=weight)
+        else:
+            self.n[src] = {dst: dict(weight=weight)}
+
+        if dst in self.n:
+            self.n[dst][src] = dict(weight=weight)
+        else:
+            self.n[dst] = {src: dict(weight=weight)}
+
+    def __getitem__(self, item):
+        return self.n[item]
+
+    def nodes(self):
+        return list(self.n.keys())
+
+    def edges(self):
+        return list(self.e.keys())
+
+    def items(self):
+        return list(self.n.items())
+
+
 def read_edgelist(edge_list, weighted=False):
-    import networkx as nx
-    G = nx.DiGraph()
+    G = DiGraph()
 
     def read_unweighted(l):
         src, dst = l[0], l[1]
-        G.add_edge(src, dst)
-        G.add_edge(dst, src)
-        G[src][dst]['weight'] = 1.0
-        G[dst][src]['weight'] = 1.0
+        G.add_edge(src, dst, 1.0)
 
     def read_weighted(l):
         src, dst, w = l[0], l[1], l[2]
-        G.add_edge(src, dst)
-        G.add_edge(dst, src)
-        G[src][dst]['weight'] = float(w)
-        G[dst][src]['weight'] = float(w)
+        G.add_edge(src, dst, float(w))
 
     func = read_unweighted
     if weighted:
         func = read_weighted
     for x in edge_list:
         func(x)
-    G.add_edges_from(zip(G.nodes(), G.nodes()), weight=1)
+
+    for src, dst in zip(G.nodes(), G.nodes()):
+        G.add_edge(src, dst, 1.0)
 
     return G
 
 
 class Walker:
     def __init__(self, G, p, q, workers=None):
-        import networkx as nx
-        assert type(G) == nx.classes.digraph.DiGraph
+        assert type(G) == DiGraph
         self.p = p
         self.q = q
         self.nodes = list(G.nodes())
@@ -45,62 +70,7 @@ class Walker:
         self.G = {node: dict(G[node]) for node in self.nodes}
         self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
-    def node2vec_walk(self, walk_length, start_node):
-        '''
-        Simulate a random walk starting from start node.
-        '''
-        alias_nodes = self.alias_nodes
-        alias_edges = self.alias_edges
-        adjacency_list = self.adjacency_list
-
-        walk = [start_node]
-        # put next 5 lines as fn
-        cur_nbrs = adjacency_list[start_node]
-        n_neighbors = len(cur_nbrs)
-        if n_neighbors == 0:
-            return walk
-
-        walk.append(cur_nbrs[random.choices(range(n_neighbors), alias_nodes[start_node])[0]])
-        for _ in range(walk_length - 1):
-            cur = walk[-1]
-            cur_nbrs = adjacency_list[cur]
-            n_neighbors = len(cur_nbrs)
-            if n_neighbors == 0:
-                return walk
-            prev = walk[-2]
-            pos = (prev, cur)
-            walk.append(cur_nbrs[random.choices(range(n_neighbors), alias_edges[pos])[0]])
-
-        return walk
-
-    def simulate_walks(self, num_walks, walk_length):
-        '''
-        Repeatedly simulate random walks from each node.
-        '''
-        walks = []
-        nodes = self.nodes
-        node2vec_walk = self.node2vec_walk
-        for walk_iter in range(num_walks):
-            for node in nodes:
-                walks.append(node2vec_walk(
-                    walk_length=walk_length, start_node=node))
-
-        return walks
-
-    def simulate_walks_generator(self, num_walks, walk_length):
-        '''
-        Repeatedly simulate random walks from each node.
-        '''
-        nodes = self.nodes
-        node2vec_walk = self.node2vec_walk
-        for walk_iter in range(num_walks):
-            for node in nodes:
-                yield node2vec_walk(walk_length=walk_length, start_node=node)
-
     def simulate_walks_generator_optimised(self, num_walks, walk_length):
-        '''
-        Repeatedly simulate random walks from each node.
-        '''
         nodes = self.nodes
         import numpy as np
         np.random.shuffle(nodes)
@@ -108,9 +78,9 @@ class Walker:
         alias_nodes = self.alias_nodes
         alias_edges = self.alias_edges
 
-        for node in nodes:
-            node_cur_nbrs = adjacency_list[node]
-            for _ in range(num_walks):
+        for _ in range(num_walks):
+            for node in nodes:
+                node_cur_nbrs = adjacency_list[node]
                 cur, back = random.choices(node_cur_nbrs, alias_nodes[node])[0], node
                 walk = [back, cur]
                 for _ in range(walk_length - 1):
