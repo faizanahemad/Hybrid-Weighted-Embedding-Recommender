@@ -39,12 +39,19 @@ class HybridGCNRec(SVDppHybrid):
         iter = hyperparams["iter"] if "iter" in hyperparams else 3
         p = 1.0
         q = hyperparams["q"] if "q" in hyperparams else 0.5
+        total_examples = len(user_item_affinities)
 
         total_users = len(user_ids)
         total_items = len(item_ids)
 
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in user_item_affinities]
         affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
+        if total_examples <= 100_000:
+            Walker = Node2VecWalker
+        elif total_examples <= 1_000_000:
+            Walker = MemoryOptimisedNode2VecWalker
+        else:
+            Walker = RandomWalker
         walker = Walker(read_edgelist(affinities), p=p, q=q)
         walker.preprocess_transition_probs()
 
@@ -124,7 +131,7 @@ class HybridGCNRec(SVDppHybrid):
         num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 150
         p = 0.25
         q = hyperparams["q"] if "q" in hyperparams else 0.25
-
+        total_examples = len(affinities)
         total_users = len(user_ids)
         total_items = len(item_ids)
         ratings = np.array([r for i, j, r in affinities])
@@ -141,6 +148,12 @@ class HybridGCNRec(SVDppHybrid):
             return affinities_generator
 
         affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
+        if total_examples <= 100_000:
+            Walker = Node2VecWalker
+        elif total_examples <= 1_000_000:
+            Walker = MemoryOptimisedNode2VecWalker
+        else:
+            Walker = RandomWalker
         walker = Walker(read_edgelist(affinities, weighted=True), p=p, q=q)
         walker.preprocess_transition_probs()
 
@@ -325,7 +338,7 @@ class HybridGCNRec(SVDppHybrid):
             h = []
             for nf in sampler:
                 h.append(model.gcn.forward(nf))
-            h = torch.cat(h).numpy()
+        h = torch.cat(h).numpy()
 
         user_vectors, item_vectors = h[:total_users], h[total_users:]
         self.log.info(
@@ -512,7 +525,6 @@ class HybridGCNRec(SVDppHybrid):
 
                     score = model.forward(nodeflow, s, d) if odd_even else model.forward(nodeflow, d, s)
                     odd_even = not odd_even
-                    # r = r + torch.randn(r.shape)
                     loss = ((score - r) ** 2).mean()
                     total_loss = total_loss + loss.item()
                     opt.zero_grad()

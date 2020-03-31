@@ -60,7 +60,7 @@ def read_edgelist(edge_list, weighted=False):
     return G
 
 
-class Walker:
+class Node2VecWalker:
     def __init__(self, G, p, q, workers=None):
         assert type(G) == DiGraph
         self.p = p
@@ -135,8 +135,95 @@ class Walker:
 
         p = self.p
         q = self.q
-        for edge in self.edges:
+        for i, edge in enumerate(self.edges):
             alias_edges[edge] = edge_processor(edge[0], edge[1], G[edge[1]], p, q)
 
         self.alias_nodes = alias_nodes
         self.alias_edges = alias_edges
+
+
+class MemoryOptimisedNode2VecWalker:
+    def __init__(self, G, p, q, workers=None):
+        assert type(G) == DiGraph
+        self.p = p
+        self.q = q
+        self.nodes = list(G.nodes())
+        self.edges = list(G.edges())
+        self.G = {node: dict(G[node]) for node in self.nodes}
+        self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
+
+    def simulate_walks_generator_optimised(self, num_walks, walk_length):
+        nodes = self.nodes
+        import numpy as np
+        np.random.shuffle(nodes)
+        adjacency_list = self.adjacency_list
+
+        for _ in range(num_walks):
+            for node in nodes:
+                node_cur_nbrs = adjacency_list[node]
+                cur, back = random.choices(node_cur_nbrs, self.node_proba(node))[0], node
+                walk = [back, cur]
+                for _ in range(walk_length - 1):
+                    cur_nbrs = adjacency_list[cur]
+                    cur, back = random.choices(cur_nbrs, self.edge_proba((back, cur)))[0], cur
+                    walk.append(cur)
+                yield walk
+
+    def node_proba(self, node):
+        neigh_dict = self.G[node]
+        unnormalized_probs = [nbr['weight'] for nbr in neigh_dict.values()]
+        norm_const = sum(unnormalized_probs)
+        normalized_probs = [u_prob / norm_const for u_prob in unnormalized_probs]
+        return normalized_probs
+
+    def edge_proba(self, edge):
+        src, dst = edge[0], edge[1]
+        g_dst = self.G[edge[1]]
+        zipped = [(dst_nbr == src, dst_nbr == dst, g_dst[dst_nbr]['weight']) for dst_nbr in g_dst]
+        unnormalized_probs = []
+        for b1, b2, w in zipped:
+            if b1:
+                unnormalized_probs.append(w / self.p)
+            elif b2:
+                unnormalized_probs.append(1.0)
+            else:
+                unnormalized_probs.append(w / self.q)  # HERE
+        #
+        norm_const = sum(unnormalized_probs)
+        normalized_probs = [u_prob / norm_const for u_prob in unnormalized_probs]
+        return normalized_probs
+
+    def preprocess_transition_probs(self):
+        pass
+
+
+class RandomWalker:
+    def __init__(self, G, p, q, workers=None):
+        assert type(G) == DiGraph
+        self.p = p
+        self.q = q
+        self.nodes = list(G.nodes())
+        self.edges = list(G.edges())
+        self.G = {node: dict(G[node]) for node in self.nodes}
+        self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
+
+    def simulate_walks_generator_optimised(self, num_walks, walk_length):
+        nodes = self.nodes
+        import numpy as np
+        np.random.shuffle(nodes)
+        adjacency_list = self.adjacency_list
+
+        for _ in range(num_walks):
+            for node in nodes:
+                node_cur_nbrs = adjacency_list[node]
+                cur, back = random.choice(node_cur_nbrs), node
+                walk = [back, cur]
+                for _ in range(walk_length - 1):
+                    cur_nbrs = adjacency_list[cur]
+                    cur, back = random.choice(cur_nbrs), cur
+                    walk.append(cur)
+                yield walk
+
+    def preprocess_transition_probs(self):
+        pass
+
