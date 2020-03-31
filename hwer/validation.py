@@ -1,5 +1,6 @@
 import pandas as pd
 from bidict import bidict
+import random
 
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
@@ -19,7 +20,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import describe
 
-from .utils import average_precision, reciprocal_rank, ndcg, binary_ndcg, recall
+from .utils import average_precision, reciprocal_rank, ndcg, binary_ndcg, recall, binary_ndcg_v2
 
 
 def surprise_get_topk(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
@@ -49,6 +50,32 @@ def model_get_all(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
 
 
 model_get_topk = model_get_topk_knn
+
+
+def ncf_eval(model, train_affinities, validation_affinities, get_topk, item_list):
+    item_list = set(item_list)
+    train_interactions = defaultdict(set)
+    for u, i, _ in train_affinities:
+        train_interactions[u].add(i)
+    user_test_item = {}
+    actual = {}
+    for u, i, _ in validation_affinities:
+        user_test_item[u] = [i, *random.sample(item_list - train_interactions[u], 100)]
+        actual[u] = i
+
+    for u, items in user_test_item.items():
+        it = list(zip(items, model.predict([(u, i) for i in items])))
+        it = list(sorted(it, key=operator.itemgetter(1), reverse=True))
+        user_test_item[u], _ = zip(*it[:10])
+
+    hr = []
+    ndcg = []
+    for u, i in actual.items():
+        preds = user_test_item[u]
+        hr.append(i in preds)
+        ndcg.append(binary_ndcg_v2([i], preds))
+
+    return {"ncf_hr": np.mean(hr), "ncf_ndcg": np.mean(ndcg)}
 
 
 def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):
@@ -137,6 +164,8 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
     val_binary_ndcg_50 = np.mean([binary_ndcg(validation_actuals_score_dict[u], predictions_50[u]) for u in validation_users])
     val_recall_50 = np.mean([recall(validation_actuals_score_dict[u], predictions_50[u]) for u in validation_users])
 
+    ncf_metrics = ncf_eval(model, train_affinities, validation_affinities, get_topk, item_list)
+
     metrics = {"train_map": train_mean_ap, "map": mean_ap, "train_mrr": train_mrr, "mrr": mrr,
                "retrieval_time": pred_time,
                "train_ndcg@100": train_ndcg, "ndcg@100": val_ndcg,
@@ -146,7 +175,7 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
                "ndcg@20": val_ndcg_20, "ndcg_b@20": val_binary_ndcg_20,
                "ndcg@10": val_ndcg_10, "ndcg_b@10": val_binary_ndcg_10,
                "recall@10": val_recall_10, "recall@20": val_recall_20, "recall@50": val_recall_50,
-               "train_diversity": train_diversity, "diversity": diversity}
+               "train_diversity": train_diversity, "diversity": diversity, **ncf_metrics}
     return {"actuals": validation_actuals, "predictions": predictions_100,
             "train_actuals": train_actuals, "train_predictions": train_predictions,
             "train_actuals_score_dict": train_actuals_score_dict,

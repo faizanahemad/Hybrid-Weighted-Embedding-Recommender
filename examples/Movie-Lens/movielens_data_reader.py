@@ -81,14 +81,25 @@ def get_data_reader(dataset="100K"):
         users = pd.read_csv("100K/users.csv", sep="\t")
         movies = pd.read_csv("100K/movies.csv", sep="\t")
         # Based on GC-MC Paper and code: https://github.com/riannevdberg/gc-mc/blob/master/gcmc/preprocessing.py#L326
-        if "fold" in kwargs and type(kwargs["fold"])==int and 1 <= kwargs["fold"] <= 5:
-            train_file = "100K/ml-100k/u%s.base" % kwargs["fold"]
-            test_file = "100K/ml-100k/u%s.test" % kwargs["fold"]
+        test_method = kwargs["test_method"] if "test_method" in kwargs else "random-split"
+        if test_method == "random-split" or test_method == "stratified-split":
+            if "fold" in kwargs and type(kwargs["fold"]) == int and 1 <= kwargs["fold"] <= 5:
+                train_file = "100K/ml-100k/u%s.base" % kwargs["fold"]
+                test_file = "100K/ml-100k/u%s.test" % kwargs["fold"]
+            else:
+                train_file = "100K/ml-100k/u1.base"
+                test_file = "100K/ml-100k/u1.test"
+            train = pd.read_csv(train_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
+            test = pd.read_csv(test_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
+        elif test_method == "ncf":
+            train_file = "100K/ml-100k/u.data"
+            train = pd.read_csv(train_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])
+            test = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).tail(1))
+            train = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).head(-1))
         else:
-            train_file = "100K/ml-100k/u1.base"
-            test_file = "100K/ml-100k/u1.test"
-        train = pd.read_csv(train_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
-        test = pd.read_csv(test_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
+            raise ValueError()
+        train = train[["user", "item", "rating"]]
+        test = test[["user", "item", "rating"]]
         train["is_test"] = False
         test["is_test"] = True
         ratings = pd.concat((train, test))
@@ -110,6 +121,7 @@ def get_data_reader(dataset="100K"):
         return users, movies, ratings
 
     def read_data_1M(**kwargs):
+        test_method = kwargs["test_method"] if "test_method" in kwargs else "random-split"
         users = pd.read_csv("1M/users.csv", sep="\t", engine="python")
         movies = pd.read_csv("1M/movies.csv", sep="\t", engine="python")
         ratings = pd.read_csv("1M/ratings.csv", sep="\t", engine="python")
@@ -117,10 +129,19 @@ def get_data_reader(dataset="100K"):
         ratings['movie_id'] = ratings['movie_id'].astype(str)
         ratings['user_id'] = ratings['user_id'].astype(str)
         ratings.rename(columns={"user_id": "user", "movie_id": "item"}, inplace=True)
-        ratings = ratings[["user", "item", "rating"]]
         # Based on Paper https://arxiv.org/pdf/1605.09477.pdf (CF-NADE GC-MC)
-        train = ratings.sample(frac=0.9)
-        test = ratings[~ratings.index.isin(train.index)]
+        if test_method == "random-split":
+            train = ratings.sample(frac=0.9)
+            test = ratings[~ratings.index.isin(train.index)]
+        elif test_method == "stratified-split":
+            from sklearn.model_selection import train_test_split
+            train, test = train_test_split(ratings, test_size=0.1, stratify=[u for u, i, r in ratings])
+        elif test_method == "ncf":
+            train = ratings
+            test = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).tail(1))
+            train = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).head(-1))
+        train = train[["user", "item", "rating"]]
+        test = test[["user", "item", "rating"]]
         train["is_test"] = False
         test["is_test"] = True
         ratings = pd.concat((train, test))
@@ -142,9 +163,6 @@ def get_data_reader(dataset="100K"):
         movies.rename(columns={"movie_id": "item"}, inplace=True)
         users.rename(columns={"user_id": "user"}, inplace=True)
         return users, movies, ratings
-
-    def read_data_1M_leave_one_out(**kwargs):
-        pass
 
     if dataset == "100K":
         return read_data_100K

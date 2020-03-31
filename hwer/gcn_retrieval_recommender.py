@@ -2,6 +2,7 @@ import time
 from typing import List, Dict, Tuple, Optional
 
 import numpy as np
+from .recommendation_base import EntityType
 from more_itertools import flatten
 
 from .logging import getLogger
@@ -41,4 +42,7 @@ class GCNRetriever(HybridGCNRec):
         pass
 
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
-        return [self.mu] * len(user_item_pairs)
+        user_embeddings = self.get_embeddings([(u, EntityType.USER) for u, i in user_item_pairs])
+        item_embeddings = self.get_embeddings([(i, EntityType.ITEM) for u, i in user_item_pairs])
+        scores = (user_embeddings * item_embeddings).sum(1)
+        return [self.mu + s for s in scores]
