@@ -108,7 +108,7 @@ class HybridGCNRec(SVDppHybrid):
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
                                   conv_depth, g_train, triplet_vectors, margin,
                                   conv_arch, gaussian_noise):
-        from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling, GraphSAGENegativeSamplingEmbedding
+        from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling, GraphSAGENegativeSamplingEmbedding, GraphSageResnetWithSampling
         self.log.info("Getting Triplet Model for GCN")
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
                                                                 gcn_layers, g_train,

@@ -200,6 +200,132 @@ class GraphSageWithSampling(nn.Module):
         return result
 
 
+class ResnetConv(nn.Module):
+    def __init__(self, in_dims, out_dims, first_layer, prediction_layer, gaussian_noise, depth):
+        super(ResnetConv, self).__init__()
+        layers = []
+        depth = max(1, depth)
+        if first_layer:
+            inp = in_dims * 2
+        else:
+            inp = in_dims * 3
+        for i in range(depth - 1):
+            weights = nn.Linear(inp, inp)
+            init_weight(weights.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+            init_bias(weights.bias)
+            layers.append(GaussianNoise(gaussian_noise))
+            layers.append(weights)
+            layers.append(nn.LeakyReLU(negative_slope=0.1))
+
+        layers.append(GaussianNoise(gaussian_noise))
+        W = nn.Linear(inp, out_dims)
+        layers.append(W)
+        self.prediction_layer = prediction_layer
+        self.noise = GaussianNoise(gaussian_noise)
+
+        if not prediction_layer:
+            init_weight(W.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+            layers.append(nn.LeakyReLU(negative_slope=0.1))
+            skip = nn.Linear(in_dims, out_dims)
+            init_weight(skip.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+            init_bias(skip.bias)
+            self.skip = nn.Sequential(skip, nn.LeakyReLU(negative_slope=0.1))
+        else:
+            init_weight(W.weight, 'xavier_uniform_', 'linear')
+        init_bias(W.bias)
+        self.W = nn.Sequential(*layers)
+        self.first_layer = first_layer
+
+    def forward(self, nodes):
+        h_agg = nodes.data['h_agg']
+        h = nodes.data['h']
+        w = nodes.data['w'][:, None]
+        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+        if self.first_layer:
+            h_concat = torch.cat([h, h_agg], 1)
+        else:
+            h_residue = nodes.data['h_residue']
+            h_concat = torch.cat([h, h_agg, h_residue], 1)
+        h_new = self.W(h_concat)
+        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
+
+        if self.prediction_layer:
+            return {'h': h_new}
+        # skip
+        h_agg = self.skip(h_agg)
+        h_agg = h_agg / h_agg.norm(dim=1, keepdim=True).clamp(min=1e-6)
+        return {'h': h_new, 'h_residue': h_agg}
+
+
+class GraphSageResnetWithSampling(nn.Module):
+    def __init__(self, n_content_dims, feature_size, n_layers, G,
+                 conv_arch, gaussian_noise, conv_depth,
+                 init_node_vectors=None,):
+        super(GraphSageResnetWithSampling, self).__init__()
+
+        self.feature_size = feature_size
+        self.n_layers = n_layers
+        noise = GaussianNoise(gaussian_noise)
+
+        w1 = nn.Linear(n_content_dims, min(n_content_dims, feature_size*2))
+        proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise]
+        init_weight(w1.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_bias(w1.bias)
+        w = nn.Linear(min(n_content_dims, feature_size*2), feature_size)
+        init_weight(w.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        init_bias(w.bias)
+        proj.extend([w, nn.LeakyReLU(negative_slope=0.1)])
+        self.proj = nn.Sequential(*proj)
+
+        self.G = G
+        import math
+        embedding_dim = 2 ** int(math.log2(feature_size/4))
+        self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
+        if init_node_vectors is None:
+            nn.init.normal_(self.node_emb.weight, std=1 / (100 * embedding_dim))
+        else:
+            if embedding_dim != feature_size:
+                from sklearn.decomposition import PCA
+                init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
+            self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
+        expansion = nn.Linear(embedding_dim, feature_size)
+        init_bias(expansion.bias)
+        init_weight(expansion.weight, 'xavier_uniform_', 'leaky_relu', 0.1)
+        self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1), noise)
+        self.convs = nn.ModuleList(
+            [ResnetConv(feature_size, feature_size, i == 0, i == n_layers - 1, gaussian_noise, conv_depth) for i
+             in
+             range(n_layers)])
+
+        m_init = [FN.copy_src('h', 'h'),
+               FN.copy_src('one', 'one')]
+        r_init = [FN.sum('h', 'h_agg'), FN.sum('one', 'w')]
+        m = [FN.copy_src('h', 'h'),
+             FN.copy_src('h_residue', 'h_residue'),
+             FN.copy_src('one', 'one')]
+        r = [FN.sum('h', 'h_agg'), FN.sum('h_residue', 'h_residue'), FN.sum('one', 'w')]
+        self.msg = [m_init if i == 0 else m for i in range(n_layers)]
+        self.red = [r_init if i == 0 else r for i in range(n_layers)]
+
+    def forward(self, nf):
+        '''
+        nf: NodeFlow.
+        '''
+        nf.copy_from_parent(edge_embed_names=None)
+        for i in range(nf.num_layers):
+            nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
+            nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
+            mix_embeddings(nf.layers[i].data, self.proj)
+        if self.n_layers == 0:
+            return nf.layers[i].data['h']
+        for i in range(self.n_layers):
+            nf.block_compute(i, self.msg[i], self.red[i], self.convs[i])
+
+        result = nf.layers[self.n_layers].data['h']
+        assert (result != result).sum() == 0
+        return result
+
+
 def get_score(src, dst, mean, node_biases,
               h_dst, h_src):
 
