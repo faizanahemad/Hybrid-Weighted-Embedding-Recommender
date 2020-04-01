@@ -82,7 +82,7 @@ def fetch_svdpp_params(dataset):
     return p
 
 
-def get_best_params(dataset, gcn_conv_variant):
+def get_best_params(dataset):
 
     hyperparameter_content = fetch_content_params()
 

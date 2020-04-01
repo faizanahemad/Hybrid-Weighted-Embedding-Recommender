@@ -37,14 +37,10 @@ def init_args():
     ap.add_argument('--dataset', type=str, default="100K", metavar='N',
                     choices=["100K", "1M", "20M"],
                     help='')
-    ap.add_argument('--conv_arch', type=int, default=1, metavar='N',
-                    choices=[-1, 0,],
-                    help='')
     args = vars(ap.parse_args())
     algo = args["algo"]
     objective = args["objective"]
     dataset = args["dataset"]
-    conv_arch = int(args["conv_arch"])
-    hyperparamters_dict = get_best_params(dataset, conv_arch)
+    hyperparamters_dict = get_best_params(dataset)
     params = copy.deepcopy(hyperparamters_dict[algo])
     return params, dataset, objective, algo

@@ -27,9 +27,6 @@ if __name__ == '__main__':
     ap.add_argument('--dataset', type=str, default="100K", metavar='N',
                     choices=["100K", "1M", "20M"],
                     help='')
-    ap.add_argument('--conv_arch', type=int, default=0, metavar='N',
-                    choices=[-1, 0,],
-                    help='')
     ap.add_argument('--enable_baselines', type=str2bool, default=False, metavar='N',
                     help='')
     ap.add_argument('--test_method', type=str, default="ncf", metavar='N',
@@ -38,10 +35,9 @@ if __name__ == '__main__':
     args = vars(ap.parse_args())
     algos = args["algo"]
     dataset = args["dataset"]
-    conv_arch = int(args["conv_arch"])
     enable_baselines = args["enable_baselines"]
     test_method = args["test_method"]
-    hyperparamters_dict = get_best_params(dataset, conv_arch)
+    hyperparamters_dict = get_best_params(dataset)
 
     df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = build_dataset(dataset, fold=1, test_method=test_method)
     #
