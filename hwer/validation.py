@@ -216,16 +216,8 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
         train_mae = accuracy.mae(train_predictions, verbose=False)
         train_predictions = [p.est for p in train_predictions]
         predictions = [p.est for p in predictions]
-        user_rating_count_metrics = metrics_by_num_interactions_user(train_affinities, validation_affinities,
-                                                                     train_predictions, predictions,
-                                                                     ex_ee["actuals"], ex_ee["predictions"],
-                                                                     ex_ee["train_actuals"], ex_ee["train_predictions"],
-                                                                     ex_ee["train_actuals_score_dict"],
-                                                                     ex_ee["validation_actuals_score_dict"])
-        user_rating_count_metrics["algo"] = name
         stats = {"algo": name, "rmse": rmse, "mae": mae,
-                 "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time,
-                 "user_rating_count_metrics": user_rating_count_metrics}
+                 "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time}
         stats.update(ex_ee["metrics"])
         return stats
 
@@ -236,10 +228,7 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
                     **(algo_params["clustering"] if "clustering" in algo_params else dict(n_cltr_u=5, n_cltr_i=10))),
                 "normal": NormalPredictor()}
     results = list(map(lambda a: use_algo(algo_map[a], a), algo))
-    user_rating_count_metrics = pd.concat([r["user_rating_count_metrics"] for r in results])
-    for s in results:
-        del s["user_rating_count_metrics"]
-    return None, results, user_rating_count_metrics, None, None
+    return None, results, None, None
 
 
 def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
@@ -287,11 +276,10 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
     recsys.fast_inference = False
     recsys.super_fast_inference = False
     res2 = {"algo": algo, "time": total_time}
-    predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities,
+    predictions, actuals, stats = get_prediction_details(recsys, train_affinities,
                                                                                     validation_affinities,
                                                                                     model_get_topk, items)
     res2.update(stats)
-    user_rating_count_metrics["algo"] = res2["algo"]
     results = [res2]
 
     #
@@ -299,29 +287,25 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
         recsys.fast_inference = False
         recsys.super_fast_inference = True
         res4 = {"algo": "Super-Fast-%s" % algo, "time": total_time}
-        predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities,
+        predictions, actuals, stats = get_prediction_details(recsys, train_affinities,
                                                                    validation_affinities,
                                                                    model_get_topk, items)
         res4.update(stats)
-        urcm["algo"] = res4["algo"]
-        user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
         results.append(res4)
 
         #
         recsys.fast_inference = True
         recsys.super_fast_inference = False
         res = {"algo": "Fast-%s" % algo, "time": total_time}
-        predictions, actuals, stats, urcm = get_prediction_details(recsys, train_affinities, validation_affinities,
+        predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
                                                                    model_get_topk, items)
         res.update(stats)
-        urcm["algo"] = res["algo"]
-        user_rating_count_metrics = pd.concat((urcm, user_rating_count_metrics))
         results.append(res)
 
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
         error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
-    return recsys, results, user_rating_count_metrics, predictions, actuals
+    return recsys, results, predictions, actuals
 
 
 def test_content_only(train_affinities, validation_affinities, users, items, hyperparameters,
@@ -340,17 +324,16 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
     assert np.sum(np.isnan(recsys.predict([(users[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
 
     res = {"algo": "Content-Only", "time": total_time}
-    predictions, actuals, stats, user_rating_count_metrics = get_prediction_details(recsys, train_affinities,
+    predictions, actuals, stats = get_prediction_details(recsys, train_affinities,
                                                                                     validation_affinities,
                                                                                     model_get_topk, items)
     res.update(stats)
-    user_rating_count_metrics["algo"] = res["algo"]
 
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
         error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
     results = [res]
-    return recsys, results, user_rating_count_metrics, predictions, actuals
+    return recsys, results, predictions, actuals
 
 
 def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
@@ -361,34 +344,29 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
     assert len(algos) > 0
     algos = set(algos)
     assert len(algos - {"surprise", "content_only", "svdpp_hybrid", "gcn_hybrid", "gcn_retriever"}) == 0
-    user_rating_count_metrics = pd.DataFrame([],
-                                             columns=["algo", "user_rating_count", "rmse", "mae", "train_map", "map",
-                                                      "train_rmse", "train_mae"])
     if "surprise" in algos:
         hyperparameters_surprise = hyperparamters_dict["surprise"]
-        _, surprise_results, surprise_user_rating_count_metrics, _, _ = test_surprise(train_affinities,
+        _, surprise_results, _, _ = test_surprise(train_affinities,
                                                                                       validation_affinities,
                                                                                       algo=hyperparameters_surprise[
                                                                                           "algos"],
                                                                                       algo_params=hyperparameters_surprise,
                                                                                       rating_scale=rating_scale, )
         results.extend(surprise_results)
-        user_rating_count_metrics = pd.concat((user_rating_count_metrics, surprise_user_rating_count_metrics))
 
     if "content_only" in algos:
         hyperparameters = hyperparamters_dict["content_only"]
-        content_rec, res, content_user_rating_count_metrics, _, _ = test_content_only(train_affinities,
+        content_rec, res, _, _ = test_content_only(train_affinities,
                                                                                       validation_affinities, users,
                                                                                       items, hyperparameters,
                                                                                       get_data_mappers, rating_scale,
                                                                                       enable_error_analysis=enable_error_analysis)
         results.extend(res)
         recs.append(content_rec)
-        user_rating_count_metrics = pd.concat((user_rating_count_metrics, content_user_rating_count_metrics))
 
     if "svdpp_hybrid" in algos:
         hyperparameters = hyperparamters_dict["svdpp_hybrid"]
-        svd_rec, res, svdpp_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities,
+        svd_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities,
                                                                           users,
                                                                           items, hyperparameters, get_data_mappers,
                                                                           rating_scale,
@@ -397,11 +375,10 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
                                                                           enable_baselines=enable_baselines)
         results.extend(res)
         recs.append(svd_rec)
-        user_rating_count_metrics = pd.concat((user_rating_count_metrics, svdpp_user_rating_count_metrics))
 
     if "gcn_hybrid" in algos:
         hyperparameters = hyperparamters_dict["gcn_hybrid"]
-        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+        gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                         items, hyperparameters, get_data_mappers,
                                                                         rating_scale,
                                                                         algo="gcn_hybrid",
@@ -409,11 +386,10 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
                                                                         enable_baselines=enable_baselines)
         results.extend(res)
         recs.append(gcn_rec)
-        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
 
     if "gcn_retriever" in algos:
         hyperparameters = hyperparamters_dict["gcn_retriever"]
-        gcn_rec, res, gcn_user_rating_count_metrics, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+        gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                                                         items, hyperparameters, get_data_mappers,
                                                                         rating_scale,
                                                                         algo="gcn_retriever",
@@ -421,68 +397,8 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
                                                                         enable_baselines=enable_baselines)
         results.extend(res)
         recs.append(gcn_rec)
-        user_rating_count_metrics = pd.concat((user_rating_count_metrics, gcn_user_rating_count_metrics))
 
-    user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
-    return recs, results, user_rating_count_metrics
-
-
-def metrics_by_num_interactions_user(train_affinities: List[Tuple[str, str, float]],
-                                     validation_affinities: List[Tuple[str, str, float]],
-                                     train_predictions: np.ndarray, val_predictions: np.ndarray,
-                                     val_user_topk_actuals: Dict[str, List[str]],
-                                     val_user_topk_predictions: Dict[str, List[str]],
-                                     train_user_topk_actuals: Dict[str, List[str]],
-                                     train_user_topk_predictions: Dict[str, List[str]],
-                                     train_actuals_score_dict: Dict[str, Dict[str, float]],
-                                     validation_actuals_score_dict: Dict[str, Dict[str, float]],
-                                     mode="le",
-                                     increments=5):
-    columns = ["user", "item", "rating"]
-    train_affinities = pd.DataFrame(train_affinities, columns=columns)
-    validation_affinities = pd.DataFrame(validation_affinities, columns=columns)
-    train_affinities["prediction"] = train_predictions
-    validation_affinities["prediction"] = val_predictions
-    user_rating_count = train_affinities.groupby(["user"])["item"].agg(['count']).reset_index()
-    min_count = user_rating_count["count"].min()
-    max_count = user_rating_count["count"].max()
-
-    def rmse_mae_calc(affinities):
-        error = affinities["rating"] - affinities["prediction"]
-        rmse = np.sqrt(np.mean(np.square(error)))
-        mae = np.mean(np.abs(error))
-        return rmse, mae
-
-    results = []
-    for i in range(min_count, max_count, increments):
-        uc = min(i, max_count)
-        if mode == "exact":
-            users = set(user_rating_count[user_rating_count["count"] == uc]['user'])
-        elif mode == "le":
-            users = set(user_rating_count[user_rating_count["count"] <= uc]['user'])
-        elif mode == "ge":
-            users = set(user_rating_count[user_rating_count["count"] >= uc]['user'])
-        else:
-            raise ValueError("`mode` should be one of {'exact', 'le', 'ge'}")
-        train_rmse, train_mae = rmse_mae_calc(train_affinities[train_affinities.user.isin(users)])
-        val_rmse, val_mae = rmse_mae_calc(validation_affinities[validation_affinities.user.isin(users)])
-        train_map = np.mean(
-            [average_precision(train_user_topk_actuals[u], train_user_topk_predictions[u]) for u in users])
-        mean_ap = np.mean([average_precision(val_user_topk_actuals[u], val_user_topk_predictions[u]) for u in users])
-
-        train_mrr = np.mean(
-            [reciprocal_rank(train_user_topk_actuals[u], train_user_topk_predictions[u]) for u in users])
-        train_ndcg = np.mean([ndcg(train_actuals_score_dict[u], train_user_topk_predictions[u]) for u in users])
-
-        mrr = np.mean([reciprocal_rank(val_user_topk_actuals[u], val_user_topk_predictions[u]) for u in users])
-        val_ndcg = np.mean([ndcg(validation_actuals_score_dict[u], val_user_topk_predictions[u]) for u in users])
-
-        results.append(["", uc, val_rmse, val_mae, train_map, mean_ap, mrr, val_ndcg, train_rmse, train_mae, train_mrr,
-                        train_ndcg])
-    results = pd.DataFrame(results,
-                           columns=["algo", "user_rating_count", "rmse", "mae", "train_map", "map", "mrr", "ndcg",
-                                    "train_rmse", "train_mae", "train_mrr", "train_ndcg"])
-    return results
+    return recs, results
 
 
 def display_results(results: List[Dict[str, Any]]):
@@ -500,7 +416,7 @@ def display_results(results: List[Dict[str, Any]]):
     return df
 
 
-def visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities):
+def visualize_results(results, train_affinities, validation_affinities):
     # TODO: support which algos have to be plotted?
     validation_users_count = len(set([u for u, i, r in validation_affinities]))
     results['retrieval_time'] = results['retrieval_time'] / validation_users_count
@@ -561,52 +477,6 @@ def visualize_results(results, user_rating_count_metrics, train_affinities, vali
     plt.xticks(rotation=45, ha='right')
     plt.savefig('diversity_vs_algo.png', bbox_inches='tight')
 
-    unique_algos = user_rating_count_metrics["algo"].nunique()
-    markers = None
-    style = None
-    if unique_algos < 6:
-        style = 'algo'
-        markers = True
-    plt.figure(figsize=(12, 8))
-    plt.title("Mean Absolute Error vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="mae", hue="algo", markers=markers, style=style,
-                 data=user_rating_count_metrics)
-    plt.semilogx(basex=2)
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('mae_vs_urc.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("Mean Average Precision vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="map", hue="algo", markers=markers, style=style,
-                 data=user_rating_count_metrics)
-    plt.semilogx(basex=2)
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('map_vs_urc.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("RMSE vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="rmse", hue="algo", markers=markers, style=style,
-                 data=user_rating_count_metrics)
-    plt.semilogx(basex=2)
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('rmse_vs_urc.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("Mean Reciprocal Rank vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="mrr", hue="algo", markers=markers, style=style,
-                 data=user_rating_count_metrics)
-    plt.semilogx(basex=2)
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('mrr_vs_urc.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("NDCG vs User Rating Count")
-    sns.lineplot(x="user_rating_count", y="ndcg", hue="algo", markers=markers, style=style,
-                 data=user_rating_count_metrics)
-    plt.semilogx(basex=2)
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('ndcg_vs_urc.png', bbox_inches='tight')
-
 
 def get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items):
     def get_details(recsys, affinities):
@@ -629,16 +499,10 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
     predictions, actuals, rmse, mae = get_details(recsys, validation_affinities)
     train_predictions, _, train_rmse, train_mae = get_details(recsys, train_affinities)
     ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
-    user_rating_count_metrics = metrics_by_num_interactions_user(train_affinities, validation_affinities,
-                                                                 train_predictions, predictions,
-                                                                 ex_ee["actuals"], ex_ee["predictions"],
-                                                                 ex_ee["train_actuals"], ex_ee["train_predictions"],
-                                                                 ex_ee["train_actuals_score_dict"],
-                                                                 ex_ee["validation_actuals_score_dict"])
     stats = {"rmse": rmse, "mae": mae,
              "train_rmse": train_rmse, "train_mae": train_mae}
     stats.update(ex_ee["metrics"])
-    return predictions, actuals, stats, user_rating_count_metrics
+    return predictions, actuals, stats
 
 
 def error_analysis(train_affinities, validation_affinities, error_df, title):
@@ -718,7 +582,7 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
             train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2,
                                                                        stratify=[u for u, i, r in user_item_affinities])
 
-        recs, results, user_rating_count_metrics = test_once(train_affinities, validation_affinities,
+        recs, results = test_once(train_affinities, validation_affinities,
                                                              list(df_user.user.values),
                                                              list(df_item.item.values),
                                                              hyperparamters_dict,
@@ -732,17 +596,13 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
         y = np.array([u for u, i, r in user_item_affinities])
         skf = StratifiedKFold(n_splits=5)
         results = []
-        user_rating_count_metrics = pd.DataFrame([],
-                                                 columns=["algo", "user_rating_count", "rmse", "mae", "map",
-                                                          "train_rmse",
-                                                          "train_mae"])
         step = 0
         for train_index, test_index in skf.split(X, y):
             train_affinities, validation_affinities = X[train_index], X[test_index]
             train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
             validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
             #
-            recs, res, ucrms = test_once(train_affinities, validation_affinities, list(df_user.user.values),
+            recs, res = test_once(train_affinities, validation_affinities, list(df_user.user.values),
                                          list(df_item.item.values),
                                          hyperparamters_dict,
                                          prepare_data_mappers, rating_scale, algos,
@@ -751,16 +611,12 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
             rmse, ndcg = res[0]['rmse'], res[0]['ndcg@100']
             report({"rmse": rmse, "ndcg": ndcg}, step)
             step += 1
-            user_rating_count_metrics = pd.concat((user_rating_count_metrics, ucrms))
             results.extend(res)
 
     if display:
-        user_rating_count_metrics = user_rating_count_metrics.groupby(
-            ["algo", "user_rating_count"]).mean().reset_index()
-        user_rating_count_metrics = user_rating_count_metrics.sort_values(["algo", "user_rating_count"])
         results = display_results(results)
         results.to_csv("overall_results.csv")
-        visualize_results(results, user_rating_count_metrics, train_affinities, validation_affinities)
+        visualize_results(results, train_affinities, validation_affinities)
 
     else:
         results = pd.DataFrame.from_records(results)
