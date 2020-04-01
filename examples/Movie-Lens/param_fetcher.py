@@ -35,12 +35,9 @@ def fetch_content_params():
     return dict(n_dims=64, combining_factor=0.1, knn_params=knn_params)
 
 
-def fetch_gcn_params(dataset, algo, conv_arch):
+def fetch_gcn_params(dataset, algo):
     p = read_params("best_params/", dataset, algo)
-    p = p[conv_arch]
     p["knn_params"] = knn_params
-    p["collaborative_params"]["user_item_params"]["conv_arch"] = conv_arch
-    p["collaborative_params"]["prediction_network_params"]["conv_arch"] = conv_arch
 
     p["collaborative_params"]["user_item_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
@@ -58,11 +55,9 @@ def fetch_gcn_params(dataset, algo, conv_arch):
     return p
 
 
-def fetch_retriever_params(dataset, algo, conv_arch):
+def fetch_retriever_params(dataset, algo):
     p = read_params("best_params/", dataset, algo)
-    p = p[conv_arch]
     p["knn_params"] = knn_params
-    p["collaborative_params"]["user_item_params"]["conv_arch"] = conv_arch
 
     p["collaborative_params"]["user_item_params"]["verbose"] = verbose
 
@@ -93,9 +88,9 @@ def get_best_params(dataset, gcn_conv_variant):
 
     hyperparameters_svdpp = fetch_svdpp_params(dataset)
 
-    hyperparameters_gcn = fetch_gcn_params(dataset, "gcn", gcn_conv_variant)
+    hyperparameters_gcn = fetch_gcn_params(dataset, "gcn")
 
-    hyperparameters_gcn_retriever = fetch_retriever_params(dataset, "gcn_retriever", gcn_conv_variant)
+    hyperparameters_gcn_retriever = fetch_retriever_params(dataset, "gcn_retriever")
 
     hyperparameters_surprise = {"svdpp": {"n_factors": 64, "n_epochs": 40, "reg_all": 0.1},
                                 "svd": {"biased": True, "n_factors": 20},

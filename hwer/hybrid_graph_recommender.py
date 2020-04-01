@@ -106,13 +106,12 @@ class HybridGCNRec(SVDppHybrid):
         return user_vectors, item_vectors
 
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
-                                  conv_depth, g_train, triplet_vectors, margin,
-                                  conv_arch, gaussian_noise):
+                                  conv_depth, g_train, triplet_vectors, margin, gaussian_noise):
         from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling, GraphSAGENegativeSamplingEmbedding, GraphSageResnetWithSampling
         self.log.info("Getting Triplet Model for GCN")
         model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
                                                                 gcn_layers, g_train,
-                                                                conv_arch, gaussian_noise, conv_depth, triplet_vectors))
+                                                                gaussian_noise, conv_depth, triplet_vectors))
         return model
 
     def __user_item_affinities_triplet_trainer_data_gen_fn__(self, user_ids, item_ids,
@@ -190,7 +189,6 @@ class HybridGCNRec(SVDppHybrid):
         enable_gcn = hyperparams["enable_gcn"] if "enable_gcn" in hyperparams else False
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
-        conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
         total_users = len(user_ids)
         total_items = len(item_ids)
@@ -229,7 +227,7 @@ class HybridGCNRec(SVDppHybrid):
         n_content_dims = user_vectors.shape[1]
         model = self.__get_triplet_gcn_model__(n_content_dims, self.n_collaborative_dims, gcn_layers,
                                                conv_depth, g_train, triplet_vectors, margin,
-                                               conv_arch, gaussian_noise)
+                                               gaussian_noise)
         opt = torch.optim.Adam(model.parameters(), lr=gcn_lr, weight_decay=gcn_kernel_l2)
         generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
                                                                                               user_id_to_index,
@@ -361,7 +359,6 @@ class HybridGCNRec(SVDppHybrid):
         use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
-        conv_arch = hyperparams["conv_arch"] if "conv_arch" in hyperparams else 1
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
 
@@ -414,7 +411,7 @@ class HybridGCNRec(SVDppHybrid):
         zeroed_indices = [0, 1, total_users + 1]
         model = GraphSAGERecommenderImplicit(
             GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, g_train,
-                                  conv_arch, gaussian_noise, conv_depth),
+                                  gaussian_noise, conv_depth),
             mu, biases, zeroed_indices=zeroed_indices)
         opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
         scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
