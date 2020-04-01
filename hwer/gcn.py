@@ -336,7 +336,7 @@ class GraphSAGETripletEmbedding(nn.Module):
         h_neg = h_output[nf.map_from_parent_nid(-1, neg, True)]
         d_a_b = 1.0 - (h_src * h_dst).sum(1)
         d_a_c = 1.0 - (h_src * h_neg).sum(1)
-        score = F.leaky_relu(d_a_b + self.margin - d_a_c)
+        score = F.leaky_relu(d_a_b + self.margin - d_a_c, 0.2)
         return score
 
 
