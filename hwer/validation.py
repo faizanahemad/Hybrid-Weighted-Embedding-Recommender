@@ -488,11 +488,6 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
             raise AssertionError("Encountered Nan Predictions = %s" % count,
                                  np.array(affinities)[np.isnan(predictions)])
 
-        if np.sum(predictions <= 0) > 0:
-            indices = predictions <= 0
-            count = np.sum(indices)
-            raise AssertionError("Encountered Less than 0 Predictions = %s" % count,
-                                 list(zip(predictions[indices], np.array(affinities)[indices])))
         actuals = np.array([r for u, i, r in affinities])
         rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
         mae = np.mean(np.abs(actuals - predictions))
