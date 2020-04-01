@@ -60,7 +60,7 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
 
 
 class GraphSageConvWithSamplingBase(nn.Module):
-    def __init__(self, feature_size, prediction_layer, gaussian_noise, depth):
+    def __init__(self, feature_size, out_dims, prediction_layer, gaussian_noise, depth):
         super(GraphSageConvWithSamplingBase, self).__init__()
         layers = []
         depth = max(1, depth)
@@ -72,7 +72,7 @@ class GraphSageConvWithSamplingBase(nn.Module):
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
         layers.append(GaussianNoise(gaussian_noise))
-        W = nn.Linear(feature_size * 2, feature_size)
+        W = nn.Linear(feature_size * 2, out_dims)
         layers.append(W)
         self.prediction_layer = prediction_layer
         self.noise = GaussianNoise(gaussian_noise)
@@ -120,18 +120,11 @@ class GraphSageWithSampling(nn.Module):
         self.n_layers = n_layers
         GraphSageConvWithSampling = GraphSageConvWithSamplingBase
 
-        self.convs = nn.ModuleList(
-            [GraphSageConvWithSampling(feature_size, i == n_layers - 1, gaussian_noise, conv_depth) for i in
-             range(n_layers)])
         noise = GaussianNoise(gaussian_noise)
 
         w1 = nn.Linear(n_content_dims, min(n_content_dims, feature_size*2))
-        proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise]
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        w = nn.Linear(min(n_content_dims, feature_size*2), feature_size)
-        init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
-        proj.extend([w, nn.LeakyReLU(negative_slope=0.1)])
-        self.proj = nn.Sequential(*proj)
+
 
         self.G = G
         import math
@@ -144,9 +137,36 @@ class GraphSageWithSampling(nn.Module):
                 from sklearn.decomposition import PCA
                 init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
-        expansion = nn.Linear(embedding_dim, feature_size)
-        init_fc(expansion, 'xavier_uniform_', 'leaky_relu', 0.1)
-        self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1), noise)
+
+        expansions = []
+        projs = []
+        convs = []
+        # 1/8, 1/4, 1/2, 1
+        # 1/4, 1/2, 1
+        segments = min(n_layers, 4)
+        segments = list(reversed([2**i for i in range(segments)]))
+        for i in range(n_layers):
+            s = segments[i] if i < len(segments) else segments[-1]
+            dims = int(feature_size/s)
+            out_dims = min(feature_size, dims * 2)
+            expansion = nn.Linear(embedding_dim, dims)
+            init_fc(expansion, 'xavier_uniform_', 'leaky_relu', 0.1)
+            self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1), noise)
+            expansions.append(expansion)
+
+            w = nn.Linear(min(n_content_dims, feature_size * 2), dims)
+            init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
+            proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w, nn.LeakyReLU(negative_slope=0.1)]
+            proj = nn.Sequential(*proj)
+            projs.append(proj)
+            conv = GraphSageConvWithSampling(dims, out_dims, i == n_layers - 1, gaussian_noise, conv_depth)
+            convs.append(conv)
+
+        projs = [projs[0]] + projs
+        expansions = [expansions[0]] + expansions
+        self.convs = nn.ModuleList(convs)
+        self.projs = nn.ModuleList(projs)
+        self.expansions = nn.ModuleList(expansions)
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -158,9 +178,9 @@ class GraphSageWithSampling(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
+            nf.layers[i].data['h'] = self.expansions[i](self.node_emb(nf.layer_parent_nid(i) + 1))
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
-            mix_embeddings(nf.layers[i].data, self.proj)
+            mix_embeddings(nf.layers[i].data, self.projs[i])
         if self.n_layers == 0:
             return nf.layers[i].data['h']
         for i in range(self.n_layers):
