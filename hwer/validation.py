@@ -418,68 +418,6 @@ def display_results(results: List[Dict[str, Any]]):
     return df
 
 
-def visualize_results(results, train_affinities, validation_affinities):
-    # TODO: support which algos have to be plotted?
-    validation_users_count = len(set([u for u, i, r in validation_affinities]))
-    results['retrieval_time'] = results['retrieval_time'] / validation_users_count
-    results['retrieval_time'] = results['retrieval_time'] * 1000
-    plt.figure(figsize=(12, 8))
-    plt.title("Retrieval Time vs Algorithm")
-    sns.barplot(results.index, results.retrieval_time)
-    plt.xlabel("Algorithm")
-    plt.ylabel("Retrieval Time in milli-seconds")
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('retrieval_time_vs_algo.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("Mean Absolute Error vs Algorithm")
-    sns.barplot(results.index, results.mae)
-    plt.xlabel("Algorithm")
-    plt.ylabel("Mean Absolute Error")
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('mae_vs_algo.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("RMSE vs Algorithm")
-    sns.barplot(results.index, results.rmse)
-    plt.xlabel("Algorithm")
-    plt.ylabel("RMSE")
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('rmse_vs_algo.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("NDCG vs Algorithm")
-    sns.barplot(results.index, results["ndcg@100"])
-    plt.xlabel("Algorithm")
-    plt.ylabel("NDCG")
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('ndcg_vs_algo.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("Mean Average Precision vs Algorithm")
-    sns.barplot(results.index, results.map)
-    plt.xlabel("Algorithm")
-    plt.ylabel("Mean Average Precision")
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('map_vs_algo.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("Mean Reciprocal Rank vs Algorithm")
-    sns.barplot(results.index, results.mrr)
-    plt.xlabel("Algorithm")
-    plt.ylabel("Mean Reciprocal Rank ")
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('mrr_vs_algo.png', bbox_inches='tight')
-
-    plt.figure(figsize=(12, 8))
-    plt.title("Diversity vs Algorithm")
-    sns.barplot(results.index, results.diversity)
-    plt.xlabel("Algorithm")
-    plt.ylabel("Proportion of total items.")
-    plt.xticks(rotation=45, ha='right')
-    plt.savefig('diversity_vs_algo.png', bbox_inches='tight')
-
-
 def get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items):
     def get_details(recsys, affinities):
         predictions = np.array(recsys.predict([(u, i) for u, i, r in affinities]))
@@ -613,8 +551,6 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
     if display:
         results = display_results(results)
         results.to_csv("overall_results.csv")
-        visualize_results(results, train_affinities, validation_affinities)
-
     else:
         results = pd.DataFrame.from_records(results)
         results = results.groupby(["algo"]).mean().reset_index()

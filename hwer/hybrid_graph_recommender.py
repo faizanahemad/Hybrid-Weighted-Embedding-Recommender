@@ -88,6 +88,11 @@ class HybridGCNRec(SVDppHybrid):
             w2v2.train(corpus_file=sfile, epochs=2, total_examples=total_examples, total_words=len(walker.nodes))
 
             gc.collect()
+        import os
+        try:
+            os.remove(sfile)
+        except FileNotFoundError:
+            pass
         uv1 = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
         iv1 = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
 
