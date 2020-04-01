@@ -136,7 +136,7 @@ def get_data_reader(dataset="100K"):
             test = ratings[~ratings.index.isin(train.index)]
         elif test_method == "stratified-split":
             from sklearn.model_selection import train_test_split
-            train, test = train_test_split(ratings, test_size=0.1, stratify=[u for u, i, r in ratings])
+            train, test = train_test_split(ratings, test_size=0.1, stratify=ratings["user"])
         elif test_method == "ncf":
             train = ratings
             train["rating"] = 1
