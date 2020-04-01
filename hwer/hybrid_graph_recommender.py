@@ -46,12 +46,7 @@ class HybridGCNRec(SVDppHybrid):
 
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in user_item_affinities]
         affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-        if total_examples <= 100_000:
-            Walker = Node2VecWalker
-        elif total_examples <= 1_000_000:
-            Walker = MemoryOptimisedNode2VecWalker
-        else:
-            Walker = RandomWalker
+        Walker = RandomWalker
         walker = Walker(read_edgelist(affinities), p=p, q=q)
         walker.preprocess_transition_probs()
 
@@ -148,12 +143,7 @@ class HybridGCNRec(SVDppHybrid):
             return affinities_generator
 
         affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-        if total_examples <= 100_000:
-            Walker = Node2VecWalker
-        elif total_examples <= 1_000_000:
-            Walker = MemoryOptimisedNode2VecWalker
-        else:
-            Walker = RandomWalker
+        Walker = RandomWalker
         walker = Walker(read_edgelist(affinities, weighted=True), p=p, q=q)
         walker.preprocess_transition_probs()
 
