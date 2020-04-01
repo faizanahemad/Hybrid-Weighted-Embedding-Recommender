@@ -54,13 +54,15 @@ model_get_topk = model_get_topk_knn
 
 def ncf_eval(model, train_affinities, validation_affinities, get_topk, item_list):
     item_list = set(item_list)
-    train_interactions = defaultdict(set)
+    interactions = defaultdict(set)
     for u, i, _ in train_affinities:
-        train_interactions[u].add(i)
+        interactions[u].add(i)
+    for u, i, _ in validation_affinities:
+        interactions[u].add(i)
     user_test_item = {}
     actual = {}
     for u, i, _ in validation_affinities:
-        user_test_item[u] = [i, *random.sample(item_list - train_interactions[u], 100)]
+        user_test_item[u] = [i, *random.sample(item_list - interactions[u], 100)]
         actual[u] = i
 
     for u, items in user_test_item.items():

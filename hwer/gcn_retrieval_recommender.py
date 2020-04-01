@@ -45,4 +45,4 @@ class GCNRetriever(HybridGCNRec):
         user_embeddings = self.get_embeddings([(u, EntityType.USER) for u, i in user_item_pairs])
         item_embeddings = self.get_embeddings([(i, EntityType.ITEM) for u, i in user_item_pairs])
         scores = (user_embeddings * item_embeddings).sum(1)
-        return [self.mu + s for s in scores]
+        return list(scores)

@@ -94,6 +94,7 @@ def get_data_reader(dataset="100K"):
         elif test_method == "ncf":
             train_file = "100K/ml-100k/u.data"
             train = pd.read_csv(train_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])
+            train["rating"] = 1
             test = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).tail(1))
             train = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).head(-1))
         else:
@@ -138,6 +139,7 @@ def get_data_reader(dataset="100K"):
             train, test = train_test_split(ratings, test_size=0.1, stratify=[u for u, i, r in ratings])
         elif test_method == "ncf":
             train = ratings
+            train["rating"] = 1
             test = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).tail(1))
             train = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).head(-1))
         train = train[["user", "item", "rating"]]
@@ -169,6 +171,14 @@ def get_data_reader(dataset="100K"):
     elif dataset == "1M":
         return read_data_1M
     elif dataset == "20M":
+        pass
+    elif dataset == "netflix":
+        pass
+    elif dataset == "pinterest":
+        pass
+    elif dataset == "msd":
+        pass
+    elif dataset == "douban":
         pass
     else:
         raise ValueError("Unsupported Dataset")
