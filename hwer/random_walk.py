@@ -67,7 +67,7 @@ class Node2VecWalker:
         self.q = q
         self.nodes = list(G.nodes())
         self.edges = list(G.edges())
-        self.G = {node: dict(G[node]) for node in self.nodes}
+        self.G = G
         self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
     def simulate_walks_generator_optimised(self, num_walks, walk_length):
@@ -149,7 +149,7 @@ class MemoryOptimisedNode2VecWalker:
         self.q = q
         self.nodes = list(G.nodes())
         self.edges = list(G.edges())
-        self.G = {node: dict(G[node]) for node in self.nodes}
+        self.G = G
         self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
     def simulate_walks_generator_optimised(self, num_walks, walk_length):
@@ -203,8 +203,7 @@ class RandomWalker:
         self.p = p
         self.q = q
         self.nodes = list(G.nodes())
-        self.edges = list(G.edges())
-        self.G = {node: dict(G[node]) for node in self.nodes}
+        self.G = G
         self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
     def simulate_walks_generator_optimised(self, num_walks, walk_length):

@@ -356,7 +356,14 @@ class GraphSAGETripletEmbedding(nn.Module):
         h_neg = h_output[nf.map_from_parent_nid(-1, neg, True)]
         d_a_b = 1.0 - (h_src * h_dst).sum(1)
         d_a_c = 1.0 - (h_src * h_neg).sum(1)
-        score = F.leaky_relu(d_a_b + self.margin - d_a_c, 0.2)
+        score = d_a_b + self.margin - d_a_c
+
+        f = 0.1
+        a = 2*f
+        b = -1 * f ** 2
+
+        score = torch.where(score >= f, score ** 2, a * score + b)
+        # score = torch.where(score >= 0.1, score ** 2, 0.2 * score)
         return score
 
 
