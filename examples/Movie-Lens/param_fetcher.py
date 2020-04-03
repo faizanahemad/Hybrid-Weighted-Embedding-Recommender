@@ -52,6 +52,11 @@ def fetch_gcn_params(dataset, algo):
                                                                                           p["collaborative_params"][
                                                                                               "user_item_params"] else \
     p["collaborative_params"]["user_item_params"]["enable_node2vec"]
+
+    p["collaborative_params"]["user_item_params"]["enable_svd"] = enable_svd if "enable_svd" not in \
+                                                                                p["collaborative_params"][
+                                                                                    "user_item_params"] else \
+        p["collaborative_params"]["user_item_params"]["enable_svd"]
     return p
 
 
@@ -70,6 +75,11 @@ def fetch_retriever_params(dataset, algo):
                                                                                           p["collaborative_params"][
                                                                                               "user_item_params"] else \
     p["collaborative_params"]["user_item_params"]["enable_node2vec"]
+
+    p["collaborative_params"]["user_item_params"]["enable_svd"] = enable_svd if "enable_svd" not in \
+                                                                                          p["collaborative_params"][
+                                                                                              "user_item_params"] else \
+        p["collaborative_params"]["user_item_params"]["enable_svd"]
     return p
 
 
@@ -106,6 +116,7 @@ n_neighbors = 500
 knn_params = dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, })
 enable_node2vec = True
 enable_gcn = True
+enable_svd = True
 verbose = 2
 
 

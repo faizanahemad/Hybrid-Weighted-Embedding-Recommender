@@ -195,6 +195,7 @@ class HybridGCNRec(SVDppHybrid):
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
+        enable_svd = hyperparams["enable_svd"] if "enable_svd" in hyperparams else False
         total_users = len(user_ids)
         total_items = len(item_ids)
 
@@ -214,8 +215,37 @@ class HybridGCNRec(SVDppHybrid):
             self.w2v_user_vectors = w2v_user_vectors
             self.w2v_item_vectors = w2v_item_vectors
             user_triplet_vectors, item_triplet_vectors = w2v_user_vectors, w2v_item_vectors
+        if enable_svd:
+            from surprise import Dataset
+            from surprise import Reader
+            from surprise import SVD
+
+            reader = Reader(rating_scale=(-1, 1))
+            import pandas as pd
+            ratings = [(user_id_to_index[u], total_users + item_id_to_index[i], 1) for u, i, r in user_item_affinities]
+            negs = list(zip(np.random.randint(0, total_users, len(ratings) * 5),
+                            np.random.randint(total_users, total_users + total_items, len(ratings) * 5),
+                            [-1] * (len(ratings) * 5)))
+            ratings = ratings + negs
+            np.random.shuffle(ratings)
+            train = pd.DataFrame(ratings)
+            train = Dataset.load_from_df(train, reader).build_full_trainset()
+            svd_model = SVD(n_factors=self.n_collaborative_dims, biased=False)
+            svd_model.fit(train)
+            user_svd_vectors = [svd_model.pu[svd_model.trainset.to_inner_uid(i)] for i in range(total_users)]
+            item_svd_vectors = [svd_model.qi[svd_model.trainset.to_inner_iid(i + total_users)] for i in range(total_items)]
+            user_svd_vectors = np.vstack(user_svd_vectors)
+            item_svd_vectors = np.vstack(item_svd_vectors)
+
+            from .utils import unit_length
+            user_svd_vectors = unit_length(user_svd_vectors, axis=1)
+            item_svd_vectors = unit_length(item_svd_vectors, axis=1)
+
+            # return user_svd_vectors, item_svd_vectors
 
         if not enable_gcn or gcn_epochs <= 0:
+            if enable_svd:
+                user_triplet_vectors, item_triplet_vectors = user_svd_vectors, item_svd_vectors
             return user_triplet_vectors, item_triplet_vectors
 
         triplet_vectors = None
@@ -226,10 +256,13 @@ class HybridGCNRec(SVDppHybrid):
 
         total_users = len(user_ids)
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i], r) for u, i, r in user_item_affinities]
-        g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids),
-                                  np.concatenate((user_vectors, item_vectors)))
+        content_vectors = np.concatenate((user_vectors, item_vectors))
+        if enable_svd:
+            content_vectors = np.concatenate((content_vectors, np.concatenate((user_svd_vectors, item_svd_vectors))), axis=1)
+
+        g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids), content_vectors)
         g_train.readonly()
-        n_content_dims = user_vectors.shape[1]
+        n_content_dims = content_vectors.shape[1]
         model = self.__get_triplet_gcn_model__(n_content_dims, self.n_collaborative_dims, gcn_layers,
                                                conv_depth, g_train, triplet_vectors, margin,
                                                gaussian_noise)
