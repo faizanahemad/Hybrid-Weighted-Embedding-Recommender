@@ -65,8 +65,12 @@ def ncf_eval(model, train_affinities, validation_affinities, get_topk, item_list
         user_test_item[u] = [i, *random.sample(item_list - interactions[u], 100)]
         actual[u] = i
 
+    from surprise import SVD, SVDpp
     for u, items in user_test_item.items():
-        it = list(zip(items, model.predict([(u, i) for i in items])))
+        if isinstance(model, SVD) or isinstance(model, SVDpp):
+            it = list(zip(items, [model.predict(u, i) for i in items]))
+        else:
+            it = list(zip(items, model.predict([(u, i) for i in items])))
         it = list(sorted(it, key=operator.itemgetter(1), reverse=True))
         user_test_item[u], _ = zip(*it[:10])
 

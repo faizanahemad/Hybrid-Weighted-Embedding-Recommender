@@ -112,9 +112,10 @@ class HybridGCNRec(SVDppHybrid):
 
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
                                   conv_depth, g_train, triplet_vectors, margin, gaussian_noise):
-        from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling, GraphSAGENegativeSamplingEmbedding, GraphSageResnetWithSampling
+        from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling, GraphSAGENegativeSamplingEmbedding, \
+            GraphSageResnetWithSampling, GraphSAGELogisticEmbedding, GraphSAGELogisticEmbeddingv2
         self.log.info("Getting Triplet Model for GCN")
-        model = GraphSAGETripletEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
+        model = GraphSAGELogisticEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
                                                                 gcn_layers, g_train,
                                                                 gaussian_noise, conv_depth, triplet_vectors))
         return model
@@ -274,23 +275,31 @@ class HybridGCNRec(SVDppHybrid):
                                                                                               hyperparams)
 
         def get_samples():
-            src, dst, neg, weights = [], [], [], []
+            src, dst, weights = [], [], []
             for (u, v), r in generate_training_samples():
                 src.append(u)
                 dst.append(v)
-                weights.append(r)
+                weights.append(1.0)
 
             src = torch.LongTensor(src)
             dst = torch.LongTensor(dst)
-            weights = torch.LongTensor(weights)
+            weights = torch.FloatTensor(weights)
+
+            ns = 2
+            src_neg = torch.randint(0, total_users+total_items, (len(src) * ns,))
+            dst_neg = torch.randint(0, total_users + total_items, (len(src) * ns,))
+            weights_neg = torch.tensor([0.0] * len(src) * ns)
+            src = torch.cat((src, src_neg), 0)
+            dst = torch.cat((dst, dst_neg), 0)
+            weights = torch.cat((weights, weights_neg), 0)
+
             shuffle_idx = torch.randperm(len(src))
             src = src[shuffle_idx]
             dst = dst[shuffle_idx]
-            neg = torch.randint(0, total_users+total_items, (len(src),))
             weights = weights[shuffle_idx]
-            return src, dst, neg, weights
+            return src, dst, weights
 
-        src, dst, neg, weights = get_samples()
+        src, dst, weights = get_samples()
 
         model.train()
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -300,14 +309,13 @@ class HybridGCNRec(SVDppHybrid):
         for epoch in range(gcn_epochs):
             start = time.time()
             loss = 0.0
-            def train(src, dst, neg):
+            def train(src, dst):
 
                 src_batches = src.split(gcn_batch_size)
                 dst_batches = dst.split(gcn_batch_size)
-                neg_batches = neg.split(gcn_batch_size)
                 weights_batches = weights.split(gcn_batch_size)
                 model.train()
-                seed_nodes = torch.cat(sum([[s, d, n] for s, d, n in zip(src_batches, dst_batches, neg_batches)], []))
+                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
                     gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
@@ -322,12 +330,9 @@ class HybridGCNRec(SVDppHybrid):
 
                 # Training
                 total_loss = 0.0
-                odd_even = True
-                for s, d, n, nodeflow, ws in zip(src_batches, dst_batches, neg_batches, sampler, weights_batches):
-                    score = model.forward(nodeflow, s, d, n) if odd_even else model.forward(nodeflow, d, s, n)
-                    score = score * ws
-                    odd_even = not odd_even
-                    loss = score.mean()
+                for s, d, nodeflow, ws in zip(src_batches, dst_batches, sampler, weights_batches):
+                    score = model.forward(nodeflow, s, d, ws)
+                    loss = score.sum()
                     total_loss = total_loss + loss
 
                     opt.zero_grad()
@@ -335,10 +340,10 @@ class HybridGCNRec(SVDppHybrid):
                     opt.step()
                 return total_loss / len(src_batches)
 
-            loss += train(src, dst, neg)
+            loss += train(src, dst)
             gen_time = time.time()
             if epoch < gcn_epochs - 1:
-                src, dst, neg, weights = get_samples()
+                src, dst, weights = get_samples()
             gen_time = time.time() - gen_time
 
             total_time = time.time() - start

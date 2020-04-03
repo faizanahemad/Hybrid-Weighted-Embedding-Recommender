@@ -102,7 +102,7 @@ def get_best_params(dataset):
 
     hyperparameters_gcn_retriever = fetch_retriever_params(dataset, "gcn_retriever")
 
-    hyperparameters_surprise = {"svdpp": {"n_factors": 64, "n_epochs": 40, "reg_all": 0.1},
+    hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20, "reg_all": 0.1},
                                 "svd": {"biased": True, "n_factors": 20},
                                 "algos": ["svdpp"]}
     hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn,
