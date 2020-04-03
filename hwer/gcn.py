@@ -318,9 +318,9 @@ def get_score(src, dst, mean, node_biases,
     return score
 
 
-class GraphSAGERecommenderImplicit(nn.Module):
+class GraphSAGERecommender(nn.Module):
     def __init__(self, gcn, mu, node_biases, zeroed_indices):
-        super(GraphSAGERecommenderImplicit, self).__init__()
+        super(GraphSAGERecommender, self).__init__()
 
         self.gcn = gcn
         if node_biases is not None:

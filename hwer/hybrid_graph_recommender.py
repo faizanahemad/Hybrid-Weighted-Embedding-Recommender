@@ -347,7 +347,7 @@ class HybridGCNRec(SVDppHybrid):
                                      user_vectors: np.ndarray, item_vectors: np.ndarray,
                                      user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
-        from .gcn import build_dgl_graph, GraphSageWithSampling, GraphSAGERecommenderImplicit, get_score
+        from .gcn import build_dgl_graph, GraphSageWithSampling, GraphSAGERecommender, get_score
         import torch
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         cpu = torch.device('cpu')
@@ -414,7 +414,7 @@ class HybridGCNRec(SVDppHybrid):
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()
         zeroed_indices = [0, 1, total_users + 1]
-        model = GraphSAGERecommenderImplicit(
+        model = GraphSAGERecommender(
             GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, g_train,
                                   gaussian_noise, conv_depth),
             mu, biases, zeroed_indices=zeroed_indices)
