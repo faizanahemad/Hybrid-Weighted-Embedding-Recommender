@@ -2,7 +2,6 @@ import time
 from typing import List, Dict, Tuple, Optional
 
 import numpy as np
-from more_itertools import flatten
 
 from .logging import getLogger
 from .random_walk import *
@@ -137,12 +136,12 @@ class HybridGCNRec(SVDppHybrid):
         ratings = np.array([r for i, j, r in affinities])
         min_rating, max_rating = np.min(ratings), np.max(ratings)
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], 1 + r - min_rating) for i, j, r in affinities]
-        affinities_gen_data = [(i, j, r - 1) for i, j, r in affinities]
+        affinities_gen_data = [(i, j, r) for i, j, r in affinities]
 
         def affinities_generator():
             np.random.shuffle(affinities_gen_data)
             for i, j, r in affinities_gen_data:
-                yield (i, j), r + 1
+                yield (i, j), r
 
         if num_walks == 0:
             return affinities_generator
@@ -250,16 +249,21 @@ class HybridGCNRec(SVDppHybrid):
             return user_triplet_vectors, item_triplet_vectors
 
         triplet_vectors = None
-        if enable_node2vec:
+        if enable_node2vec and not enable_svd:
             triplet_vectors = np.concatenate(
                 (np.zeros((1, user_triplet_vectors.shape[1])), user_triplet_vectors, item_triplet_vectors))
+            triplet_vectors = torch.FloatTensor(triplet_vectors)
+
+        if enable_svd:
+            triplet_vectors = np.concatenate(
+                (np.zeros((1, user_svd_vectors.shape[1])), user_svd_vectors, item_svd_vectors))
             triplet_vectors = torch.FloatTensor(triplet_vectors)
 
         total_users = len(user_ids)
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i], r) for u, i, r in user_item_affinities]
         content_vectors = np.concatenate((user_vectors, item_vectors))
-        if enable_svd:
-            content_vectors = np.concatenate((content_vectors, np.concatenate((user_svd_vectors, item_svd_vectors))), axis=1)
+        if enable_node2vec:
+            content_vectors = np.concatenate((content_vectors, np.concatenate((user_triplet_vectors, item_triplet_vectors))), axis=1)
 
         g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids), content_vectors)
         g_train.readonly()
@@ -275,11 +279,12 @@ class HybridGCNRec(SVDppHybrid):
                                                                                               hyperparams)
 
         def get_samples():
-            src, dst, weights = [], [], []
+            src, dst, weights, error_weights = [], [], [], []
             for (u, v), r in generate_training_samples():
                 src.append(u)
                 dst.append(v)
                 weights.append(1.0)
+                error_weights.append(r)
 
             src = torch.LongTensor(src)
             dst = torch.LongTensor(dst)
@@ -297,11 +302,44 @@ class HybridGCNRec(SVDppHybrid):
             src = src[shuffle_idx]
             dst = dst[shuffle_idx]
             weights = weights[shuffle_idx]
+            weights = weights.clamp(min=1e-7, max=1-1e-7)
             return src, dst, weights
 
         src, dst, weights = get_samples()
 
         model.train()
+
+        def pretrain():
+            opt = torch.optim.Adam(model.parameters(), lr=gcn_lr, weight_decay=gcn_kernel_l2)
+            target = torch.tensor(np.concatenate((user_svd_vectors, item_svd_vectors)))
+            for epoch in range(gcn_epochs * 2):
+                seed_nodes = torch.randperm(g_train.number_of_nodes())
+                sampler = dgl.contrib.sampling.NeighborSampler(
+                    g_train,
+                    gcn_batch_size,
+                    5,
+                    gcn_layers,
+                    seed_nodes=seed_nodes,
+                    prefetch=True,
+                    add_self_loop=True,
+                    shuffle=False,
+                    num_workers=self.cpu
+                )
+                nodes = seed_nodes.split(gcn_batch_size)
+                total_loss = 0
+                for nf, node in zip(sampler, nodes):
+                    vec = model.gcn.forward(nf)
+                    loss = ((target[node] - vec) ** 2).mean()
+                    opt.zero_grad()
+                    loss.backward()
+                    opt.step()
+                    total_loss += loss.item()
+                self.log.info('Pretraining Epoch %2d/%2d: ' % (int(epoch + 1),
+                                               gcn_epochs) + " loss = %.4f" % (total_loss))
+
+        if enable_svd:
+            pretrain()
+
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
         params = sum([np.prod(p.size()) for p in model_parameters])
         self.log.info("Built KNN Network, model params = %s, examples = %s, model = \n%s", params, len(src), model)
