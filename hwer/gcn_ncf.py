@@ -22,17 +22,16 @@ from .gcn import *
 
 
 class NCF(nn.Module):
-    def __init__(self, feature_size, depth, gaussian_noise,
-                 content, total_users, total_items):
+    def __init__(self, feature_size, depth, gaussian_noise, content):
         super(NCF, self).__init__()
         noise = GaussianNoise(gaussian_noise)
         # self.node_emb = nn.Embedding(total_users + total_items, feature_size)
         self.content_emb = nn.Embedding.from_pretrained(torch.tensor(content, dtype=torch.float), freeze=True)
         # nn.init.normal_(self.node_emb.weight, std=1 / (10 * feature_size))
 
-        wc1 = nn.Linear(content.shape[1] * 2, feature_size * 2)
+        wc1 = nn.Linear(content.shape[1] * 2, feature_size)
         init_fc(wc1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        wc2 = nn.Linear(feature_size * 2, feature_size)
+        wc2 = nn.Linear(feature_size, feature_size)
         init_fc(wc2, 'xavier_uniform_', 'leaky_relu', 0.1)
 
         self.cem = nn.Sequential(wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
@@ -41,7 +40,7 @@ class NCF(nn.Module):
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers = [noise, w1, nn.LeakyReLU(negative_slope=0.1)]
 
-        for _ in range(depth):
+        for _ in range(depth - 1):
             wx = nn.Linear(feature_size * 2, feature_size * 2)
             init_fc(wx, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.extend([noise, wx, nn.LeakyReLU(negative_slope=0.1)])
@@ -64,6 +63,53 @@ class NCF(nn.Module):
         out = self.w_out(out).flatten()
         out = F.sigmoid(out)
         return out
+
+
+class NCFEmbedding(nn.Module):
+    def __init__(self, feature_size, depth, gaussian_noise, content):
+        super(NCFEmbedding, self).__init__()
+        noise = GaussianNoise(gaussian_noise)
+
+        wc1 = nn.Linear(content.shape[1], feature_size)
+        init_fc(wc1, 'xavier_uniform_', 'leaky_relu', 0.1)
+        wc2 = nn.Linear(feature_size, feature_size)
+        init_fc(wc2, 'xavier_uniform_', 'leaky_relu', 0.1)
+        content_emb = nn.Embedding.from_pretrained(torch.tensor(content, dtype=torch.float), freeze=True)
+        self.cem = nn.Sequential(content_emb, wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
+
+        w1 = nn.Linear(feature_size * 2, feature_size * 2)
+        init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
+        layers = [noise, w1, nn.LeakyReLU(negative_slope=0.1)]
+
+        for _ in range(depth - 1):
+            wx = nn.Linear(feature_size * 2, feature_size * 2)
+            init_fc(wx, 'xavier_uniform_', 'leaky_relu', 0.1)
+            layers.extend([noise, wx, nn.LeakyReLU(negative_slope=0.1)])
+
+        w_out = nn.Linear(feature_size * 2, feature_size)
+        init_fc(w_out, 'xavier_uniform_', 'tanh', 0.1)
+        layers.extend([w_out, nn.Tanh()])
+        self.W = nn.Sequential(*layers)
+
+    def forward(self, node, g_node):
+        hc_src = self.cem(node)
+        vec = torch.cat([hc_src, g_node], 1)
+        vec = self.W(vec)
+        vec = vec / vec.norm(dim=1, keepdim=True).clamp(min=1e-5)
+        return vec
+
+
+class RecImplicitEmbedding(nn.Module):
+    def __init__(self, gcn: GraphSageWithSampling, ncf: NCFEmbedding):
+        super(RecImplicitEmbedding, self).__init__()
+        self.gcn = gcn
+        self.ncf = ncf
+
+    def forward(self, nf, src, dst):
+        h_output = self.gcn(nf)
+        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
+        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
+        return self.ncf(src, h_src), self.ncf(dst, h_dst)
 
 
 class RecImplicit(nn.Module):
@@ -89,6 +135,218 @@ class GcnNCF(HybridGCNRec):
         assert n_collaborative_dims % 2 == 0
         self.cpu = int(os.cpu_count() / 2)
 
+    def __user_item_affinities_triplet_trainer_data_gen_fn__(self, user_ids, item_ids,
+                                                             user_id_to_index,
+                                                             item_id_to_index,
+                                                             affinities: List[Tuple[str, str, float]],
+                                                             hyperparams):
+
+        walk_length = 3  # Fixed, change node2vec_generator if changed, see grouper from more itertools or commit 0a7d3b0755ae3ccafec5077edb4c8bf1ed1e3b34
+        # for a generic implementation
+        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 10
+        p = 0.25
+        q = hyperparams["q"] if "q" in hyperparams else 0.25
+        total_users = len(user_ids)
+        total_items = len(item_ids)
+        ratings = np.array([r for i, j, r in affinities])
+        min_rating, max_rating = np.min(ratings), np.max(ratings)
+        affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], 1 + r - min_rating) for i, j, r in affinities]
+        affinities_gen_data = [(i, j, r) for i, j, r in affinities]
+
+        def affinities_generator():
+            np.random.shuffle(affinities_gen_data)
+            for i, j, r in affinities_gen_data:
+                yield (i, j), r
+
+        if num_walks == 0:
+            return affinities_generator
+
+        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
+        Walker = RandomWalker
+        walker = Walker(read_edgelist(affinities, weighted=True), p=p, q=q)
+        walker.preprocess_transition_probs()
+
+        def node2vec_generator():
+            g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
+            for walk in g:
+                yield (walk[0], walk[2]), 1
+
+        from more_itertools import distinct_combinations, chunked, grouper, interleave_longest
+
+        def sentences_generator():
+            return interleave_longest(node2vec_generator(), affinities_generator())
+
+        return sentences_generator
+
+    def __user_item_affinities_triplet_trainer__(self,
+                                                 user_ids: List[str], item_ids: List[str],
+                                                 user_item_affinities: List[Tuple[str, str, float]],
+                                                 user_vectors: np.ndarray, item_vectors: np.ndarray,
+                                                 user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
+                                                 n_output_dims: int,
+                                                 hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
+        from .gcn import build_dgl_graph
+        import torch
+        import torch.nn.functional as F
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        cpu = torch.device('cpu')
+        import dgl
+        self.log.debug(
+            "Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
+            len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
+
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.1
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 1
+        gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 2
+        ncf_layers = hyperparams["ncf_layers"] if "ncf_layers" in hyperparams else 2
+        gcn_batch_size = hyperparams["gcn_batch_size"] if "gcn_batch_size" in hyperparams else 512
+        verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
+        margin = hyperparams["margin"] if "margin" in hyperparams else 0.0
+        gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
+        conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
+        gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
+        ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
+        total_users = len(user_ids)
+        total_items = len(item_ids)
+
+        assert np.sum(np.isnan(user_vectors)) == 0
+        assert np.sum(np.isnan(item_vectors)) == 0
+
+        import gc
+        gc.collect()
+
+        total_users = len(user_ids)
+        edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i], r) for u, i, r in user_item_affinities]
+        content_vectors = np.concatenate((user_vectors, item_vectors))
+        g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids), content_vectors)
+        g_train.readonly()
+        n_content_dims = content_vectors.shape[1]
+        ncf = NCFEmbedding(self.n_collaborative_dims, ncf_layers, gaussian_noise,
+                           np.concatenate((user_vectors, item_vectors)))
+        gcn = GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, gcn_layers, g_train,
+                                    gaussian_noise, conv_depth)
+        model = RecImplicitEmbedding(gcn=gcn, ncf=ncf)
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=gcn_kernel_l2)
+        generate_training_samples = self.__user_item_affinities_triplet_trainer_data_gen_fn__(user_ids, item_ids,
+                                                                                              user_id_to_index,
+                                                                                              item_id_to_index,
+                                                                                              user_item_affinities,
+                                                                                              hyperparams)
+
+        def get_samples():
+            src, dst, weights, error_weights = [], [], [], []
+            for (u, v), r in generate_training_samples():
+                src.append(u)
+                dst.append(v)
+                weights.append(1.0)
+                error_weights.append(r)
+
+            positive_samples = len(src)
+            src = torch.LongTensor(src)
+            dst = torch.LongTensor(dst)
+            weights = torch.FloatTensor(weights)
+
+            ns = ns_proportion
+            negative_samples = ns * positive_samples
+            src_neg = torch.randint(0, total_users+total_items, (negative_samples,))
+            dst_neg = torch.randint(0, total_users+total_items, (negative_samples,))
+            weights_neg = torch.tensor([0.0] * negative_samples)
+            src = torch.cat((src, src_neg), 0)
+            dst = torch.cat((dst, dst_neg), 0)
+            weights = torch.cat((weights, weights_neg), 0)
+
+            shuffle_idx = torch.randperm(positive_samples + negative_samples)
+            src = src[shuffle_idx]
+            dst = dst[shuffle_idx]
+            weights = weights[shuffle_idx]
+            self.log.info("Generate Samples: Positive = %s, Negative = %s", positive_samples, negative_samples)
+            return src, dst, weights
+
+        src, dst, weights = get_samples()
+
+        model.train()
+
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.log.info("Built KNN Network, model params = %s, examples = %s, model = \n%s", params, len(src), model)
+        gc.collect()
+        for epoch in range(epochs):
+            start = time.time()
+            loss = 0.0
+            def train(src, dst, weights):
+
+                src_batches = src.split(gcn_batch_size)
+                dst_batches = dst.split(gcn_batch_size)
+                weights_batches = weights.split(gcn_batch_size)
+                model.train()
+                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
+                sampler = dgl.contrib.sampling.NeighborSampler(
+                    g_train,  # the graph
+                    gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                    5,  # number of neighbors for each node
+                    gcn_layers,  # number of layers in GCN
+                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
+                    prefetch=True,  # whether to prefetch the NodeFlows
+                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
+                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
+                    num_workers=self.cpu,
+                )
+
+                # Training
+                total_loss = 0.0
+                for s, d, nodeflow, r in zip(src_batches, dst_batches, sampler, weights_batches):
+                    h_src, h_dst = model.forward(nodeflow, s, d)
+                    score = (h_src * h_dst).sum(1)
+                    score = (score + 1)/2
+                    loss = -1 * (r * torch.log(score + margin) + (1 - r) * torch.log(1 - score + margin))
+                    loss = loss.mean()
+                    total_loss = total_loss + loss.item()
+                    opt.zero_grad()
+                    loss.backward()
+                    opt.step()
+                return total_loss / len(src_batches)
+
+            loss += train(src, dst, weights)
+            gen_time = time.time()
+            if epoch < epochs - 1:
+                src, dst, weights = get_samples()
+            gen_time = time.time() - gen_time
+
+            total_time = time.time() - start
+            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
+                                               epochs) + ' Training loss: %.4f' % loss +
+                          ' || Time Taken: %.1f' % total_time + " Generator time: %.1f" % gen_time)
+
+            #
+        model.eval()
+        sampler = dgl.contrib.sampling.NeighborSampler(
+            g_train,
+            gcn_batch_size,
+            5,
+            gcn_layers,
+            seed_nodes=torch.arange(g_train.number_of_nodes()),
+            prefetch=True,
+            add_self_loop=True,
+            shuffle=False,
+            num_workers=self.cpu
+        )
+        src_batches = torch.arange(g_train.number_of_nodes()).split(gcn_batch_size)
+        with torch.no_grad():
+            h = []
+            for src, nf in zip(src_batches, sampler):
+                h_src = model.gcn.forward(nf)
+                h_src = model.ncf.forward(src, h_src)
+                h.append(h_src)
+        h = torch.cat(h).numpy()
+
+        user_vectors, item_vectors = h[:total_users], h[total_users:]
+        self.log.info(
+            "End Training User-Item Affinities, Unit Length Violations:: user = %s, item = %s, margin = %.4f",
+            unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1), margin)
+
+        gc.collect()
+        return user_vectors, item_vectors
+
     def __build_prediction_network__(self, user_ids: List[str], item_ids: List[str],
                                      user_item_affinities: List[Tuple[str, str, float]],
                                      user_content_vectors: np.ndarray, item_content_vectors: np.ndarray,
@@ -111,9 +369,12 @@ class GcnNCF(HybridGCNRec):
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 2
         use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
-        network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
+        gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 3
+        ncf_layers = hyperparams["ncf_layers"] if "ncf_layers" in hyperparams else 2
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
+        ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
+        margin = hyperparams["margin"] if "margin" in hyperparams else 0.0
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
@@ -141,10 +402,9 @@ class GcnNCF(HybridGCNRec):
         g_train = build_dgl_graph(edge_list, total_users + total_items, np.concatenate((user_vectors, item_vectors)))
         n_content_dims = user_vectors.shape[1]
         g_train.readonly()
-        ncf = NCF(self.n_collaborative_dims, 2, gaussian_noise,
-                  np.concatenate((user_vectors, item_vectors)),
-                  total_users, total_items)
-        gcn = GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, g_train,
+        ncf = NCF(self.n_collaborative_dims, ncf_layers, gaussian_noise,
+                  np.concatenate((user_vectors, item_vectors)))
+        gcn = GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, gcn_layers, g_train,
                                     gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
@@ -163,7 +423,7 @@ class GcnNCF(HybridGCNRec):
             dst = torch.LongTensor(dst)
             weights = torch.FloatTensor(weights)
 
-            ns = 2
+            ns = ns_proportion
             src_neg = torch.randint(0, total_users, (len(src) * ns,))
             dst_neg = torch.randint(total_users+1, total_users+total_items, (len(src) * ns,))
             weights_neg = torch.tensor([0.0] * len(src) * ns)
@@ -175,7 +435,6 @@ class GcnNCF(HybridGCNRec):
             src = src[shuffle_idx]
             dst = dst[shuffle_idx]
             weights = weights[shuffle_idx]
-            weights = weights.clamp(min=1e-2, max=1-1e-2)
             return src, dst, weights
 
         src, dst, rating = get_samples()
@@ -203,7 +462,7 @@ class GcnNCF(HybridGCNRec):
                     g_train,  # the graph
                     batch_size * 2,  # number of nodes to compute at a time, HACK 2
                     5,  # number of neighbors for each node
-                    network_depth,  # number of layers in GCN
+                    gcn_layers,  # number of layers in GCN
                     seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
                     prefetch=True,  # whether to prefetch the NodeFlows
                     add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
@@ -216,7 +475,7 @@ class GcnNCF(HybridGCNRec):
                 for s, d, r, nf in zip(src_batches, dst_batches, rating_batches, sampler):
                     score = model(nf, s, d)
                     # loss = ((score - r) ** 2)
-                    loss = -1 * (r * torch.log(score) + (1-r)*torch.log(1-score))
+                    loss = -1 * (r * torch.log(score + margin) + (1-r)*torch.log(1 - score + margin))
                     loss = loss.mean()
                     total_loss = total_loss + loss.item()
 
@@ -241,7 +500,7 @@ class GcnNCF(HybridGCNRec):
             g_train,
             batch_size,
             5,
-            network_depth,
+            gcn_layers,
             seed_nodes=torch.arange(g_train.number_of_nodes()),
             prefetch=True,
             add_self_loop=True,

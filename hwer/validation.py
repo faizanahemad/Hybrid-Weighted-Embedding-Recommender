@@ -240,7 +240,7 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
 def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
                 get_data_mappers, rating_scale, algo,
                 enable_error_analysis=False, enable_baselines=False):
-    from . import SVDppHybrid, HybridGCNRec, GCNRetriever
+    from . import SVDppHybrid, HybridGCNRec, GCNRetriever, GcnNCF
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
     if algo == "svdpp_hybrid":
@@ -257,6 +257,13 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
                               n_content_dims=hyperparameters["n_content_dims"],
                               n_collaborative_dims=hyperparameters["n_dims"],
                               fast_inference=False, super_fast_inference=False)
+    elif algo in ["gcn_ncf"]:
+        recsys = GcnNCF(embedding_mapper=embedding_mapper,
+                        knn_params=hyperparameters["knn_params"],
+                        rating_scale=rating_scale,
+                        n_content_dims=hyperparameters["n_content_dims"],
+                        n_collaborative_dims=hyperparameters["n_dims"],
+                        fast_inference=False, super_fast_inference=False)
     elif algo in ["gcn_retriever"]:
         recsys = GCNRetriever(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
@@ -349,58 +356,69 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
     recs = []
     assert len(algos) > 0
     algos = set(algos)
-    assert len(algos - {"surprise", "content_only", "svdpp_hybrid", "gcn_hybrid", "gcn_retriever"}) == 0
+    assert len(algos - {"surprise", "content_only", "svdpp_hybrid", "gcn_hybrid", "gcn_retriever", "gcn_ncf"}) == 0
     if "surprise" in algos:
         hyperparameters_surprise = hyperparamters_dict["surprise"]
         _, surprise_results, _, _ = test_surprise(train_affinities,
-                                                                                      validation_affinities,
-                                                                                      algo=hyperparameters_surprise[
-                                                                                          "algos"],
-                                                                                      algo_params=hyperparameters_surprise,
-                                                                                      rating_scale=rating_scale, )
+                                                  validation_affinities,
+                                                  algo=hyperparameters_surprise[
+                                                      "algos"],
+                                                  algo_params=hyperparameters_surprise,
+                                                  rating_scale=rating_scale, )
         results.extend(surprise_results)
 
     if "content_only" in algos:
         hyperparameters = hyperparamters_dict["content_only"]
         content_rec, res, _, _ = test_content_only(train_affinities,
-                                                                                      validation_affinities, users,
-                                                                                      items, hyperparameters,
-                                                                                      get_data_mappers, rating_scale,
-                                                                                      enable_error_analysis=enable_error_analysis)
+                                                   validation_affinities, users,
+                                                   items, hyperparameters,
+                                                   get_data_mappers, rating_scale,
+                                                   enable_error_analysis=enable_error_analysis)
         results.extend(res)
         recs.append(content_rec)
 
     if "svdpp_hybrid" in algos:
         hyperparameters = hyperparamters_dict["svdpp_hybrid"]
         svd_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities,
-                                                                          users,
-                                                                          items, hyperparameters, get_data_mappers,
-                                                                          rating_scale,
-                                                                          algo="svdpp_hybrid",
-                                                                          enable_error_analysis=enable_error_analysis,
-                                                                          enable_baselines=enable_baselines)
+                                         users,
+                                         items, hyperparameters, get_data_mappers,
+                                         rating_scale,
+                                         algo="svdpp_hybrid",
+                                         enable_error_analysis=enable_error_analysis,
+                                         enable_baselines=enable_baselines)
         results.extend(res)
         recs.append(svd_rec)
 
     if "gcn_hybrid" in algos:
         hyperparameters = hyperparamters_dict["gcn_hybrid"]
         gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
-                                                                        items, hyperparameters, get_data_mappers,
-                                                                        rating_scale,
-                                                                        algo="gcn_hybrid",
-                                                                        enable_error_analysis=enable_error_analysis,
-                                                                        enable_baselines=enable_baselines)
+                                         items, hyperparameters, get_data_mappers,
+                                         rating_scale,
+                                         algo="gcn_hybrid",
+                                         enable_error_analysis=enable_error_analysis,
+                                         enable_baselines=enable_baselines)
         results.extend(res)
         recs.append(gcn_rec)
 
     if "gcn_retriever" in algos:
         hyperparameters = hyperparamters_dict["gcn_retriever"]
         gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
-                                                                        items, hyperparameters, get_data_mappers,
-                                                                        rating_scale,
-                                                                        algo="gcn_retriever",
-                                                                        enable_error_analysis=enable_error_analysis,
-                                                                        enable_baselines=enable_baselines)
+                                         items, hyperparameters, get_data_mappers,
+                                         rating_scale,
+                                         algo="gcn_retriever",
+                                         enable_error_analysis=enable_error_analysis,
+                                         enable_baselines=enable_baselines)
+        results.extend(res)
+        recs.append(gcn_rec)
+
+    if "gcn_ncf" in algos:
+        hyperparameters = hyperparamters_dict["gcn_ncf"]
+        gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
+                                         items, hyperparameters, get_data_mappers,
+                                         rating_scale,
+                                         algo="gcn_ncf",
+                                         enable_error_analysis=enable_error_analysis,
+                                         enable_baselines=enable_baselines)
         results.extend(res)
         recs.append(gcn_rec)
 

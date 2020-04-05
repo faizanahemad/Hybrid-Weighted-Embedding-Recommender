@@ -7,7 +7,6 @@ from pprint import pprint
 def read_params(location, dataset, algo):
     import importlib
     pkg = importlib.import_module('best_params')
-    loc = os.path.join(location, "%s_%s.json" %(algo, dataset))
     if dataset == "100K":
         if algo == "gcn":
             return pkg.params_gcn_100K
@@ -15,6 +14,8 @@ def read_params(location, dataset, algo):
             return pkg.params_svdpp_100K
         if algo == "gcn_retriever":
             return pkg.params_gcn_retriever_100K
+        if algo == "gcn_ncf":
+            return pkg.params_gcn_ncf_100K
     if dataset == "1M":
         if algo == "gcn":
             return pkg.params_gcn_1M
@@ -22,6 +23,8 @@ def read_params(location, dataset, algo):
             return pkg.params_svdpp_1M
         if algo == "gcn_retriever":
             return pkg.params_gcn_retriever_1M
+        if algo == "gcn_ncf":
+            return pkg.params_gcn_ncf_1M
     if dataset == "20M":
         if algo == "gcn":
             pass
@@ -29,10 +32,22 @@ def read_params(location, dataset, algo):
             pass
         if algo == "gcn_retriever":
             return pkg.params_gcn_retriever_20M
+        if algo == "gcn_ncf":
+            return pkg.params_gcn_ncf_20M
 
 
 def fetch_content_params():
     return dict(n_dims=64, combining_factor=0.1, knn_params=knn_params)
+
+
+def fetch_ncf_params(dataset, algo):
+    p = read_params("best_params/", dataset, algo)
+    p["knn_params"] = knn_params
+
+    p["collaborative_params"]["user_item_params"]["verbose"] = verbose
+    p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
+    p["collaborative_params"]["prediction_network_params"]["use_content"] = True
+    return p
 
 
 def fetch_gcn_params(dataset, algo):
@@ -102,12 +117,13 @@ def get_best_params(dataset):
 
     hyperparameters_gcn_retriever = fetch_retriever_params(dataset, "gcn_retriever")
 
+    hyperparameters_ncf_retriever = fetch_ncf_params(dataset, "gcn_ncf")
+
     hyperparameters_surprise = {"svdpp": {"n_factors": 20, "n_epochs": 20, "reg_all": 0.1},
                                 "svd": {"biased": True, "n_factors": 20},
                                 "algos": ["svdpp"]}
-    hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn,
-                               gcn_retriever=hyperparameters_gcn_retriever,
-                               content_only=hyperparameter_content,
+    hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_ncf=hyperparameters_ncf_retriever,
+                               gcn_retriever=hyperparameters_gcn_retriever, content_only=hyperparameter_content,
                                svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise)
     return hyperparamters_dict
 
