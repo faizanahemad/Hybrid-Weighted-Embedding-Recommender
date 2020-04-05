@@ -37,7 +37,7 @@ class NCF(nn.Module):
 
         self.cem = nn.Sequential(wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
 
-        w1 = nn.Linear(feature_size * 3, feature_size * 2)
+        w1 = nn.Linear(feature_size * 5, feature_size * 2)
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers = [noise, w1, nn.LeakyReLU(negative_slope=0.1)]
 
@@ -51,7 +51,7 @@ class NCF(nn.Module):
         self.w_out = nn.Sequential(w_out)
         self.W = nn.Sequential(*layers)
 
-    def forward(self, src, dst):
+    def forward(self, src, dst, g_src, g_dst):
         h_src = self.node_emb(src)
         h_dst = self.node_emb(dst)
 
@@ -59,11 +59,24 @@ class NCF(nn.Module):
         hc_dst = self.content_emb(dst)
         hc = torch.cat([hc_src, hc_dst], 1)
         hc = self.cem(hc)
-        vec = torch.cat([h_src, h_dst, hc], 1)
+        vec = torch.cat([h_src, h_dst, hc, g_src, g_dst], 1)
         out = self.W(vec)
         out = self.w_out(out).flatten()
         out = F.sigmoid(out)
         return out
+
+
+class RecImplicit(nn.Module):
+    def __init__(self, gcn: GraphSageWithSampling, ncf: NCF):
+        super(RecImplicit, self).__init__()
+        self.gcn = gcn
+        self.ncf = ncf
+
+    def forward(self, nf, src, dst):
+        h_output = self.gcn(nf)
+        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
+        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
+        return self.ncf(src, dst, h_src, h_dst)
 
 
 class GcnNCF(HybridGCNRec):
@@ -126,9 +139,17 @@ class GcnNCF(HybridGCNRec):
 
         import gc
         gc.collect()
-        model = NCF(self.n_collaborative_dims, 2, gaussian_noise,
-                    np.concatenate((user_vectors, item_vectors)),
-                    total_users, total_items)
+        edge_list = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
+                     user_item_affinities]
+        g_train = build_dgl_graph(edge_list, total_users + total_items, np.concatenate((user_vectors, item_vectors)))
+        n_content_dims = user_vectors.shape[1]
+        g_train.readonly()
+        ncf = NCF(self.n_collaborative_dims, 2, gaussian_noise,
+                  np.concatenate((user_vectors, item_vectors)),
+                  total_users, total_items)
+        gcn = GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, network_depth, g_train,
+                                    gaussian_noise, conv_depth)
+        model = RecImplicit(gcn=gcn, ncf=ncf)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
         user_item_affinities = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                                 user_item_affinities]
@@ -145,7 +166,7 @@ class GcnNCF(HybridGCNRec):
             dst = torch.LongTensor(dst)
             weights = torch.FloatTensor(weights)
 
-            ns = 1
+            ns = 2
             src_neg = torch.randint(0, total_users, (len(src) * ns,))
             dst_neg = torch.randint(total_users+1, total_users+total_items, (len(src) * ns,))
             weights_neg = torch.tensor([0.0] * len(src) * ns)
@@ -157,7 +178,7 @@ class GcnNCF(HybridGCNRec):
             src = src[shuffle_idx]
             dst = dst[shuffle_idx]
             weights = weights[shuffle_idx]
-            weights = weights.clamp(min=1e-4, max=1-1e-4)
+            weights = weights.clamp(min=1e-2, max=1-1e-2)
             return src, dst, weights
 
         src, dst, rating = get_samples()
@@ -179,12 +200,26 @@ class GcnNCF(HybridGCNRec):
                 dst_batches = dst.split(batch_size)
                 rating_batches = rating.split(batch_size)
 
+                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
+
+                sampler = dgl.contrib.sampling.NeighborSampler(
+                    g_train,  # the graph
+                    batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                    5,  # number of neighbors for each node
+                    network_depth,  # number of layers in GCN
+                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
+                    prefetch=True,  # whether to prefetch the NodeFlows
+                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
+                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
+                    num_workers=self.cpu,
+                )
+
                 # Training
                 total_loss = 0.0
-                for s, d, r in zip(src_batches, dst_batches, rating_batches):
-                    score = model(s, d)
-                    loss = ((score - r) ** 2)
-                    # loss = -1 * (r * torch.log(score) + (1-r)*torch.log(1-score))
+                for s, d, r, nf in zip(src_batches, dst_batches, rating_batches, sampler):
+                    score = model(nf, s, d)
+                    # loss = ((score - r) ** 2)
+                    loss = -1 * (r * torch.log(score) + (1-r)*torch.log(1-score))
                     loss = loss.mean()
                     total_loss = total_loss + loss.item()
 
@@ -205,8 +240,26 @@ class GcnNCF(HybridGCNRec):
 
         gc.collect()
         model.eval()
+        sampler = dgl.contrib.sampling.NeighborSampler(
+            g_train,
+            batch_size,
+            5,
+            network_depth,
+            seed_nodes=torch.arange(g_train.number_of_nodes()),
+            prefetch=True,
+            add_self_loop=True,
+            shuffle=False,
+            num_workers=self.cpu
+        )
 
-        prediction_artifacts = {"model": model,
+        with torch.no_grad():
+            h = []
+            for nf in sampler:
+                h.append(model.gcn.forward(nf))
+            h = torch.cat(h)
+
+        prediction_artifacts = {"model": model.ncf,
+                                "h": h,
                                 "total_users": total_users}
         model_parameters = filter(lambda p: p.requires_grad, model.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
@@ -217,6 +270,7 @@ class GcnNCF(HybridGCNRec):
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         from .gcn import get_score
         model = self.prediction_artifacts["model"]
+        h = self.prediction_artifacts["h"]
         total_users = self.prediction_artifacts["total_users"]
         batch_size = 512
 
@@ -236,7 +290,9 @@ class GcnNCF(HybridGCNRec):
             item = item.split(batch_size)
 
             for u, i in zip(user, item):
-                scores = model.forward(u, i)
+                g_src = h[u]
+                g_dst = h[i]
+                scores = model.forward(u, i, g_src, g_dst)
                 scores = list(scores.numpy())
                 predictions.extend(scores)
         return predictions
