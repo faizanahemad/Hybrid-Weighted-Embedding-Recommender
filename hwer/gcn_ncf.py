@@ -26,9 +26,9 @@ class NCF(nn.Module):
                  content, total_users, total_items):
         super(NCF, self).__init__()
         noise = GaussianNoise(gaussian_noise)
-        self.node_emb = nn.Embedding(total_users + total_items, feature_size)
+        # self.node_emb = nn.Embedding(total_users + total_items, feature_size)
         self.content_emb = nn.Embedding.from_pretrained(torch.tensor(content, dtype=torch.float), freeze=True)
-        nn.init.normal_(self.node_emb.weight, std=1 / (10 * feature_size))
+        # nn.init.normal_(self.node_emb.weight, std=1 / (10 * feature_size))
 
         wc1 = nn.Linear(content.shape[1] * 2, feature_size * 2)
         init_fc(wc1, 'xavier_uniform_', 'leaky_relu', 0.1)
@@ -37,7 +37,7 @@ class NCF(nn.Module):
 
         self.cem = nn.Sequential(wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
 
-        w1 = nn.Linear(feature_size * 5, feature_size * 2)
+        w1 = nn.Linear(feature_size * 3, feature_size * 2)
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers = [noise, w1, nn.LeakyReLU(negative_slope=0.1)]
 
@@ -52,14 +52,14 @@ class NCF(nn.Module):
         self.W = nn.Sequential(*layers)
 
     def forward(self, src, dst, g_src, g_dst):
-        h_src = self.node_emb(src)
-        h_dst = self.node_emb(dst)
+        # h_src = self.node_emb(src)
+        # h_dst = self.node_emb(dst)
 
         hc_src = self.content_emb(src)
         hc_dst = self.content_emb(dst)
         hc = torch.cat([hc_src, hc_dst], 1)
         hc = self.cem(hc)
-        vec = torch.cat([h_src, h_dst, hc, g_src, g_dst], 1)
+        vec = torch.cat([hc, g_src, g_dst], 1)
         out = self.W(vec)
         out = self.w_out(out).flatten()
         out = F.sigmoid(out)
@@ -130,10 +130,7 @@ class GcnNCF(HybridGCNRec):
 
         total_users = len(user_ids) + 1
         total_items = len(item_ids) + 1
-        if use_content:
-            user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
-            item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
-        else:
+        if not use_content:
             user_vectors = np.zeros((user_vectors.shape[0], 1))
             item_vectors = np.zeros((item_vectors.shape[0], 1))
 
