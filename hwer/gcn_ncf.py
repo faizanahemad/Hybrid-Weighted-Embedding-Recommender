@@ -247,7 +247,7 @@ class GcnNCF(HybridGCNRec):
             weights = torch.FloatTensor(weights)
 
             ns = ns_proportion
-            negative_samples = ns * positive_samples
+            negative_samples = int(ns * positive_samples)
             src_neg = torch.randint(0, total_users+total_items, (negative_samples,))
             dst_neg = torch.randint(0, total_users+total_items, (negative_samples,))
             weights_neg = torch.tensor([0.0] * negative_samples)
@@ -424,14 +424,16 @@ class GcnNCF(HybridGCNRec):
             weights = torch.FloatTensor(weights)
 
             ns = ns_proportion
-            src_neg = torch.randint(0, total_users, (len(src) * ns,))
-            dst_neg = torch.randint(total_users+1, total_users+total_items, (len(src) * ns,))
-            weights_neg = torch.tensor([0.0] * len(src) * ns)
+            positive_samples = len(src)
+            negative_samples = int(ns * positive_samples)
+            src_neg = torch.randint(0, total_users, (negative_samples,))
+            dst_neg = torch.randint(total_users+1, total_users+total_items, (negative_samples,))
+            weights_neg = torch.tensor([0.0] * negative_samples)
             src = torch.cat((src, src_neg), 0)
             dst = torch.cat((dst, dst_neg), 0)
             weights = torch.cat((weights, weights_neg), 0)
 
-            shuffle_idx = torch.randperm(len(src))
+            shuffle_idx = torch.randperm(positive_samples + negative_samples)
             src = src[shuffle_idx]
             dst = dst[shuffle_idx]
             weights = weights[shuffle_idx]

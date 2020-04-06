@@ -515,12 +515,12 @@ def run_model_for_hpo(df_user, df_item, user_item_affinities, prepare_data_mappe
                       enable_kfold=False, provided_test_set=True):
     if enable_kfold:
         provided_test_set = False
-    rmse, ndcg = run_models_for_testing(df_user, df_item, user_item_affinities,
-                                        prepare_data_mappers, rating_scale,
-                                        [algo], {algo: hyperparameters}, provided_test_set=provided_test_set,
-                                        enable_kfold=enable_kfold, display=False, report=report)
+    rmse, ndcg, ncf_ndcg = run_models_for_testing(df_user, df_item, user_item_affinities,
+                                                  prepare_data_mappers, rating_scale,
+                                                  [algo], {algo: hyperparameters}, provided_test_set=provided_test_set,
+                                                  enable_kfold=enable_kfold, display=False, report=report)
 
-    return rmse, ndcg
+    return rmse, ndcg, ncf_ndcg
 
 
 def run_models_for_testing(df_user, df_item, user_item_affinities,
@@ -546,7 +546,7 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
                                                              prepare_data_mappers, rating_scale, algos,
                                                              enable_error_analysis=enable_error_analysis,
                                                              enable_baselines=enable_baselines)
-        rmse, ndcg = results[0]['rmse'], results[0]['ndcg@100']
+        rmse, ndcg, ncf_ndcg = results[0]['rmse'], results[0]['ndcg@100'], results[0]['ncf_ndcg']
 
     else:
         X = np.array(user_item_affinities)
@@ -565,8 +565,8 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
                                          prepare_data_mappers, rating_scale, algos,
                                          enable_error_analysis=False, enable_baselines=enable_baselines)
 
-            rmse, ndcg = res[0]['rmse'], res[0]['ndcg@100']
-            report({"rmse": rmse, "ndcg": ndcg}, step)
+            rmse, ndcg, ncf_ndcg = res[0]['rmse'], res[0]['ndcg@100'], res[0]['ncf_ndcg']
+            report({"rmse": rmse, "ndcg": ndcg, "ncf_ndcg": ncf_ndcg}, step)
             step += 1
             results.extend(res)
 
@@ -576,5 +576,5 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
     else:
         results = pd.DataFrame.from_records(results)
         results = results.groupby(["algo"]).mean().reset_index()
-        rmse, ndcg = results["rmse"].values[0], results["ndcg@100"].values[0]
-    return rmse, ndcg
+        rmse, ndcg, ncf_ndcg = results["rmse"].values[0], results["ndcg@100"].values[0], results["ncf_ndcg"].values[0]
+    return rmse, ndcg, ncf_ndcg

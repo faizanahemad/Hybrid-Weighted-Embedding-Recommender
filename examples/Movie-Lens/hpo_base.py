@@ -20,16 +20,16 @@ enable_kfold = False
 
 def optimisation_objective(hyperparameters, algo, report, dataset):
     df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = build_dataset(dataset)
-    rmse, ndcg = run_model_for_hpo(df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale,
-                                   hyperparameters, algo, report,
-                                   enable_kfold=enable_kfold)
-    print("Algo = %s, RMSE = %.4f, NDCG = %.4f" % (algo, rmse, ndcg))
-    return rmse, ndcg
+    rmse, ndcg, ncf_ndcg = run_model_for_hpo(df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale,
+                                             hyperparameters, algo, report,
+                                             enable_kfold=enable_kfold)
+    print("Algo = %s, RMSE = %.4f, NDCG = %.4f, NCF_NDCG = %.4f" % (algo, rmse, ndcg, ncf_ndcg))
+    return rmse, ndcg, ncf_ndcg
 
 
 def init_args():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--objective', type=str, default="rmse", metavar='N', choices=["rmse", "ndcg"],
+    ap.add_argument('--objective', type=str, default="rmse", metavar='N', choices=["rmse", "ndcg", "ncf_ndcg"],
                     help='')
     ap.add_argument('--algo', type=str, default="gcn_hybrid", metavar='N',
                     choices=["gcn_hybrid", "gcn_ncf", "svdpp_hybrid", "gcn_retriever"],
