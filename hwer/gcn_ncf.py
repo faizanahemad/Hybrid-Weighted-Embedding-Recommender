@@ -36,16 +36,16 @@ class NCF(nn.Module):
 
         self.cem = nn.Sequential(wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
 
-        w1 = nn.Linear(feature_size * 3, feature_size * 2)
+        w1 = nn.Linear(feature_size * 3, feature_size * (2 ** (depth - 1)))
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers = [noise, w1, nn.LeakyReLU(negative_slope=0.1)]
 
-        for _ in range(depth - 1):
-            wx = nn.Linear(feature_size * 2, feature_size * 2)
+        for i in reversed(range(depth - 1)):
+            wx = nn.Linear(feature_size * (2 ** (i+1)), feature_size * (2 ** i))
             init_fc(wx, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.extend([noise, wx, nn.LeakyReLU(negative_slope=0.1)])
 
-        w_out = nn.Linear(feature_size * 2, 1)
+        w_out = nn.Linear(feature_size, 1)
         init_fc(w_out, 'xavier_uniform_', 'sigmoid', 0.1)
         self.w_out = nn.Sequential(w_out)
         self.W = nn.Sequential(*layers)
@@ -212,6 +212,20 @@ class GcnNCF(HybridGCNRec):
         assert np.sum(np.isnan(user_vectors)) == 0
         assert np.sum(np.isnan(item_vectors)) == 0
 
+        if epochs <= 0:
+            from .utils import unit_length
+            from sklearn.decomposition import PCA
+            user_vectors_length = len(user_vectors)
+            all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)
+            if user_vectors.shape[1] > self.n_collaborative_dims:
+                pca = PCA(n_components=self.n_collaborative_dims, )
+                all_vectors = pca.fit_transform(all_vectors)
+            elif user_vectors.shape[1] < self.n_collaborative_dims:
+                raise ValueError()
+            all_vectors = unit_length(all_vectors, axis=1)
+            user_vectors = all_vectors[:user_vectors_length]
+            item_vectors = all_vectors[user_vectors_length:]
+            return user_vectors, item_vectors
         import gc
         gc.collect()
 
@@ -381,29 +395,25 @@ class GcnNCF(HybridGCNRec):
         # For unseen users and items creating 2 mock nodes
         user_content_vectors = np.concatenate((np.zeros((1, user_content_vectors.shape[1])), user_content_vectors))
         item_content_vectors = np.concatenate((np.zeros((1, item_content_vectors.shape[1])), item_content_vectors))
-        user_vectors = np.concatenate((np.zeros((1, user_vectors.shape[1])), user_vectors))
-        item_vectors = np.concatenate((np.zeros((1, item_vectors.shape[1])), item_vectors))
         gc.collect()
         assert np.sum(np.isnan(user_content_vectors)) == 0
         assert np.sum(np.isnan(item_content_vectors)) == 0
-        assert np.sum(np.isnan(user_vectors)) == 0
-        assert np.sum(np.isnan(item_vectors)) == 0
 
         total_users = len(user_ids) + 1
         total_items = len(item_ids) + 1
         if not use_content:
-            user_vectors = np.zeros((user_vectors.shape[0], 1))
-            item_vectors = np.zeros((item_vectors.shape[0], 1))
+            user_content_vectors = np.zeros((user_content_vectors.shape[0], 1))
+            item_content_vectors = np.zeros((item_content_vectors.shape[0], 1))
 
         import gc
         gc.collect()
         edge_list = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                      user_item_affinities]
-        g_train = build_dgl_graph(edge_list, total_users + total_items, np.concatenate((user_vectors, item_vectors)))
-        n_content_dims = user_vectors.shape[1]
+        g_train = build_dgl_graph(edge_list, total_users + total_items, np.concatenate((user_content_vectors, item_content_vectors)))
+        n_content_dims = user_content_vectors.shape[1]
         g_train.readonly()
         ncf = NCF(self.n_collaborative_dims, ncf_layers, gaussian_noise,
-                  np.concatenate((user_vectors, item_vectors)))
+                  np.concatenate((user_content_vectors, item_content_vectors)))
         gcn = GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, gcn_layers, g_train,
                                     gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
