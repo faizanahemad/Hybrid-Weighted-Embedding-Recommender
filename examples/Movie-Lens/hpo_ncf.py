@@ -49,7 +49,7 @@ def run_trial(args):
     hyperparams = build_params(args, objective, params)
     import traceback
     try:
-        rmse, ndcg, ncf_ndcg = optimisation_objective(hyperparams, algo, report, dataset)
+        rmse, ndcg, ncf_ndcg = optimisation_objective(hyperparams, algo, report, dataset, test_method)
         loss = 1 - ncf_ndcg
     except Exception as e:
         traceback.print_exc()
@@ -122,10 +122,10 @@ def merge_trials(trials1, trials2_slice):
     return trials1
 
 
-def load_trials(algo, dataset, objective, conv_arch):
+def load_trials(algo, dataset, objective):
     loaded_fnames = []
     trials = None
-    path = TRIALS_FOLDER + '/%s_%s_%s_%s_*.pkl' % (algo, dataset, objective, conv_arch)
+    path = TRIALS_FOLDER + '/%s_%s_%s_*.pkl' % (algo, dataset, objective)
     for fname in glob.glob(path):
         trials_obj = pkl.load(open(fname, 'rb'))
         n_trials = trials_obj['n']
@@ -160,11 +160,7 @@ def print_trial_details(trials):
 
 
 if __name__ == '__main__':
-    params, dataset, objective, algo = init_args()
-    try:
-        conv_arch = params["collaborative_params"]["prediction_network_params"]["conv_arch"]
-    except KeyError as e:
-        conv_arch = 0
+    params, dataset, objective, algo, test_method = init_args()
     # Run new hyperparameter trials until killed
     while True:
         np.random.seed()
@@ -172,7 +168,7 @@ if __name__ == '__main__':
         # Load up all runs:
         import glob
 
-        trials = load_trials(algo, dataset, objective, conv_arch)
+        trials = load_trials(algo, dataset, objective)
         if trials is None:
             trials = Trials()
         else:
@@ -196,7 +192,7 @@ if __name__ == '__main__':
 
         # Merge with empty trials dataset:
         save_trials = merge_trials(hyperopt_trial, trials.trials[-n:])
-        new_fname = TRIALS_FOLDER + '/%s_%s_%s_%s_' % (algo, dataset, objective, conv_arch) + str(np.random.randint(0, sys.maxsize)) + '.pkl'
+        new_fname = TRIALS_FOLDER + '/%s_%s_%s_' % (algo, dataset, objective) + str(np.random.randint(0, sys.maxsize)) + '.pkl'
         pkl.dump({'trials': save_trials, 'n': n}, open(new_fname, 'wb'))
 
 

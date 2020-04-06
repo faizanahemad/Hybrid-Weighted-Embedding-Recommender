@@ -18,8 +18,8 @@ from hwer.utils import str2bool
 enable_kfold = False
 
 
-def optimisation_objective(hyperparameters, algo, report, dataset):
-    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = build_dataset(dataset)
+def optimisation_objective(hyperparameters, algo, report, dataset, test_method):
+    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = build_dataset(dataset, test_method=test_method)
     rmse, ndcg, ncf_ndcg = run_model_for_hpo(df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale,
                                              hyperparameters, algo, report,
                                              enable_kfold=enable_kfold)
@@ -37,10 +37,14 @@ def init_args():
     ap.add_argument('--dataset', type=str, default="100K", metavar='N',
                     choices=["100K", "1M", "20M"],
                     help='')
+    ap.add_argument('--test_method', type=str, default="ncf", metavar='N',
+                    choices=["ncf", "vae_cf", "stratified-split", "random-split"],
+                    help='')
     args = vars(ap.parse_args())
     algo = args["algo"]
     objective = args["objective"]
     dataset = args["dataset"]
+    test_method = args["test_method"]
     hyperparamters_dict = get_best_params(dataset)
     params = copy.deepcopy(hyperparamters_dict[algo])
-    return params, dataset, objective, algo
+    return params, dataset, objective, algo, test_method
