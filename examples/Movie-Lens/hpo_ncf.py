@@ -76,7 +76,7 @@ def define_search_space(objective, starting_params):
         'gcn_layers': hp.quniform('gcn_layers', 1, prediction["gcn_layers"] + 1, 1),
         'ncf_layers': hp.quniform('ncf_layers', 1, prediction["ncf_layers"] + 1, 1),
         'ns_proportion': hp.quniform('ns_proportion', 1.0, prediction["ns_proportion"] + 1.0, 0.1),
-        'margin': hp.choice('margin', [0.0, hp.quniform('margin', 0.01, prediction["margin_choice"] + 0.05, 0.01)]),
+        'margin': hp.choice('margin', [0.0, hp.quniform('margin_choice', 0.01, prediction["margin"] + 0.05, 0.01)]),
         'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(prediction["gaussian_noise"]),
                                         0.5 * prediction["gaussian_noise"], 0.005),
         'n_dims': hp.quniform('n_dims',
