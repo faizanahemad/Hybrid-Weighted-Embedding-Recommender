@@ -65,21 +65,22 @@ class GraphSageConvWithSamplingBase(nn.Module):
         layers = []
         depth = max(1, depth)
         for i in range(depth - 1):
-            weights = nn.Linear(feature_size * 2, feature_size * 2)
+            in_width = 2 if i == 0 else 4
+            weights = nn.Linear(feature_size * in_width, feature_size * 4)
             init_fc(weights, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.append(GaussianNoise(gaussian_noise))
             layers.append(weights)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
         layers.append(GaussianNoise(gaussian_noise))
-        W = nn.Linear(feature_size * 2, out_dims)
+        W = nn.Linear(feature_size * 4, out_dims)
         layers.append(W)
         self.prediction_layer = prediction_layer
         self.noise = GaussianNoise(gaussian_noise)
 
         if not prediction_layer:
             init_fc(W, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.append(nn.Tanh()) # tanh
+            layers.append(nn.LeakyReLU(0.1)) # tanh
         else:
             init_fc(W, 'xavier_uniform_', 'linear')
         self.W = nn.Sequential(*layers)
@@ -128,7 +129,7 @@ class GraphSageWithSampling(nn.Module):
         w2 = nn.Linear(feature_size, feature_size)
         init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_fc(w2, 'xavier_uniform_', 'leaky_relu', 0.1)
-        proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w, nn.LeakyReLU(negative_slope=0.1), w2, nn.Tanh()] # Tanh
+        proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w, nn.LeakyReLU(negative_slope=0.1)]
         self.proj = nn.Sequential(*proj)
 
 
