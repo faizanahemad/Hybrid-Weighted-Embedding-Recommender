@@ -36,7 +36,7 @@ class GaussianNoise(nn.Module):
 
 def mix_embeddings(ndata, proj):
     """Adds external (categorical and numeric) features into node representation G.ndata['h']"""
-    ndata['h'] = ndata['h'] + proj(torch.cat([ndata['h'], ndata['content']], 1))
+    ndata['h'] = ndata['h'] + proj(ndata['content'])
 
 
 def init_weight(param, initializer, nonlinearity, nonlinearity_param=None):
@@ -100,7 +100,7 @@ class GraphSageConvWithSamplingBase(nn.Module):
 
     def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
-        h_new = h + h_new
+        # h_new = h + h_new
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
         return {'h': h_new}
 
@@ -123,13 +123,13 @@ class GraphSageWithSampling(nn.Module):
         GraphSageConvWithSampling = GraphSageConvWithSamplingBase
 
         noise = GaussianNoise(gaussian_noise)
-        w1 = nn.Linear(n_content_dims + feature_size, min(n_content_dims + feature_size, feature_size*2))
+        w1 = nn.Linear(n_content_dims, feature_size)
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        w = nn.Linear(min(n_content_dims + feature_size, feature_size * 2), feature_size)
+        w = nn.Linear(feature_size, feature_size)
         w2 = nn.Linear(feature_size, feature_size)
         init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
         init_fc(w2, 'xavier_uniform_', 'leaky_relu', 0.1)
-        proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w, nn.LeakyReLU(negative_slope=0.1)]
+        proj = [w1, nn.LeakyReLU(negative_slope=0.1)]
         self.proj = nn.Sequential(*proj)
 
 
@@ -195,14 +195,15 @@ class ResnetConv(nn.Module):
         else:
             inp = in_dims * 3
         for i in range(depth - 1):
-            weights = nn.Linear(inp, inp)
+            width = 1 if i == 0 else 2
+            weights = nn.Linear(inp * width, inp * 2)
             init_fc(weights, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.append(GaussianNoise(gaussian_noise))
             layers.append(weights)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
         layers.append(GaussianNoise(gaussian_noise))
-        W = nn.Linear(inp, out_dims)
+        W = nn.Linear(inp * 2, out_dims)
         layers.append(W)
         self.prediction_layer = prediction_layer
         self.noise = GaussianNoise(gaussian_noise)
@@ -210,9 +211,11 @@ class ResnetConv(nn.Module):
         if not prediction_layer:
             init_fc(W, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
-            skip = nn.Linear(in_dims, out_dims)
-            init_fc(skip, 'xavier_uniform_', 'leaky_relu', 0.1)
-            self.skip = nn.Sequential(skip, nn.LeakyReLU(negative_slope=0.1))
+            self.skip = None
+            if in_dims != out_dims:
+                skip = nn.Linear(in_dims, out_dims)
+                init_fc(skip, 'xavier_uniform_', 'leaky_relu', 0.1)
+                self.skip = nn.Sequential(skip, nn.LeakyReLU(negative_slope=0.1))
         else:
             init_fc(W, 'xavier_uniform_', 'linear')
         self.W = nn.Sequential(*layers)
@@ -234,32 +237,28 @@ class ResnetConv(nn.Module):
         if self.prediction_layer:
             return {'h': h_new}
         # skip
-        h_agg = self.skip(h_agg)
+        h_agg = self.skip(h_agg) if self.skip is not None else h_agg
         h_agg = h_agg / h_agg.norm(dim=1, keepdim=True).clamp(min=1e-6)
         return {'h': h_new, 'h_residue': h_agg}
 
 
-class GraphSageResnetWithSampling(nn.Module):
+class GraphResnetWithSampling(nn.Module):
     def __init__(self, n_content_dims, feature_size, n_layers, G,
                  gaussian_noise, conv_depth,
                  init_node_vectors=None,):
-        super(GraphSageResnetWithSampling, self).__init__()
+        super(GraphResnetWithSampling, self).__init__()
 
         self.feature_size = feature_size
         self.n_layers = n_layers
         noise = GaussianNoise(gaussian_noise)
 
-        w1 = nn.Linear(n_content_dims, min(n_content_dims, feature_size*2))
-        proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise]
-        init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        w = nn.Linear(min(n_content_dims, feature_size*2), feature_size)
-        init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
-        proj.extend([w, nn.LeakyReLU(negative_slope=0.1)])
+        w1 = nn.Linear(n_content_dims, feature_size)
+        proj = [w1, nn.LeakyReLU(negative_slope=0.1)]
         self.proj = nn.Sequential(*proj)
 
         self.G = G
         import math
-        embedding_dim = 2 ** int(math.log2(feature_size/4))
+        embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
         if init_node_vectors is None:
             nn.init.normal_(self.node_emb.weight, std=1 / (100 * embedding_dim))
@@ -268,9 +267,6 @@ class GraphSageResnetWithSampling(nn.Module):
                 from sklearn.decomposition import PCA
                 init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
-        expansion = nn.Linear(embedding_dim, feature_size)
-        init_fc(expansion, 'xavier_uniform_', 'leaky_relu', 0.1)
-        self.expansion = nn.Sequential(expansion, nn.LeakyReLU(negative_slope=0.1), noise)
         self.convs = nn.ModuleList(
             [ResnetConv(feature_size, feature_size, i == 0, i == n_layers - 1, gaussian_noise, conv_depth) for i
              in
@@ -292,7 +288,7 @@ class GraphSageResnetWithSampling(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
+            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:

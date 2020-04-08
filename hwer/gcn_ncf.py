@@ -36,7 +36,7 @@ class NCF(nn.Module):
 
         self.cem = nn.Sequential(wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
 
-        w1 = nn.Linear(feature_size * 3, feature_size * (2 ** (depth - 1)))
+        w1 = nn.Linear(feature_size * 2, feature_size * (2 ** (depth - 1)))
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers = [noise, w1, nn.LeakyReLU(negative_slope=0.1)]
 
@@ -54,11 +54,11 @@ class NCF(nn.Module):
         # h_src = self.node_emb(src)
         # h_dst = self.node_emb(dst)
 
-        hc_src = self.content_emb(src)
-        hc_dst = self.content_emb(dst)
-        hc = torch.cat([hc_src, hc_dst], 1)
-        hc = self.cem(hc)
-        vec = torch.cat([hc, g_src, g_dst], 1)
+        # hc_src = self.content_emb(src)
+        # hc_dst = self.content_emb(dst)
+        # hc = torch.cat([hc_src, hc_dst], 1)
+        # hc = self.cem(hc)
+        vec = torch.cat([g_src, g_dst], 1)
         out = self.W(vec)
         out = self.w_out(out).flatten()
         out = F.sigmoid(out)
@@ -414,7 +414,7 @@ class GcnNCF(HybridGCNRec):
         g_train.readonly()
         ncf = NCF(self.n_collaborative_dims, ncf_layers, gaussian_noise,
                   np.concatenate((user_content_vectors, item_content_vectors)))
-        gcn = GraphSageWithSampling(n_content_dims, self.n_collaborative_dims, gcn_layers, g_train,
+        gcn = GraphResnetWithSampling(n_content_dims, self.n_collaborative_dims, gcn_layers, g_train,
                                     gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
