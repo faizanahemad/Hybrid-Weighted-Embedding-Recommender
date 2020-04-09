@@ -21,22 +21,45 @@ import torch.nn.functional as F
 from .gcn import *
 
 
+class LinearResnet(nn.Module):
+    def __init__(self, in_dims, out_dims, gaussian_noise):
+        super(LinearResnet, self).__init__()
+        noise = GaussianNoise(gaussian_noise)
+        w1 = nn.Linear(in_dims, out_dims)
+        init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
+        w2 = nn.Linear(out_dims, out_dims)
+        init_fc(w2, 'xavier_uniform_', 'leaky_relu', 0.1)
+        residuals = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w2, nn.LeakyReLU(negative_slope=0.1)]
+        self.residuals = nn.Sequential(*residuals)
+
+        self.skip = None
+        if in_dims != out_dims:
+            skip = nn.Linear(in_dims, out_dims)
+            init_fc(skip, 'xavier_uniform_', 'leaky_relu', 0.1)
+            self.skip = nn.Sequential(skip, nn.LeakyReLU(negative_slope=0.1))
+
+    def forward(self, x):
+        r = self.residuals(x)
+        x = x if self.skip is None else self.skip(x)
+        return x + r
+
+
 class NCF(nn.Module):
-    def __init__(self, feature_size, depth, gaussian_noise, content):
+    def __init__(self, feature_size, depth, gaussian_noise, content, ncf_gcn_balance):
         super(NCF, self).__init__()
         noise = GaussianNoise(gaussian_noise)
         # self.node_emb = nn.Embedding(total_users + total_items, feature_size)
-        # self.content_emb = nn.Embedding.from_pretrained(torch.tensor(content, dtype=torch.float), freeze=True)
+        self.content_emb = nn.Embedding.from_pretrained(torch.tensor(content, dtype=torch.float), freeze=True)
         # nn.init.normal_(self.node_emb.weight, std=1 / (10 * feature_size))
-        #
-        # wc1 = nn.Linear(content.shape[1] * 2, feature_size)
-        # init_fc(wc1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        # wc2 = nn.Linear(feature_size, feature_size)
-        # init_fc(wc2, 'xavier_uniform_', 'leaky_relu', 0.1)
-        #
-        # self.cem = nn.Sequential(wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
 
-        w1 = nn.Linear(feature_size * 2, feature_size * (2 ** (depth - 1)))
+        wc1 = nn.Linear(content.shape[1] * 2, feature_size)
+        init_fc(wc1, 'xavier_uniform_', 'leaky_relu', 0.1)
+        wc2 = nn.Linear(feature_size, feature_size)
+        init_fc(wc2, 'xavier_uniform_', 'leaky_relu', 0.1)
+
+        self.cem = nn.Sequential(wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
+
+        w1 = nn.Linear(feature_size * 3, feature_size * (2 ** (depth - 1)))
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers = [noise, w1, nn.LeakyReLU(negative_slope=0.1)]
 
@@ -49,17 +72,21 @@ class NCF(nn.Module):
         init_fc(w_out, 'xavier_uniform_', 'sigmoid', 0.1)
         layers.extend([w_out, nn.Sigmoid()])
         self.W = nn.Sequential(*layers)
+        self.ncf_gcn_balance = ncf_gcn_balance
 
     def forward(self, src, dst, g_src, g_dst):
         # h_src = self.node_emb(src)
         # h_dst = self.node_emb(dst)
 
-        # hc_src = self.content_emb(src)
-        # hc_dst = self.content_emb(dst)
-        # hc = torch.cat([hc_src, hc_dst], 1)
-        # hc = self.cem(hc)
-        vec = torch.cat([g_src, g_dst], 1)
-        out = self.W(vec).flatten()
+        hc_src = self.content_emb(src)
+        hc_dst = self.content_emb(dst)
+        hc = torch.cat([hc_src, hc_dst], 1)
+        hc = self.cem(hc)
+        vec = torch.cat([g_src, g_dst, hc], 1)
+        cos = (g_src * g_dst).sum(1)
+        cos = ((cos + 1)/2).flatten()
+        ncf = self.W(vec).flatten()
+        out = ncf * self.ncf_gcn_balance + (1 - self.ncf_gcn_balance) * cos
         return out
 
 
@@ -133,9 +160,51 @@ class GcnNCF(HybridGCNRec):
         assert n_collaborative_dims % 2 == 0
         self.cpu = int(os.cpu_count() / 2)
 
-    def __negative_pair_generator_(self, total_users, total_items,
-                                   affinities: List[Tuple[int, int, float]],
-                                   hyperparams):
+    def __positive_pair_generator__(self, total_users, total_items,
+                                    affinities: List[Tuple[int, int, float]],
+                                    hyperparams):
+        ps_proportion = hyperparams["ps_proportion"] if "ps_proportion" in hyperparams else 1
+        positive_samples = len(affinities) * ps_proportion
+        p = 0.25
+        q = hyperparams["q"] if "q" in hyperparams else 0.25
+        affinities = [(i, j, r) for i, j, r in affinities]
+        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
+        Walker = RandomWalker
+        walker = Walker(read_edgelist(affinities, weighted=False), p=p, q=q)
+        walker.preprocess_transition_probs()
+        samples_per_node = int(np.ceil(positive_samples / (total_users + total_items)))
+        from collections import Counter
+        random_walks = max(100, samples_per_node * 10)
+
+        def sampler():
+            for i in range(total_users):
+                cnt = Counter()
+                for walk in walker.simulate_walks_single_node(i, random_walks, 4):
+                    if len(walk) == 5 and walk[4] != i:
+                        cnt.update([walk[4]])
+                results = cnt.most_common(samples_per_node)
+                if len(results) > 0:
+                    results, _ = zip(*results)
+                for r in results:
+                    yield i, r
+
+            for j in range(total_items):
+                j = j + total_users
+                cnt = Counter()
+                for walk in walker.simulate_walks_single_node(j, random_walks, 4):
+                    if len(walk) == 5 and walk[4] != j:
+                        cnt.update([walk[4]])
+                results = cnt.most_common(samples_per_node)
+                if len(results) > 0:
+                    results, _ = zip(*results)
+                for r in results:
+                    yield j, r
+
+        return sampler
+
+    def __negative_pair_generator__(self, total_users, total_items,
+                                    affinities: List[Tuple[int, int, float]],
+                                    hyperparams):
         nsh = hyperparams["nsh"] if "nsh" in hyperparams else 1
         positive_samples = len(affinities)
         p = 0.25
@@ -440,6 +509,8 @@ class GcnNCF(HybridGCNRec):
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.0
         nsh = hyperparams["nsh"] if "nsh" in hyperparams else 1.0
+        ps_proportion = hyperparams["ps_proportion"] if "ps_proportion" in hyperparams else 1
+        ncf_gcn_balance = hyperparams["ncf_gcn_balance"] if "ncf_gcn_balance" in hyperparams else 1.0
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
@@ -464,12 +535,13 @@ class GcnNCF(HybridGCNRec):
         n_content_dims = user_content_vectors.shape[1]
         g_train.readonly()
         ncf = NCF(self.n_collaborative_dims, ncf_layers, gaussian_noise,
-                  np.concatenate((user_content_vectors, item_content_vectors)))
+                  np.concatenate((user_content_vectors, item_content_vectors)), ncf_gcn_balance)
         gcn = GraphResnetWithSampling(n_content_dims, self.n_collaborative_dims, gcn_layers, g_train,
                                     gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
-        hard_negative_gen = self.__negative_pair_generator_(total_users, total_items, user_item_affinities, hyperparams)
+        hard_negative_gen = self.__negative_pair_generator__(total_users, total_items, user_item_affinities, hyperparams)
+        pos_gen = self.__positive_pair_generator__(total_users, total_items, user_item_affinities, hyperparams)
 
         user_item_affinities = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                                 user_item_affinities]
@@ -492,19 +564,27 @@ class GcnNCF(HybridGCNRec):
             src_neg = torch.randint(0, total_users, (negative_samples,))
             dst_neg = torch.randint(total_users+1, total_users+total_items, (negative_samples,))
             weights_neg = torch.tensor([0.0] * negative_samples)
+            src = torch.cat((src, src_neg), 0)
+            dst = torch.cat((dst, dst_neg), 0)
+            weights = torch.cat((weights, weights_neg), 0)
 
             if nsh > 0:
                 h_src_neg, h_dst_neg = zip(*hard_negative_gen())
                 weights_hneg = torch.tensor([0.0] * len(h_src_neg))
                 h_src_neg = torch.LongTensor(h_src_neg)
                 h_dst_neg = torch.LongTensor(h_dst_neg)
-                src = torch.cat((src, src_neg, h_src_neg), 0)
-                dst = torch.cat((dst, dst_neg, h_dst_neg), 0)
-                weights = torch.cat((weights, weights_neg, weights_hneg), 0)
-            else:
-                src = torch.cat((src, src_neg), 0)
-                dst = torch.cat((dst, dst_neg), 0)
-                weights = torch.cat((weights, weights_neg), 0)
+                src = torch.cat((src, h_src_neg), 0)
+                dst = torch.cat((dst, h_dst_neg), 0)
+                weights = torch.cat((weights, weights_hneg), 0)
+
+            if ps_proportion > 0:
+                h_src_pos, h_dst_pos = zip(*pos_gen())
+                weights_pos = torch.tensor([1.0] * len(h_src_pos))
+                h_src_pos = torch.LongTensor(h_src_pos)
+                h_dst_pos = torch.LongTensor(h_dst_pos)
+                src = torch.cat((src, h_src_pos), 0)
+                dst = torch.cat((dst, h_dst_pos), 0)
+                weights = torch.cat((weights, weights_pos), 0)
 
             shuffle_idx = torch.randperm(len(src))
             src = src[shuffle_idx]
