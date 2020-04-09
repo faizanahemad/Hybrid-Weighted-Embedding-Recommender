@@ -26,15 +26,15 @@ class NCF(nn.Module):
         super(NCF, self).__init__()
         noise = GaussianNoise(gaussian_noise)
         # self.node_emb = nn.Embedding(total_users + total_items, feature_size)
-        self.content_emb = nn.Embedding.from_pretrained(torch.tensor(content, dtype=torch.float), freeze=True)
+        # self.content_emb = nn.Embedding.from_pretrained(torch.tensor(content, dtype=torch.float), freeze=True)
         # nn.init.normal_(self.node_emb.weight, std=1 / (10 * feature_size))
-
-        wc1 = nn.Linear(content.shape[1] * 2, feature_size)
-        init_fc(wc1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        wc2 = nn.Linear(feature_size, feature_size)
-        init_fc(wc2, 'xavier_uniform_', 'leaky_relu', 0.1)
-
-        self.cem = nn.Sequential(wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
+        #
+        # wc1 = nn.Linear(content.shape[1] * 2, feature_size)
+        # init_fc(wc1, 'xavier_uniform_', 'leaky_relu', 0.1)
+        # wc2 = nn.Linear(feature_size, feature_size)
+        # init_fc(wc2, 'xavier_uniform_', 'leaky_relu', 0.1)
+        #
+        # self.cem = nn.Sequential(wc1, nn.LeakyReLU(0.1), noise, wc2, nn.LeakyReLU(0.1))
 
         w1 = nn.Linear(feature_size * 2, feature_size * (2 ** (depth - 1)))
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
@@ -47,7 +47,7 @@ class NCF(nn.Module):
 
         w_out = nn.Linear(feature_size, 1)
         init_fc(w_out, 'xavier_uniform_', 'sigmoid', 0.1)
-        self.w_out = nn.Sequential(w_out)
+        layers.extend([w_out, nn.Sigmoid()])
         self.W = nn.Sequential(*layers)
 
     def forward(self, src, dst, g_src, g_dst):
@@ -59,9 +59,7 @@ class NCF(nn.Module):
         # hc = torch.cat([hc_src, hc_dst], 1)
         # hc = self.cem(hc)
         vec = torch.cat([g_src, g_dst], 1)
-        out = self.W(vec)
-        out = self.w_out(out).flatten()
-        out = F.sigmoid(out)
+        out = self.W(vec).flatten()
         return out
 
 
@@ -134,6 +132,58 @@ class GcnNCF(HybridGCNRec):
         self.log = getLogger(type(self).__name__)
         assert n_collaborative_dims % 2 == 0
         self.cpu = int(os.cpu_count() / 2)
+
+    def __negative_pair_generator_(self, total_users, total_items,
+                                   affinities: List[Tuple[int, int, float]],
+                                   hyperparams):
+        nsh = hyperparams["nsh"] if "nsh" in hyperparams else 1
+        positive_samples = len(affinities)
+        p = 0.25
+        q = hyperparams["q"] if "q" in hyperparams else 0.25
+        negative_samples = int(nsh * positive_samples)
+        affinities = [(i, j, r) for i, j, r in affinities]
+        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
+        Walker = RandomWalker
+        walker = Walker(read_edgelist(affinities, weighted=False), p=p, q=q)
+        walker.preprocess_transition_probs()
+        # samples_per_node = {i: int(len(walker.adjacency_list[i]) * nsh) for i in range(total_users + total_items)}
+        spn = int(np.ceil(negative_samples / (total_users + total_items)))
+        samples_per_node = {i: spn for i in range(total_users + total_items)}
+        all_nodes = set([i for i in range(total_users + total_items)])
+        all_users = set([i for i in range(total_users)])
+        all_items = set([i+total_users for i in range(total_items)])
+
+        def nsg():
+            for i in range(total_users):
+                neighbours = {i}
+                for walk in walker.simulate_walks_single_node(i, 20, 5):
+                    neighbours.update(walk)
+                candidates = list(all_items - neighbours)
+                results = random.choices(candidates, k=samples_per_node[i])
+                for r in results:
+                    yield i, r
+
+            for j in range(total_items):
+                j = j + total_users
+                neighbours = {j}
+                for walk in walker.simulate_walks_single_node(j, 20, 5):
+                    neighbours.update(walk)
+                candidates = list(all_users - neighbours)
+                results = random.choices(candidates, k=samples_per_node[j])
+                for r in results:
+                    yield j, r
+
+        def nsg2():
+            for i in range(total_users+total_items):
+                neighbours = {i}
+                for walk in walker.simulate_walks_single_node(i, 20, 5):
+                    neighbours.update(walk)
+                candidates = list(all_nodes - neighbours)
+                results = random.choices(candidates, k=samples_per_node[i])
+                for r in results:
+                    yield i, r
+
+        return nsg
 
     def __user_item_affinities_triplet_trainer_data_gen_fn__(self, user_ids, item_ids,
                                                              user_id_to_index,
@@ -389,6 +439,7 @@ class GcnNCF(HybridGCNRec):
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.0
+        nsh = hyperparams["nsh"] if "nsh" in hyperparams else 1.0
 
         assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
         assert user_vectors.shape[1] == item_vectors.shape[1]
@@ -418,6 +469,8 @@ class GcnNCF(HybridGCNRec):
                                     gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+        hard_negative_gen = self.__negative_pair_generator_(total_users, total_items, user_item_affinities, hyperparams)
+
         user_item_affinities = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                                 user_item_affinities]
 
@@ -439,11 +492,21 @@ class GcnNCF(HybridGCNRec):
             src_neg = torch.randint(0, total_users, (negative_samples,))
             dst_neg = torch.randint(total_users+1, total_users+total_items, (negative_samples,))
             weights_neg = torch.tensor([0.0] * negative_samples)
-            src = torch.cat((src, src_neg), 0)
-            dst = torch.cat((dst, dst_neg), 0)
-            weights = torch.cat((weights, weights_neg), 0)
 
-            shuffle_idx = torch.randperm(positive_samples + negative_samples)
+            if nsh > 0:
+                h_src_neg, h_dst_neg = zip(*hard_negative_gen())
+                weights_hneg = torch.tensor([0.0] * len(h_src_neg))
+                h_src_neg = torch.LongTensor(h_src_neg)
+                h_dst_neg = torch.LongTensor(h_dst_neg)
+                src = torch.cat((src, src_neg, h_src_neg), 0)
+                dst = torch.cat((dst, dst_neg, h_dst_neg), 0)
+                weights = torch.cat((weights, weights_neg, weights_hneg), 0)
+            else:
+                src = torch.cat((src, src_neg), 0)
+                dst = torch.cat((dst, dst_neg), 0)
+                weights = torch.cat((weights, weights_neg), 0)
+
+            shuffle_idx = torch.randperm(len(src))
             src = src[shuffle_idx]
             dst = dst[shuffle_idx]
             weights = weights[shuffle_idx]

@@ -2,6 +2,7 @@ from __future__ import print_function
 
 import os
 import random
+import numpy as np
 
 # from time import time
 
@@ -70,9 +71,24 @@ class Node2VecWalker:
         self.G = G
         self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
+    def simulate_walks_single_node(self, node, num_walks, walk_length):
+        adjacency_list = self.adjacency_list
+        alias_nodes = self.alias_nodes
+        alias_edges = self.alias_edges
+
+        for _ in range(num_walks):
+            node_cur_nbrs = adjacency_list[node]
+            cur, back = random.choices(node_cur_nbrs, alias_nodes[node])[0], node
+            walk = [back, cur]
+            for _ in range(walk_length - 1):
+                cur_nbrs = adjacency_list[cur]
+                cur, back = random.choices(cur_nbrs, alias_edges[(back, cur)])[0], cur
+                walk.append(cur)
+            yield walk
+
+
     def simulate_walks_generator_optimised(self, num_walks, walk_length):
         nodes = self.nodes
-        import numpy as np
         np.random.shuffle(nodes)
         adjacency_list = self.adjacency_list
         alias_nodes = self.alias_nodes
@@ -152,9 +168,21 @@ class MemoryOptimisedNode2VecWalker:
         self.G = G
         self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
+    def simulate_walks_single_node(self, node, num_walks, walk_length):
+        adjacency_list = self.adjacency_list
+
+        for _ in range(num_walks):
+            node_cur_nbrs = adjacency_list[node]
+            cur, back = random.choices(node_cur_nbrs, self.node_proba(node))[0], node
+            walk = [back, cur]
+            for _ in range(walk_length - 1):
+                cur_nbrs = adjacency_list[cur]
+                cur, back = random.choices(cur_nbrs, self.edge_proba((back, cur)))[0], cur
+                walk.append(cur)
+            yield walk
+
     def simulate_walks_generator_optimised(self, num_walks, walk_length):
         nodes = self.nodes
-        import numpy as np
         np.random.shuffle(nodes)
         adjacency_list = self.adjacency_list
 
@@ -206,9 +234,20 @@ class RandomWalker:
         self.G = G
         self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
+    def simulate_walks_single_node(self, node, num_walks, walk_length):
+        adjacency_list = self.adjacency_list
+        for _ in range(num_walks):
+            node_cur_nbrs = adjacency_list[node]
+            cur, back = random.choice(node_cur_nbrs), node
+            walk = [back, cur]
+            for _ in range(walk_length - 1):
+                cur_nbrs = adjacency_list[cur]
+                cur, back = random.choice(cur_nbrs), cur
+                walk.append(cur)
+            yield walk
+
     def simulate_walks_generator_optimised(self, num_walks, walk_length):
         nodes = self.nodes
-        import numpy as np
         np.random.shuffle(nodes)
         adjacency_list = self.adjacency_list
 

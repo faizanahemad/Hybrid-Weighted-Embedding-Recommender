@@ -203,10 +203,9 @@ class ResnetConv(nn.Module):
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
         layers.append(GaussianNoise(gaussian_noise))
-        W = nn.Linear(inp * 2, out_dims)
+        W = nn.Linear(inp * (2 if depth > 1 else 1), out_dims)
         layers.append(W)
         self.prediction_layer = prediction_layer
-        self.noise = GaussianNoise(gaussian_noise)
 
         if not prediction_layer:
             init_fc(W, 'xavier_uniform_', 'leaky_relu', 0.1)
@@ -252,7 +251,9 @@ class GraphResnetWithSampling(nn.Module):
         self.n_layers = n_layers
         noise = GaussianNoise(gaussian_noise)
 
-        w1 = nn.Linear(n_content_dims, feature_size)
+        width = 2
+        w1 = nn.Linear(n_content_dims, feature_size * width)
+        init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
         proj = [w1, nn.LeakyReLU(negative_slope=0.1)]
         self.proj = nn.Sequential(*proj)
 
@@ -268,7 +269,7 @@ class GraphResnetWithSampling(nn.Module):
                 init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
         self.convs = nn.ModuleList(
-            [ResnetConv(feature_size, feature_size, i == 0, i == n_layers - 1, gaussian_noise, conv_depth) for i
+            [ResnetConv(feature_size * width, feature_size * (1 if i >= n_layers - 1 else width), i == 0, i == n_layers - 1, gaussian_noise, conv_depth) for i
              in
              range(n_layers)])
 
@@ -282,13 +283,17 @@ class GraphResnetWithSampling(nn.Module):
         self.msg = [m_init if i == 0 else m for i in range(n_layers)]
         self.red = [r_init if i == 0 else r for i in range(n_layers)]
 
+        expansion = nn.Linear(feature_size, feature_size * width)
+        init_fc(expansion, 'xavier_uniform_', 'leaky_relu', 0.1)
+        self.expansion = nn.Sequential(noise, expansion, nn.LeakyReLU(0.1))
+
     def forward(self, nf):
         '''
         nf: NodeFlow.
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
+            nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
