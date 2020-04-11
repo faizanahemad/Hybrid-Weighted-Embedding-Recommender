@@ -92,22 +92,15 @@ class GraphSageConvWithSamplingBase(nn.Module):
         h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
         return h, h_agg
 
-    def process_node_data(self, h):
-        return h
-
-    def process_neighbourhood_data(self, h_agg):
-        return h_agg
-
     def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
-        # h_new = h + h_new
+        if not self.prediction_layer:
+            h_new = h_agg + h_new
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
         return {'h': h_new}
 
     def forward(self, nodes):
         h, h_agg = self.pre_process(nodes)
-        h = self.process_node_data(h)
-        h_agg = self.process_neighbourhood_data(h_agg)
         h_concat = torch.cat([h, h_agg], 1)
         return self.post_process(h_concat, h, h_agg)
 
@@ -137,7 +130,7 @@ class GraphSageWithSampling(nn.Module):
         embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
         if init_node_vectors is None:
-            nn.init.normal_(self.node_emb.weight, std=1 / (100 * embedding_dim))
+            nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
         else:
             if embedding_dim != feature_size:
                 from sklearn.decomposition import PCA
@@ -228,6 +221,8 @@ class ResnetConv(nn.Module):
             h_residue = nodes.data['h_residue']
             h_concat = torch.cat([h, h_agg, h_residue], 1)
         h_new = self.W(h_concat)
+        if not self.prediction_layer:
+            h_new = h_agg + h_new
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
 
         if self.prediction_layer:
@@ -259,7 +254,7 @@ class GraphResnetWithSampling(nn.Module):
         embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
         if init_node_vectors is None:
-            nn.init.normal_(self.node_emb.weight, std=1 / (100 * embedding_dim))
+            nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
         else:
             if embedding_dim != feature_size:
                 from sklearn.decomposition import PCA
