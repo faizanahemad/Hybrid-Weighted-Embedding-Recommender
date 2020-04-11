@@ -73,7 +73,7 @@ class GraphSageConvWithSamplingBase(nn.Module):
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
         layers.append(GaussianNoise(gaussian_noise))
-        W = nn.Linear(feature_size * 4, out_dims)
+        W = nn.Linear(feature_size * (4 if depth > 1 else 2), out_dims)
         layers.append(W)
         self.prediction_layer = prediction_layer
         self.noise = GaussianNoise(gaussian_noise)
@@ -121,14 +121,13 @@ class GraphSageWithSampling(nn.Module):
         self.feature_size = feature_size
         self.n_layers = n_layers
         GraphSageConvWithSampling = GraphSageConvWithSamplingBase
+        width = 2
 
         noise = GaussianNoise(gaussian_noise)
-        w1 = nn.Linear(n_content_dims, feature_size)
+        w1 = nn.Linear(n_content_dims, feature_size * width)
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        w = nn.Linear(feature_size, feature_size)
-        w2 = nn.Linear(feature_size, feature_size)
+        w = nn.Linear(feature_size * width, feature_size * width)
         init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
-        init_fc(w2, 'xavier_uniform_', 'leaky_relu', 0.1)
         proj = [w1, nn.LeakyReLU(negative_slope=0.1)]
         self.proj = nn.Sequential(*proj)
 
@@ -151,16 +150,14 @@ class GraphSageWithSampling(nn.Module):
         segments = min(n_layers, 4)
         segments = list(reversed([2**i for i in range(segments)]))
         for i in range(n_layers):
-            s = segments[i] if i < len(segments) else segments[-1]
-            dims = feature_size
-            out_dims = feature_size
-
-            w = nn.Linear(min(n_content_dims, feature_size * 2), dims)
-            init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
-            conv = GraphSageConvWithSampling(dims, out_dims, i == n_layers - 1, gaussian_noise, conv_depth)
+            conv = GraphSageConvWithSampling(feature_size * width, feature_size * (width if i < n_layers - 1 else 1),
+                                             i == n_layers - 1, gaussian_noise, conv_depth)
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
+        expansion = nn.Linear(feature_size, feature_size * width)
+        init_fc(expansion, 'xavier_uniform_', 'leaky_relu', 0.1)
+        self.expansion = nn.Sequential(noise, expansion, nn.LeakyReLU(0.1))
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -172,7 +169,7 @@ class GraphSageWithSampling(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
+            nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
