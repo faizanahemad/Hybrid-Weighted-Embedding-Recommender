@@ -33,6 +33,9 @@ def build_params(args, objective, params):
     params["collaborative_params"]["prediction_network_params"]["gcn_layers"] = int(args["gcn_layers"])
     params["collaborative_params"]["prediction_network_params"]["ncf_layers"] = int(args["ncf_layers"])
     params["collaborative_params"]["prediction_network_params"]["ns_proportion"] = float(args["ns_proportion"])
+    params["collaborative_params"]["prediction_network_params"]["ps_proportion"] = float(args["ps_proportion"])
+    params["collaborative_params"]["prediction_network_params"]["margin"] = float(args["margin"])
+    params["collaborative_params"]["prediction_network_params"]["nsh"] = float(args["nsh"])
     params["n_dims"] = int(args["n_dims"])
 
     return params
@@ -69,14 +72,20 @@ def define_search_space(objective, starting_params):
                               prediction["epochs"] + 20, 5),
         'kernel_l2': hp.choice('kernel_l2',
                                [0.0, hp.qloguniform('kernel_l2_choice', np.log(1e-9), np.log(1e-5), 5e-9)]),
-        'batch_size': hp.qloguniform('batch_size', np.log(1024), np.log(2047), 1024),
-        # 'batch_size': hp.choice('batch_size', [512]),
-        'conv_depth': hp.quniform('conv_depth', 1, prediction["conv_depth"] + 1, 1),
+        'batch_size': hp.qloguniform('batch_size', np.log(1024), np.log(4096), 1024),
+        'conv_depth': hp.quniform('conv_depth', 1, prediction["conv_depth"] + 2, 1),
         'gcn_layers': hp.quniform('gcn_layers', 1, prediction["gcn_layers"] + 1, 1),
         'ncf_layers': hp.quniform('ncf_layers', 1, prediction["ncf_layers"] + 1, 1),
-        'ns_proportion': hp.quniform('ns_proportion', 0.0, prediction["ns_proportion"] + 1.0, 0.1),
-        'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(prediction["gaussian_noise"]),
-                                        0.5 * prediction["gaussian_noise"], 0.005),
+        'ps_proportion': hp.choice('ps_proportion',
+                                    [0.0, hp.qloguniform('ps_proportion_choice', np.log(0.1), np.log(prediction["ps_proportion"] + 1.0), 0.05)]),
+        'ns_proportion': hp.quniform('ns_proportion', 0.0, prediction["ns_proportion"] + 2.0, 0.1),
+        'nsh': hp.quniform('nsh', 0.0, prediction["nsh"] + 2.0, 0.1),
+        # 'gaussian_noise': hp.qlognormal('gaussian_noise', np.log(prediction["gaussian_noise"]),
+        #                                 0.5 * prediction["gaussian_noise"], 0.005),
+        'gaussian_noise': hp.choice('gaussian_noise',
+                               [0.0, hp.qloguniform('gaussian_noise_choice', np.log(1e-3), np.log(0.5), 1e-3)]),
+        'margin': hp.choice('margin',
+                                    [0.0, hp.qloguniform('margin_choice', np.log(1e-4), np.log(0.05), 5e-4)]),
         'n_dims': hp.quniform('n_dims',
                               starting_params["n_dims"] - 16,
                               starting_params["n_dims"] + 64, 16),

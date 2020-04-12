@@ -576,6 +576,13 @@ class GcnNCF(HybridGCNRec):
             return src, dst, weights
 
         src, dst, rating = get_samples()
+        # total_examples = len(src) - 10_000
+        # src, dst, rating = src[:total_examples], dst[:total_examples], rating[:total_examples]
+        # opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
+        # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
+        #                                                 steps_per_epoch=int(
+        #                                                     np.ceil(total_examples / batch_size)),
+        #                                                 div_factor=50, final_div_factor=100)
 
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
         params = sum([np.prod(p.size()) for p in model_parameters])
@@ -585,6 +592,11 @@ class GcnNCF(HybridGCNRec):
             gc.collect()
             start = time.time()
             model.train()
+
+            # shuffle_idx = torch.randperm(len(src))
+            # src = src[shuffle_idx]
+            # dst = dst[shuffle_idx]
+            # rating = rating[shuffle_idx]
 
             def train(src, dst, rating):
                 import gc
@@ -626,6 +638,7 @@ class GcnNCF(HybridGCNRec):
             loss = train(src, dst, rating)
             if epoch < epochs - 1:
                 src, dst, rating = get_samples()
+                # src, dst, rating = src[:total_examples], dst[:total_examples], rating[:total_examples]
 
             total_time = time.time() - start
 

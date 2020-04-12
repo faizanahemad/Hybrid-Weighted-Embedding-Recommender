@@ -28,17 +28,20 @@ def get_data_mapper(df_user, df_item, dataset="100K"):
 
         embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
         embedding_mapper['numeric'] = NumericEmbedding(16)
+        embedding_mapper['user_numeric'] = NumericEmbedding(16)
         embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=32)
 
         u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL,
                      values=df_user[["gender", "age", "occupation", "zip"]].values)
-        user_data = FeatureSet([u1])
+        u2 = Feature(feature_name="user_numeric", feature_type=FeatureType.NUMERIC,
+                     values=df_user[["user_rating_mean", "user_rating_count"]].values)
+        user_data = FeatureSet([u1, u2])
         df_item.year = "_" + df_item.year.apply(str) + "_"
 
         i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=df_item.text.values)
         i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=df_item.genres.values)
         i3 = Feature(feature_name="numeric", feature_type=FeatureType.NUMERIC,
-                     values=np.abs(df_item[["title_length", "overview_length", "runtime"]].values) + 1)
+                     values=np.abs(df_item[["title_length", "overview_length", "runtime", "item_rating_mean", "item_rating_count"]].values) + 1)
         i4 = Feature(feature_name="categorical_year", feature_type=FeatureType.CATEGORICAL,
                      values=df_item.year.values)
         item_data = FeatureSet([i1, i2, i3, i4])
@@ -51,9 +54,12 @@ def get_data_mapper(df_user, df_item, dataset="100K"):
         embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
         embedding_mapper['numeric'] = NumericEmbedding(16)
         embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=32)
+        embedding_mapper['user_numeric'] = NumericEmbedding(16)
 
         u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL, values=df_user[["gender", "age", "occupation", "zip"]].values)
-        user_data = FeatureSet([u1])
+        u2 = Feature(feature_name="user_numeric", feature_type=FeatureType.NUMERIC,
+                     values=df_user[["user_rating_mean", "user_rating_count"]].values)
+        user_data = FeatureSet([u1, u2])
 
         # print("Numeric Nans = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]].isna()))
         # print("Numeric Zeros = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]] <= 0))
@@ -61,7 +67,7 @@ def get_data_mapper(df_user, df_item, dataset="100K"):
         i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=df_item.text.values)
         i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=df_item.genres.values)
         i3 = Feature(feature_name="numeric", feature_type=FeatureType.NUMERIC,
-                     values=np.abs(df_item[["title_length", "overview_length", "runtime"]].values) + 1)
+                     values=np.abs(df_item[["title_length", "overview_length", "runtime", "item_rating_mean", "item_rating_count"]].values) + 1)
         item_data = FeatureSet([i1, i2, i3])
         return embedding_mapper, user_data, item_data
 
@@ -101,6 +107,12 @@ def get_data_reader(dataset="100K"):
             raise ValueError()
         train = train[["user", "item", "rating"]]
         test = test[["user", "item", "rating"]]
+
+        user_stats = train.groupby(["user"])["rating"].agg(["mean", "count"]).reset_index()
+        item_stats = train.groupby(["item"])["rating"].agg(["mean", "count"]).reset_index()
+        user_stats.rename(columns={"mean": "user_rating_mean", "count": "user_rating_count"}, inplace=True)
+        item_stats.rename(columns={"mean": "item_rating_mean", "count": "item_rating_count"}, inplace=True)
+
         train["is_test"] = False
         test["is_test"] = True
         ratings = pd.concat((train, test))
@@ -119,6 +131,11 @@ def get_data_reader(dataset="100K"):
         movies["runtime"] = movies["runtime"].fillna(0.0)
         users.rename(columns={"id": "user"}, inplace=True)
         movies.rename(columns={"id": "item"}, inplace=True)
+
+        users = users.merge(user_stats, how="left", on="user")
+        movies = movies.merge(item_stats, how="left", on="item")
+        movies = movies.fillna(movies.mean())
+        users = users.fillna(users.mean())
         return users, movies, ratings
 
     def read_data_1M(**kwargs):
@@ -146,6 +163,10 @@ def get_data_reader(dataset="100K"):
         test = test[["user", "item", "rating"]]
         train["is_test"] = False
         test["is_test"] = True
+        user_stats = train.groupby(["user"])["rating"].agg(["mean", "count"]).reset_index()
+        item_stats = train.groupby(["item"])["rating"].agg(["mean", "count"]).reset_index()
+        user_stats.rename(columns={"mean": "user_rating_mean", "count": "user_rating_count"}, inplace=True)
+        item_stats.rename(columns={"mean": "item_rating_mean", "count": "item_rating_count"}, inplace=True)
         ratings = pd.concat((train, test))
         users['user_id'] = users['user_id'].astype(str)
         movies['movie_id'] = movies['movie_id'].astype(str)
@@ -164,6 +185,10 @@ def get_data_reader(dataset="100K"):
         movies["runtime"] = movies["runtime"].fillna(0.0)
         movies.rename(columns={"movie_id": "item"}, inplace=True)
         users.rename(columns={"user_id": "user"}, inplace=True)
+        users = users.merge(user_stats, how="left", on="user")
+        movies = movies.merge(item_stats, how="left", on="item")
+        movies = movies.fillna(movies.mean())
+        users = users.fillna(users.mean())
         return users, movies, ratings
 
     if dataset == "100K":

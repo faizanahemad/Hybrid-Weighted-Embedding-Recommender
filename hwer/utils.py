@@ -212,16 +212,16 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
     from tensorflow import keras
     loss = "mean_squared_error"
     es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=5, verbose=0, )
-    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=4, min_lr=0.0001)
+    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=4, min_lr=0.00001)
     nan_prevent = tf.keras.callbacks.TerminateOnNaN()
     input_layer = tf.keras.Input(shape=(Inputs.shape[1],))
-    encoded = tf.keras.layers.Dense(n_dims * 8, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(input_layer)
-    encoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(encoded)
+    encoded = tf.keras.layers.Dense(n_dims * 8, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=1e-5))(input_layer)
+    encoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=1e-5))(encoded)
     encoded = tf.keras.layers.Dense(n_dims, activation='elu')(encoded)
     encoded = K.l2_normalize(encoded, axis=-1)
 
-    decoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(encoded)
-    decoded = tf.keras.layers.Dense(n_dims * 8, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=0.001))(decoded)
+    decoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=1e-5))(encoded)
+    decoded = tf.keras.layers.Dense(n_dims * 8, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=1e-5))(decoded)
     decoded = tf.keras.layers.Dense(Outputs.shape[1])(decoded)
     decoded = tf.keras.layers.LeakyReLU(alpha=0.1)(decoded)
 
@@ -239,6 +239,7 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
                     verbose=verbose,
                     validation_data=(X2, Y2),
                     callbacks=[es, nan_prevent])
+    es = tf.keras.callbacks.EarlyStopping(monitor='val_loss', min_delta=0.0, patience=5, verbose=0, )
 
     autoencoder.fit(X2, Y2,
                     epochs=epochs,
@@ -323,7 +324,7 @@ def normalize_affinity_scores_by_user_item_bs(user_item_affinities: List[Tuple[s
 
 
 def is_num(x):
-    ans = isinstance(x, int) or isinstance(x, float) or isinstance(x, np.float)
+    ans = isinstance(x, int) or isinstance(x, float) or isinstance(x, np.float) or isinstance(x, np.int) or isinstance(x, np.int64)
     return ans
 
 
