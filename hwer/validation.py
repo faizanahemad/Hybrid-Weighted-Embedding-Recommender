@@ -247,19 +247,16 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
         recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
                               rating_scale=rating_scale,
-                              n_content_dims=hyperparameters["n_content_dims"],
                               n_collaborative_dims=hyperparameters["n_dims"])
     elif algo in ["gcn_ncf"]:
         recsys = GcnNCF(embedding_mapper=embedding_mapper,
                         knn_params=hyperparameters["knn_params"],
                         rating_scale=rating_scale,
-                        n_content_dims=hyperparameters["n_content_dims"],
                         n_collaborative_dims=hyperparameters["n_dims"])
     elif algo in ["gcn_retriever"]:
         recsys = GCNRetriever(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
                               rating_scale=rating_scale,
-                              n_content_dims=hyperparameters["n_content_dims"],
                               n_collaborative_dims=hyperparameters["n_dims"])
 
     start = time.time()

@@ -16,96 +16,11 @@ logger.addHandler(logging.StreamHandler(sys.stdout))
 
 class HybridGCNRec(HybridRecommender):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
-                 n_content_dims: int = 32, n_collaborative_dims: int = 32):
-        super().__init__(embedding_mapper, knn_params, rating_scale, n_content_dims, n_collaborative_dims)
+                 n_collaborative_dims: int = 32):
+        super().__init__(embedding_mapper, knn_params, rating_scale, n_collaborative_dims)
         self.log = getLogger(type(self).__name__)
         assert n_collaborative_dims % 2 == 0
         self.cpu = int(os.cpu_count() / 2)
-
-    def __word2vec_trainer__(self,
-                             user_ids: List[str], item_ids: List[str],
-                             user_item_affinities: List[Tuple[str, str, float]],
-                             user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                             n_output_dims: int,
-                             hyperparams: Dict):
-        self.log.info("__word2vec_trainer__: Training Node2Vec base Random Walks with Word2Vec...")
-        import gc
-        from gensim.models import Word2Vec
-        walk_length = 10
-        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 20
-        iter = hyperparams["iter"] if "iter" in hyperparams else 3
-        p = 1.0
-        q = hyperparams["q"] if "q" in hyperparams else 0.5
-        total_examples = len(user_item_affinities)
-
-        total_users = len(user_ids)
-        total_items = len(item_ids)
-
-        affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], r) for i, j, r in user_item_affinities]
-        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-        Walker = RandomWalker
-        walker = Walker(read_edgelist(affinities), p=p, q=q)
-        walker.preprocess_transition_probs()
-
-        sfile = "sentences-%s.txt" % str(np.random.randint(int(1e8)))
-        from .utils import save_list_per_line
-
-        def sentences_generator():
-            g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
-            save_list_per_line([[""]], sfile, 'w')
-            sentences = [w for w in g]
-            save_list_per_line(sentences, sfile, 'a')
-            return len(sentences)
-
-        gts = time.time()
-        start = gts
-        gt = 0.0
-        sentences_generator()
-        gt += time.time() - gts
-        w2v = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0002,
-                       size=int(self.n_collaborative_dims/2), window=3, workers=self.cpu, sg=1,
-                       negative=10, max_vocab_size=None, iter=2)
-        # w2v.init_sims(True)
-
-        w2v2 = Word2Vec(corpus_file=sfile, min_count=1, sample=0.0002,
-                       size=int(self.n_collaborative_dims/2), window=5, workers=self.cpu, sg=1,
-                       negative=10, max_vocab_size=None, iter=2)
-        # w2v2.init_sims(True)
-
-        for _ in range(iter):
-            gts = time.time()
-            total_examples = sentences_generator()
-
-            gc.collect()
-            gt += time.time() - gts
-            # w2v.init_sims(True)
-            w2v.train(corpus_file=sfile, epochs=2, total_examples=total_examples, total_words=len(walker.nodes))
-
-            # w2v2.init_sims(True)
-            w2v2.train(corpus_file=sfile, epochs=2, total_examples=total_examples, total_words=len(walker.nodes))
-
-            gc.collect()
-        import os
-        try:
-            os.remove(sfile)
-        except FileNotFoundError:
-            pass
-        uv1 = np.array([w2v.wv[str(self.user_id_to_index[u])] for u in user_ids])
-        iv1 = np.array([w2v.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
-
-        uv2 = np.array([w2v2.wv[str(self.user_id_to_index[u])] for u in user_ids])
-        iv2 = np.array([w2v2.wv[str(total_users + self.item_id_to_index[i])] for i in item_ids])
-
-        from .utils import unit_length, unit_length_violations
-        user_vectors = np.concatenate((uv1, uv2), axis=1)
-        item_vectors = np.concatenate((iv1, iv2), axis=1)
-
-        self.log.info(
-            "Trained Word2Vec with Node2Vec Walks, Walks Generation time = %.1f, Total Word2Vec Time = %.1f" % (
-            gt, time.time() - start))
-        self.log.info("Node2Vec Unit Length violation: users = %s, items = %s"
-                       % (unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1)))
-        return user_vectors, item_vectors
 
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
                                   conv_depth, g_train, triplet_vectors, margin, gaussian_noise):
@@ -188,10 +103,8 @@ class HybridGCNRec(HybridRecommender):
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         margin = hyperparams["margin"] if "margin" in hyperparams else 1.0
         gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
-        enable_node2vec = hyperparams["enable_node2vec"] if "enable_node2vec" in hyperparams else False
         enable_gcn = hyperparams["enable_gcn"] if "enable_gcn" in hyperparams else False
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
-        node2vec_params = hyperparams["node2vec_params"] if "node2vec_params" in hyperparams else {}
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
         enable_svd = hyperparams["enable_svd"] if "enable_svd" in hyperparams else False
         total_users = len(user_ids)
@@ -204,15 +117,6 @@ class HybridGCNRec(HybridRecommender):
         gc.collect()
 
         user_triplet_vectors, item_triplet_vectors = user_vectors, item_vectors
-        if enable_node2vec:
-            w2v_user_vectors, w2v_item_vectors = self.__word2vec_trainer__(user_ids, item_ids, user_item_affinities,
-                                                                           user_id_to_index,
-                                                                           item_id_to_index,
-                                                                           n_output_dims,
-                                                                           node2vec_params)
-            self.w2v_user_vectors = w2v_user_vectors
-            self.w2v_item_vectors = w2v_item_vectors
-            user_triplet_vectors, item_triplet_vectors = w2v_user_vectors, w2v_item_vectors
         if enable_svd:
             from surprise import Dataset
             from surprise import Reader
@@ -247,10 +151,6 @@ class HybridGCNRec(HybridRecommender):
             return user_triplet_vectors, item_triplet_vectors
 
         triplet_vectors = None
-        if enable_node2vec and not enable_svd:
-            triplet_vectors = np.concatenate(
-                (np.zeros((1, user_triplet_vectors.shape[1])), user_triplet_vectors, item_triplet_vectors))
-            triplet_vectors = torch.FloatTensor(triplet_vectors)
 
         if enable_svd:
             triplet_vectors = np.concatenate(
@@ -260,8 +160,6 @@ class HybridGCNRec(HybridRecommender):
         total_users = len(user_ids)
         edge_list = [(user_id_to_index[u], total_users + item_id_to_index[i], r) for u, i, r in user_item_affinities]
         content_vectors = np.concatenate((user_vectors, item_vectors))
-        if enable_node2vec:
-            content_vectors = np.concatenate((content_vectors, np.concatenate((user_triplet_vectors, item_triplet_vectors))), axis=1)
 
         g_train = build_dgl_graph(edge_list, len(user_ids) + len(item_ids), content_vectors)
         g_train.readonly()
@@ -435,7 +333,6 @@ class HybridGCNRec(HybridRecommender):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 2
-        use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         network_depth = hyperparams["network_depth"] if "network_depth" in hyperparams else 3
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
@@ -459,25 +356,8 @@ class HybridGCNRec(HybridRecommender):
 
         total_users = len(user_ids) + 1
         total_items = len(item_ids) + 1
-        if use_content:
-            try:
-                self.w2v_user_vectors = np.concatenate(
-                    (np.zeros((1, self.w2v_user_vectors.shape[1])), self.w2v_user_vectors))
-                self.w2v_item_vectors = np.concatenate(
-                    (np.zeros((1, self.w2v_item_vectors.shape[1])), self.w2v_item_vectors))
-
-                user_vectors = np.concatenate((self.w2v_user_vectors, user_vectors, user_content_vectors), axis=1)
-                item_vectors = np.concatenate((self.w2v_item_vectors, item_vectors, item_content_vectors), axis=1)
-                self.w2v_user_vectors = None
-                self.w2v_item_vectors = None
-                del self.w2v_user_vectors
-                del self.w2v_item_vectors
-            except AttributeError as e:
-                user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
-                item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
-        else:
-            user_vectors = np.zeros((user_vectors.shape[0], 1))
-            item_vectors = np.zeros((item_vectors.shape[0], 1))
+        user_vectors = np.concatenate((user_vectors, user_content_vectors), axis=1)
+        item_vectors = np.concatenate((item_vectors, item_content_vectors), axis=1)
 
         edge_list = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                      user_item_affinities]
@@ -709,9 +589,7 @@ class HybridGCNRec(HybridRecommender):
         logger.info("load_model:: Loaded Full Model.")
         return model
 
-    def prepare_for_knn(self, alpha, content_data_used,
-                        user_content_vectors, item_content_vectors,
-                        user_vectors, item_vectors):
+    def prepare_for_knn(self, user_vectors, item_vectors):
         from .utils import unit_length
         from sklearn.decomposition import PCA
         user_vectors_length = len(user_vectors)

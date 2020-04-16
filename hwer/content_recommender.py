@@ -210,7 +210,7 @@ class ContentRecommendation(RecommendationBase):
             self.log.info("Content Recommender::__concat_feature_vectors__, PCA explained variance:  %.4f, explained variance ratio: %.4f",
                            np.sum(pca.explained_variance_), np.sum(pca.explained_variance_ratio_))
 
-        if n_output_dims > all_vectors.shape[1]:
+        if n_output_dims > all_vectors.shape[1] and n_output_dims != np.inf:
             raise AssertionError("Output Dims are higher than Total Feature Dims.")
         all_vectors = unit_length(all_vectors, axis=1)
         user_vectors = all_vectors[:user_vectors_length]

@@ -40,7 +40,6 @@ def fetch_ncf_params(dataset, algo):
 
     p["collaborative_params"]["user_item_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
-    p["collaborative_params"]["prediction_network_params"]["use_content"] = True
     return p
 
 
@@ -50,17 +49,11 @@ def fetch_gcn_params(dataset, algo):
 
     p["collaborative_params"]["user_item_params"]["verbose"] = verbose
     p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
-    p["collaborative_params"]["prediction_network_params"]["use_content"] = True
 
     p["collaborative_params"]["user_item_params"]["enable_gcn"] = enable_gcn if "enable_gcn" not in \
                                                                                      p["collaborative_params"][
                                                                                          "user_item_params"] else \
         p["collaborative_params"]["user_item_params"]["enable_gcn"]
-
-    p["collaborative_params"]["user_item_params"]["enable_node2vec"] = enable_node2vec if "enable_node2vec" not in \
-                                                                                          p["collaborative_params"][
-                                                                                              "user_item_params"] else \
-    p["collaborative_params"]["user_item_params"]["enable_node2vec"]
 
     p["collaborative_params"]["user_item_params"]["enable_svd"] = enable_svd if "enable_svd" not in \
                                                                                 p["collaborative_params"][
@@ -80,11 +73,6 @@ def fetch_retriever_params(dataset, algo):
                                                                                          "user_item_params"] else \
         p["collaborative_params"]["user_item_params"]["enable_gcn"]
 
-    p["collaborative_params"]["user_item_params"]["enable_node2vec"] = enable_node2vec if "enable_node2vec" not in \
-                                                                                          p["collaborative_params"][
-                                                                                              "user_item_params"] else \
-    p["collaborative_params"]["user_item_params"]["enable_node2vec"]
-
     p["collaborative_params"]["user_item_params"]["enable_svd"] = enable_svd if "enable_svd" not in \
                                                                                           p["collaborative_params"][
                                                                                               "user_item_params"] else \
@@ -95,7 +83,6 @@ def fetch_retriever_params(dataset, algo):
 def get_best_params(dataset):
 
     hyperparameter_content = fetch_content_params()
-
 
     hyperparameters_gcn = fetch_gcn_params(dataset, "gcn")
 
@@ -114,7 +101,6 @@ def get_best_params(dataset):
 
 n_neighbors = 500
 knn_params = dict(n_neighbors=n_neighbors, index_time_params={'M': 15, 'ef_construction': 200, })
-enable_node2vec = True
 enable_gcn = True
 enable_svd = True
 verbose = 2

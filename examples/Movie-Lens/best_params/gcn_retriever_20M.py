@@ -1,7 +1,6 @@
-params = dict(n_dims=128, n_content_dims=196,
+params = dict(n_dims=64, use_content=True,
                   collaborative_params=dict(
-                      user_item_params=dict(gcn_lr=0.001, gcn_epochs=5, gcn_layers=3,
-                                            gcn_kernel_l2=1e-8, gcn_batch_size=512, conv_depth=2,
+                      user_item_params=dict(gcn_lr=0.001, gcn_epochs=3, gcn_layers=2,
+                                            gcn_kernel_l2=1e-8, gcn_batch_size=2048, conv_depth=2,
                                             margin=1.0,
-                                            gaussian_noise=0.0025,
-                                            node2vec_params=dict(num_walks=150, q=0.75))))
+                                            gaussian_noise=0.005, num_walks=20)))

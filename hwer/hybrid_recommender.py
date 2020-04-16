@@ -16,12 +16,11 @@ from .utils import unit_length, unit_length_violations
 
 class HybridRecommender(RecommendationBase):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
-                 n_content_dims: int = 32, n_collaborative_dims: int = 32, n_output_dims: int = 64):
+                 n_collaborative_dims: int = 32, n_output_dims: int = 64):
         super().__init__(knn_params=knn_params, rating_scale=rating_scale,
                          n_output_dims=n_output_dims)
         self.cb = ContentRecommendation(embedding_mapper, knn_params, rating_scale,
-                                        n_content_dims, )
-        self.n_content_dims = n_content_dims
+                                        np.inf)
         self.n_collaborative_dims = n_collaborative_dims
         self.content_data_used = None
         self.prediction_artifacts = None
@@ -91,40 +90,34 @@ class HybridRecommender(RecommendationBase):
         item_data: FeatureSet = kwargs["item_data"] if "item_data" in kwargs else FeatureSet([])
         user_data: FeatureSet = kwargs["user_data"] if "user_data" in kwargs else FeatureSet([])
         hyperparameters = {} if "hyperparameters" not in kwargs else kwargs["hyperparameters"]
-        svd_params = {} if "svd_params" not in hyperparameters else hyperparameters["svd_params"]
         collaborative_params = {} if "collaborative_params" not in hyperparameters else hyperparameters["collaborative_params"]
         prediction_network_params = {} if "prediction_network_params" not in collaborative_params else \
             collaborative_params["prediction_network_params"]
 
-        combining_factor: int = hyperparameters["combining_factor"] if "combining_factor" in hyperparameters else 0.5
-        alpha = combining_factor
-        assert 0 <= alpha <= 1
-        use_content = prediction_network_params["use_content"] if "use_content" in prediction_network_params else False
-        content_data_used = ("item_data" in kwargs or "user_data" in kwargs) and alpha > 0 and use_content
+        use_content = hyperparameters["use_content"] if "use_content" in hyperparameters else False
+        content_data_used = ("item_data" in kwargs or "user_data" in kwargs) and use_content
         self.content_data_used = content_data_used
-
-        self.n_output_dims = self.n_content_dims + self.n_collaborative_dims if content_data_used else self.n_collaborative_dims
 
         item_item_affinities: List[Tuple[str, str, bool]] = kwargs[
             "item_item_affinities"] if "item_item_affinities" in kwargs else list()
         user_user_affinities: List[Tuple[str, str, bool]] = kwargs[
             "user_user_affinities"] if "user_user_affinities" in kwargs else list()
 
-        self.log.debug("Hybrid Base: Fit Method: content_data_used = %s, content_dims = %s", content_data_used, self.n_content_dims)
+        self.log.debug("Hybrid Base: Fit Method: content_data_used = %s", content_data_used)
         start = time.time()
         if content_data_used:
             super(type(self.cb), self.cb).fit(user_ids, item_ids, user_item_affinities, **kwargs)
             user_vectors, item_vectors = self.cb.__build_content_embeddings__(user_ids, item_ids,
                                                                               user_data, item_data,
                                                                               user_item_affinities,
-                                                                              self.n_content_dims)
+                                                                              np.inf)
             self.cb = None
             del self.cb
             del kwargs["user_data"]
             del kwargs["item_data"]
 
         else:
-            user_vectors, item_vectors = np.random.rand(len(user_ids), self.n_content_dims), np.random.rand(len(item_ids), self.n_content_dims)
+            user_vectors, item_vectors = np.random.rand(len(user_ids), 1), np.random.rand(len(item_ids), 1)
         self.log.info("Hybrid Base: Built Content Embedding., user_vectors shape = %s, item vectors shape = %s, Time = %.1f" %
                        (user_vectors.shape, item_vectors.shape, time.time() - start))
         user_vectors = unit_length(user_vectors, axis=1)
@@ -133,7 +126,7 @@ class HybridRecommender(RecommendationBase):
         gc.collect()
 
         user_content_vectors, item_content_vectors = user_vectors.copy(), item_vectors.copy()
-        assert user_content_vectors.shape[1] == item_content_vectors.shape[1] == self.n_content_dims
+        assert user_content_vectors.shape[1] == item_content_vectors.shape[1]
 
         user_vectors, item_vectors = self.__build_collaborative_embeddings__(user_item_affinities,
                                                                              item_item_affinities,
@@ -167,15 +160,11 @@ class HybridRecommender(RecommendationBase):
             self.prediction_artifacts.update(dict(prediction_artifacts))
         gc.collect()
         self.log.debug("Hybrid Base: Built Prediction Network.")
-        self.__build_svd_model__(user_ids, item_ids, user_item_affinities,
-                                             self.user_id_to_index, self.item_id_to_index, self.rating_scale, **svd_params)
 
         self.log.debug("Fit Method, Before KNN, Unit Length Violations:: user = %s, item = %s",
                        unit_length_violations(user_vectors, axis=1), unit_length_violations(item_vectors, axis=1))
 
-        user_vectors, item_vectors = self.prepare_for_knn(alpha, content_data_used,
-                                                          user_content_vectors, item_content_vectors,
-                                                          user_vectors, item_vectors)
+        user_vectors, item_vectors = self.prepare_for_knn(user_vectors, item_vectors)
         self.knn_user_vectors = user_vectors
         self.knn_item_vectors = item_vectors
         self.__build_knn__(user_ids, item_ids, user_vectors, item_vectors)
@@ -186,9 +175,7 @@ class HybridRecommender(RecommendationBase):
         return user_vectors, item_vectors
 
     @abc.abstractmethod
-    def prepare_for_knn(self, alpha, content_data_used,
-                        user_content_vectors, item_content_vectors,
-                        user_vectors, item_vectors):
+    def prepare_for_knn(self, user_vectors, item_vectors):
         pass
 
     @abc.abstractmethod
