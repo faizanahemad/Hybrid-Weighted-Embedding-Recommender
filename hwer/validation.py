@@ -239,38 +239,28 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
 
 def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
                 get_data_mappers, rating_scale, algo,
-                enable_error_analysis=False, enable_baselines=False):
-    from . import SVDppHybrid, HybridGCNRec, GCNRetriever, GcnNCF
+                enable_error_analysis=False):
+    from . import HybridGCNRec, GCNRetriever, GcnNCF
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
-    if algo == "svdpp_hybrid":
-        recsys = SVDppHybrid(embedding_mapper=embedding_mapper,
-                             knn_params=hyperparameters["knn_params"],
-                             rating_scale=rating_scale,
-                             n_content_dims=hyperparameters["n_dims"],
-                             n_collaborative_dims=hyperparameters["n_dims"],
-                             fast_inference=False, super_fast_inference=False)
-    elif algo in ["gcn_hybrid"]:
+    if algo in ["gcn_hybrid"]:
         recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
                               rating_scale=rating_scale,
                               n_content_dims=hyperparameters["n_content_dims"],
-                              n_collaborative_dims=hyperparameters["n_dims"],
-                              fast_inference=False, super_fast_inference=False)
+                              n_collaborative_dims=hyperparameters["n_dims"])
     elif algo in ["gcn_ncf"]:
         recsys = GcnNCF(embedding_mapper=embedding_mapper,
                         knn_params=hyperparameters["knn_params"],
                         rating_scale=rating_scale,
                         n_content_dims=hyperparameters["n_content_dims"],
-                        n_collaborative_dims=hyperparameters["n_dims"],
-                        fast_inference=False, super_fast_inference=False)
+                        n_collaborative_dims=hyperparameters["n_dims"])
     elif algo in ["gcn_retriever"]:
         recsys = GCNRetriever(embedding_mapper=embedding_mapper,
                               knn_params=hyperparameters["knn_params"],
                               rating_scale=rating_scale,
                               n_content_dims=hyperparameters["n_content_dims"],
-                              n_collaborative_dims=hyperparameters["n_dims"],
-                              fast_inference=False, super_fast_inference=False)
+                              n_collaborative_dims=hyperparameters["n_dims"])
 
     start = time.time()
     _, _ = recsys.fit(users, items,
@@ -286,34 +276,12 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
     print("Default Preds = ", default_preds)
     assert np.sum(np.isnan(default_preds)) == 0
 
-    recsys.fast_inference = False
-    recsys.super_fast_inference = False
     res2 = {"algo": algo, "time": total_time}
     predictions, actuals, stats = get_prediction_details(recsys, train_affinities,
                                                                                     validation_affinities,
                                                                                     model_get_topk, items)
     res2.update(stats)
     results = [res2]
-
-    #
-    if enable_baselines:
-        recsys.fast_inference = False
-        recsys.super_fast_inference = True
-        res4 = {"algo": "Super-Fast-%s" % algo, "time": total_time}
-        predictions, actuals, stats = get_prediction_details(recsys, train_affinities,
-                                                                   validation_affinities,
-                                                                   model_get_topk, items)
-        res4.update(stats)
-        results.append(res4)
-
-        #
-        recsys.fast_inference = True
-        recsys.super_fast_inference = False
-        res = {"algo": "Fast-%s" % algo, "time": total_time}
-        predictions, actuals, stats = get_prediction_details(recsys, train_affinities, validation_affinities,
-                                                                   model_get_topk, items)
-        res.update(stats)
-        results.append(res)
 
     if enable_error_analysis:
         error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
@@ -351,12 +319,12 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
 
 def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
               get_data_mappers, rating_scale, algos,
-              enable_error_analysis=False, enable_baselines=False):
+              enable_error_analysis=False):
     results = []
     recs = []
     assert len(algos) > 0
     algos = set(algos)
-    assert len(algos - {"surprise", "content_only", "svdpp_hybrid", "gcn_hybrid", "gcn_retriever", "gcn_ncf"}) == 0
+    assert len(algos - {"surprise", "content_only", "gcn_hybrid", "gcn_retriever", "gcn_ncf"}) == 0
     if "surprise" in algos:
         hyperparameters_surprise = hyperparamters_dict["surprise"]
         _, surprise_results, _, _ = test_surprise(train_affinities,
@@ -377,26 +345,13 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         results.extend(res)
         recs.append(content_rec)
 
-    if "svdpp_hybrid" in algos:
-        hyperparameters = hyperparamters_dict["svdpp_hybrid"]
-        svd_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities,
-                                         users,
-                                         items, hyperparameters, get_data_mappers,
-                                         rating_scale,
-                                         algo="svdpp_hybrid",
-                                         enable_error_analysis=enable_error_analysis,
-                                         enable_baselines=enable_baselines)
-        results.extend(res)
-        recs.append(svd_rec)
-
     if "gcn_hybrid" in algos:
         hyperparameters = hyperparamters_dict["gcn_hybrid"]
         gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                          items, hyperparameters, get_data_mappers,
                                          rating_scale,
                                          algo="gcn_hybrid",
-                                         enable_error_analysis=enable_error_analysis,
-                                         enable_baselines=enable_baselines)
+                                         enable_error_analysis=enable_error_analysis)
         results.extend(res)
         recs.append(gcn_rec)
 
@@ -406,8 +361,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
                                          items, hyperparameters, get_data_mappers,
                                          rating_scale,
                                          algo="gcn_retriever",
-                                         enable_error_analysis=enable_error_analysis,
-                                         enable_baselines=enable_baselines)
+                                         enable_error_analysis=enable_error_analysis)
         results.extend(res)
         recs.append(gcn_rec)
 
@@ -417,8 +371,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
                                          items, hyperparameters, get_data_mappers,
                                          rating_scale,
                                          algo="gcn_ncf",
-                                         enable_error_analysis=enable_error_analysis,
-                                         enable_baselines=enable_baselines)
+                                         enable_error_analysis=enable_error_analysis)
         results.extend(res)
         recs.append(gcn_rec)
 
@@ -544,8 +497,7 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
                                                              list(df_item.item.values),
                                                              hyperparamters_dict,
                                                              prepare_data_mappers, rating_scale, algos,
-                                                             enable_error_analysis=enable_error_analysis,
-                                                             enable_baselines=enable_baselines)
+                                                             enable_error_analysis=enable_error_analysis)
         rmse, ndcg, ncf_ndcg = results[0]['rmse'], results[0]['ndcg@100'], results[0]['ncf_ndcg']
 
     else:

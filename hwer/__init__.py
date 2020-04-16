@@ -2,7 +2,6 @@ from .content_embedders import FlairGlove100Embedding, FlairGlove100AndBytePairE
 from .content_embedders import ContentEmbeddingBase, CategoricalEmbedding, FasttextEmbedding, NumericEmbedding, IdentityEmbedding
 from .recommendation_base import Feature, FeatureSet, RecommendationBase, FeatureType, EntityType
 from .content_recommender import ContentRecommendation
-from .svdpp_hybrid import SVDppHybrid
 from .hybrid_graph_recommender import HybridGCNRec
 from .gcn_retrieval_recommender import GCNRetriever
 from .gcn_ncf import GcnNCF

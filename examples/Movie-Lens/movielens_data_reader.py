@@ -13,7 +13,6 @@ import os
 
 from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding
 from hwer import Feature, FeatureSet, FeatureType
-from hwer import SVDppHybrid
 from hwer import FasttextEmbedding
 from ast import literal_eval
 import numpy as np

@@ -32,7 +32,7 @@ def init_args():
     ap.add_argument('--objective', type=str, default="rmse", metavar='N', choices=["rmse", "ndcg", "ncf_ndcg"],
                     help='')
     ap.add_argument('--algo', type=str, default="gcn_hybrid", metavar='N',
-                    choices=["gcn_hybrid", "gcn_ncf", "svdpp_hybrid", "gcn_retriever"],
+                    choices=["gcn_hybrid", "gcn_ncf", "gcn_retriever"],
                     help='')
     ap.add_argument('--dataset', type=str, default="100K", metavar='N',
                     choices=["100K", "1M", "20M"],

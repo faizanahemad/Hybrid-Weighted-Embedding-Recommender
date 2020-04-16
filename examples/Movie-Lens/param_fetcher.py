@@ -10,8 +10,6 @@ def read_params(location, dataset, algo):
     if dataset == "100K":
         if algo == "gcn":
             return pkg.params_gcn_100K
-        if algo == "svdpp":
-            return pkg.params_svdpp_100K
         if algo == "gcn_retriever":
             return pkg.params_gcn_retriever_100K
         if algo == "gcn_ncf":
@@ -19,16 +17,12 @@ def read_params(location, dataset, algo):
     if dataset == "1M":
         if algo == "gcn":
             return pkg.params_gcn_1M
-        if algo == "svdpp":
-            return pkg.params_svdpp_1M
         if algo == "gcn_retriever":
             return pkg.params_gcn_retriever_1M
         if algo == "gcn_ncf":
             return pkg.params_gcn_ncf_1M
     if dataset == "20M":
         if algo == "gcn":
-            pass
-        if algo == "svdpp":
             pass
         if algo == "gcn_retriever":
             return pkg.params_gcn_retriever_20M
@@ -98,20 +92,10 @@ def fetch_retriever_params(dataset, algo):
     return p
 
 
-def fetch_svdpp_params(dataset):
-    p = read_params("best_params/", dataset, "svdpp")
-    p["knn_params"] = knn_params
-    p["collaborative_params"]["user_item_params"]["verbose"] = verbose
-    p["collaborative_params"]["prediction_network_params"]["verbose"] = verbose
-    p["collaborative_params"]["prediction_network_params"]["use_content"] = True
-    return p
-
-
 def get_best_params(dataset):
 
     hyperparameter_content = fetch_content_params()
 
-    hyperparameters_svdpp = fetch_svdpp_params(dataset)
 
     hyperparameters_gcn = fetch_gcn_params(dataset, "gcn")
 
@@ -124,7 +108,7 @@ def get_best_params(dataset):
                                 "algos": ["svdpp"]}
     hyperparamters_dict = dict(gcn_hybrid=hyperparameters_gcn, gcn_ncf=hyperparameters_ncf_retriever,
                                gcn_retriever=hyperparameters_gcn_retriever, content_only=hyperparameter_content,
-                               svdpp_hybrid=hyperparameters_svdpp, surprise=hyperparameters_surprise)
+                               surprise=hyperparameters_surprise)
     return hyperparamters_dict
 
 
