@@ -528,6 +528,15 @@ class GcnNCF(HybridGCNRec):
 
         user_item_affinities = [(user_id_to_index[u] + 1, total_users + item_id_to_index[i] + 1, r) for u, i, r in
                                 user_item_affinities]
+        # from collections import Counter
+        # proba_dict = Counter([u for u, i, r in user_item_affinities])
+        # proba_dict.update(Counter([i for u, i, r in user_item_affinities]))
+        #
+        # probas = np.array([proba_dict[i] for i in range(total_users + total_items)])
+        # probas = probas ** (3/4)
+        # probas = probas / probas.sum()
+        # probas = torch.tensor(probas)
+
 
         def get_samples():
             src, dst, weights, error_weights = [], [], [], []
@@ -546,10 +555,18 @@ class GcnNCF(HybridGCNRec):
             negative_samples = int(ns * positive_samples)
             src_neg = torch.randint(0, total_users, (negative_samples,))
             dst_neg = torch.randint(total_users+1, total_users+total_items, (negative_samples,))
+            # src_neg2 = torch.multinomial(probas, positive_samples, replacement=True)
+            # dst_neg2 = torch.multinomial(probas, positive_samples, replacement=True)
+            # weights_neg2 = torch.tensor([0.0] * len(src_neg2))
+
             weights_neg = torch.tensor([0.0] * negative_samples)
             src = torch.cat((src, src_neg), 0)
             dst = torch.cat((dst, dst_neg), 0)
             weights = torch.cat((weights, weights_neg), 0)
+            #
+            # src = torch.cat((src, src_neg2), 0)
+            # dst = torch.cat((dst, dst_neg2), 0)
+            # weights = torch.cat((weights, weights_neg2), 0)
 
             if nsh > 0:
                 h_src_neg, h_dst_neg = zip(*hard_negative_gen())
