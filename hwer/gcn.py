@@ -73,16 +73,17 @@ class GraphSageConvWithSamplingBase(nn.Module):
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
         layers.append(GaussianNoise(gaussian_noise))
-        W = nn.Linear(feature_size * (4 if depth > 1 else 2), out_dims)
+        W = nn.Linear(feature_size * (4 if depth > 1 else 2), feature_size)
         layers.append(W)
         self.prediction_layer = prediction_layer
         self.noise = GaussianNoise(gaussian_noise)
+        init_fc(W, 'xavier_uniform_', 'leaky_relu', 0.1)
+        layers.append(nn.LeakyReLU(0.1))  # tanh
 
-        if not prediction_layer:
-            init_fc(W, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.append(nn.LeakyReLU(0.1)) # tanh
-        else:
-            init_fc(W, 'xavier_uniform_', 'linear')
+        if prediction_layer:
+            pred = nn.Linear(feature_size, out_dims)
+            init_fc(pred, 'xavier_uniform_', 'linear', 0.1)
+            self.pred = pred
         self.W = nn.Sequential(*layers)
 
     def pre_process(self, nodes):
@@ -94,9 +95,10 @@ class GraphSageConvWithSamplingBase(nn.Module):
 
     def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
-        if not self.prediction_layer:
-            h_new = h_agg + h_new
-        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
+        h_new = h + h_new
+        if self.prediction_layer:
+            h_new = self.pred(h_new)
+        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
 
     def forward(self, nodes):
