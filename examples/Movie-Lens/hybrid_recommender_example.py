@@ -22,7 +22,7 @@ from hwer.utils import str2bool
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--algo', type=str, metavar='N', nargs='+',
-                    choices=["gcn_hybrid", "gcn_ncf", "surprise", "gcn_retriever"],
+                    choices=["gcn_hybrid", "gcn_ncf", "surprise", "gcn_retriever", "content_only"],
                     help='')
     ap.add_argument('--dataset', type=str, default="100K", metavar='N',
                     choices=["100K", "1M", "20M"],
@@ -48,7 +48,7 @@ if __name__ == '__main__':
     run_models_for_testing(df_user, df_item, user_item_affinities,
                            prepare_data_mappers, rating_scale,
                            algos, hyperparamters_dict,
-                           enable_error_analysis=False, enable_baselines=enable_baselines,
+                           enable_baselines=enable_baselines,
                            enable_kfold=False, display=True, provided_test_set=ts)
     for algo in algos:
         print("algo = %s" % algo, hyperparamters_dict[algo])

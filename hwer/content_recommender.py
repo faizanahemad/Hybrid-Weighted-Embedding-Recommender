@@ -24,7 +24,7 @@ class ContentRecommendation(RecommendationBase):
         user_embeddings = {}
         for feature in user_data:
             feature_name = feature.feature_name
-            if feature.feature_type != "id" and feature_name in self.user_only_features:
+            if feature.feature_type != "id":
                 embedding = self.embedding_mapper[feature_name].fit_transform(feature)
                 assert embedding.shape[0] == len(user_ids)
                 if np.sum(np.isnan(embedding)) != 0:
@@ -97,60 +97,9 @@ class ContentRecommendation(RecommendationBase):
             else:
                 user_item_idx_list[user].append(self.item_id_to_index[item])
 
-        for feature in user_data:
-            feature_name = feature.feature_name
-            if feature.feature_type != "id" and feature_name not in self.user_only_features:
-                embedding = self.embedding_mapper[feature_name].transform(feature)
-                if np.sum(np.isnan(embedding)) != 0:
-                    self.log.info("User Embedding for Item Feature: Feature = %s, Nan Users = %s", feature_name, get_nan_rows(embedding))
-                assert np.sum(np.isnan(embedding)) == 0
-                embedding = unit_length(embedding, axis=1)
-                user_embeddings[feature_name] = embedding
-        self.log.debug("ContentRecommendation::__build_user_embeddings__:: User Embeddings Transform Done for User+Item Combo features")
-
-        self.log.debug("ContentRecommendation::__build_user_embeddings__:: Start Processing User Embeddings as average of Item Embeddings")
-
-        # For features which are not in user_data take average of item_features, while for ones present follow above method
-        # Assume some features are not present in Users
-        # Weighted Averaging for features not present and present in user_data
-
-        # for features which are in both user_data and item_data or for user_only_features too
-        processed_features = []
-        for feature in user_data:
-            if feature.feature_type == "id":
-                continue
-            feature_name = feature.feature_name
-            user_embedding = user_embeddings[feature_name]
-            item_embedding = item_embeddings[feature_name]
-            user_embedding = unit_length(user_embedding, axis=1)
-            item_embedding = unit_length(item_embedding, axis=1)
-            self.log.debug("ContentRecommendation::__build_user_embeddings__:: Processing User+Item Embeddings for feature = %s" % (feature_name))
-
-            if np.sum(np.isnan(user_embedding)) != 0:
-                self.log.info("User Embedding: Feature = %s, Nan Users = %s", feature_name,
-                              get_nan_rows(user_embedding))
-            assert np.sum(np.isnan(item_embedding)) == 0
-            if np.sum(np.isnan(item_embedding)) != 0:
-                self.log.info("Item Embedding: Feature = %s, Nan Users = %s", feature_name,
-                              get_nan_rows(item_embedding))
-            assert np.sum(np.isnan(user_embedding)) == 0
-            for i, (user, embedding) in enumerate(zip(user_ids, user_embedding)):
-                if user not in user_item_idx_list:
-                    continue
-                item_indices = user_item_idx_list[user]
-                item_em = item_embedding[item_indices].mean(0)
-                final_embedding = (embedding + item_em) / 2.0
-                user_embedding[i] = final_embedding
-                if i % int(len(user_embedding)/20) == 0:
-                    self.log.debug("ContentRecommendation::__build_user_embeddings__:: Processed %s/%s User+Item Embeddings of feature %s"
-                                   % (i, len(user_embedding), feature_name))
-            user_embedding = unit_length(user_embedding, axis=1)
-            user_embeddings[feature_name] = user_embedding
-            processed_features.append(feature_name)
-
         # for item_only_features
         for feature in item_data:
-            if feature.feature_type == "id" or feature.feature_name in processed_features:
+            if feature.feature_type == "id" or feature.feature_name in user_data.feature_names:
                 continue
             feature_name = feature.feature_name
             item_embedding = item_embeddings[feature_name]
@@ -170,13 +119,13 @@ class ContentRecommendation(RecommendationBase):
                                    % (i, len(user_embedding), feature_name))
             user_embedding = unit_length(user_embedding, axis=1)
             user_embeddings[feature_name] = user_embedding
-            processed_features.append(feature_name)
         self.log.debug(
-            "ContentRecommendation::__build_user_embeddings__:: Built User Embedding for %s, Processed features = %s" % (list(
-                user_embeddings.keys()), processed_features))
-        return user_embeddings, processed_features
+            "ContentRecommendation::__build_user_embeddings__:: Built User Embedding for %s" % (list(
+                user_embeddings.keys())))
+        return user_embeddings
 
-    def __concat_feature_vectors__(self, processed_features, item_embeddings, user_embeddings, n_output_dims):
+    def __concat_feature_vectors__(self, item_embeddings, user_embeddings, n_output_dims):
+        processed_features = list(item_embeddings.keys()) + list(user_embeddings.keys())
         self.log.debug("ContentRecommendation::__concat_feature_vectors__:: Concat Features = %s, " % processed_features)
         # Making Each Embedding vector to have unit length Features
         for feature_name in processed_features:
@@ -230,12 +179,12 @@ class ContentRecommendation(RecommendationBase):
         user_embeddings = self.__build_user_only_embeddings__(user_ids, user_data)
         item_embeddings = self.__build_item_embeddings__(item_ids, user_embeddings,
                                                          item_data, user_item_affinities)
-        user_embeddings, processed_features = self.__build_user_embeddings__(user_ids, user_data, item_data,
+        user_embeddings = self.__build_user_embeddings__(user_ids, user_data, item_data,
                                                                              user_embeddings, item_embeddings,
                                                                              user_item_affinities)
 
         self.log.info("Concatenating Content Embeddings ... ")
-        user_vectors, item_vectors = self.__concat_feature_vectors__(processed_features, item_embeddings,
+        user_vectors, item_vectors = self.__concat_feature_vectors__(item_embeddings,
                                                                      user_embeddings, n_output_dims)
         self.log.info("Built Content Embeddings, user vectors shape = %s, item vectors shape = %s", user_vectors.shape, item_vectors.shape)
         return user_vectors, item_vectors
