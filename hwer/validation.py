@@ -238,8 +238,7 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
 
 
 def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
-                get_data_mappers, rating_scale, algo,
-                enable_error_analysis=False):
+                get_data_mappers, rating_scale, algo):
     from . import HybridGCNRec, GCNRetriever, GcnNCF
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
@@ -280,14 +279,11 @@ def test_hybrid(train_affinities, validation_affinities, users, items, hyperpara
     res2.update(stats)
     results = [res2]
 
-    if enable_error_analysis:
-        error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
-        error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
     return recsys, results, predictions, actuals
 
 
 def test_content_only(train_affinities, validation_affinities, users, items, hyperparameters,
-                      get_data_mappers, rating_scale, enable_error_analysis=False):
+                      get_data_mappers, rating_scale):
     from . import ContentRecommendation
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
@@ -307,16 +303,12 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
                                                                                     model_get_topk, items)
     res.update(stats)
 
-    if enable_error_analysis:
-        error_df = pd.DataFrame({"errors": actuals - predictions, "actuals": actuals, "predictions": predictions})
-        error_analysis(train_affinities, validation_affinities, error_df, "Hybrid")
     results = [res]
     return recsys, results, predictions, actuals
 
 
 def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
-              get_data_mappers, rating_scale, algos,
-              enable_error_analysis=False):
+              get_data_mappers, rating_scale, algos):
     results = []
     recs = []
     assert len(algos) > 0
@@ -337,8 +329,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         content_rec, res, _, _ = test_content_only(train_affinities,
                                                    validation_affinities, users,
                                                    items, hyperparameters,
-                                                   get_data_mappers, rating_scale,
-                                                   enable_error_analysis=enable_error_analysis)
+                                                   get_data_mappers, rating_scale)
         results.extend(res)
         recs.append(content_rec)
 
@@ -347,8 +338,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                          items, hyperparameters, get_data_mappers,
                                          rating_scale,
-                                         algo="gcn_hybrid",
-                                         enable_error_analysis=enable_error_analysis)
+                                         algo="gcn_hybrid")
         results.extend(res)
         recs.append(gcn_rec)
 
@@ -357,8 +347,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                          items, hyperparameters, get_data_mappers,
                                          rating_scale,
-                                         algo="gcn_retriever",
-                                         enable_error_analysis=enable_error_analysis)
+                                         algo="gcn_retriever")
         results.extend(res)
         recs.append(gcn_rec)
 
@@ -367,8 +356,7 @@ def test_once(train_affinities, validation_affinities, users, items, hyperparamt
         gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
                                          items, hyperparameters, get_data_mappers,
                                          rating_scale,
-                                         algo="gcn_ncf",
-                                         enable_error_analysis=enable_error_analysis)
+                                         algo="gcn_ncf")
         results.extend(res)
         recs.append(gcn_rec)
 
@@ -412,37 +400,6 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
     return predictions, actuals, stats
 
 
-def error_analysis(train_affinities, validation_affinities, error_df, title):
-    # TODO: Error vs User Rating Count
-    print("-x-" * 30)
-    print("%s: Error Analysis -: " % title)
-
-    print(error_df.describe())
-
-    print("Analysis By actuals")
-    print(error_df.groupby(["actuals"]).agg(["mean", "std"]))
-
-    print("Describe Errors -: ")
-    print(describe(error_df["errors"].values))
-    plt.figure(figsize=(8, 6))
-    sns.scatterplot(x="actuals", y="errors", data=error_df)
-    plt.title("Errors vs Actuals")
-    plt.xlabel("Actuals")
-    plt.ylabel("Errors")
-    plt.show()
-    plt.figure(figsize=(8, 6))
-    sns.scatterplot(x="predictions", y="errors", hue="actuals", data=error_df)
-    plt.title("Errors vs Predictions")
-    plt.xlabel("Predictions")
-    plt.ylabel("Errors")
-    plt.show()
-
-    plt.figure(figsize=(8, 6))
-    sns.distplot(error_df["errors"], bins=100)
-    plt.title("Error Histogram")
-    plt.show()
-
-
 def get_small_subset(df_user, df_item, ratings,
                      cores):
     import networkx as nx
@@ -475,8 +432,7 @@ def run_model_for_hpo(df_user, df_item, user_item_affinities, prepare_data_mappe
 
 def run_models_for_testing(df_user, df_item, user_item_affinities,
                            prepare_data_mappers, rating_scale,
-                           algos, hyperparamters_dict,
-                           enable_error_analysis=False, enable_baselines=False,
+                           algos, hyperparamters_dict, enable_baselines=False,
                            enable_kfold=False, display=True, report=lambda x, y: None,
                            provided_test_set=False):
     from sklearn.model_selection import StratifiedKFold
@@ -493,8 +449,7 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
                                                              list(df_user.user.values),
                                                              list(df_item.item.values),
                                                              hyperparamters_dict,
-                                                             prepare_data_mappers, rating_scale, algos,
-                                                             enable_error_analysis=enable_error_analysis)
+                                                             prepare_data_mappers, rating_scale, algos)
         rmse, ndcg, ncf_ndcg = results[0]['rmse'], results[0]['ndcg@100'], results[0]['ncf_ndcg']
 
     else:
@@ -511,8 +466,7 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
             recs, res = test_once(train_affinities, validation_affinities, list(df_user.user.values),
                                          list(df_item.item.values),
                                          hyperparamters_dict,
-                                         prepare_data_mappers, rating_scale, algos,
-                                         enable_error_analysis=False, enable_baselines=enable_baselines)
+                                         prepare_data_mappers, rating_scale, algos)
 
             rmse, ndcg, ncf_ndcg = res[0]['rmse'], res[0]['ndcg@100'], res[0]['ncf_ndcg']
             report({"rmse": rmse, "ndcg": ndcg, "ncf_ndcg": ncf_ndcg}, step)
