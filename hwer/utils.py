@@ -12,20 +12,6 @@ from sklearn.utils import shuffle
 import argparse
 
 
-def locality_preserving_dimensionality_reduction(data: np.ndarray, n_neighbors=100, max_similarity=0.1, ):
-    """
-    Create lower dimensional embeddings such that ranking is maintained for `n_neighbors` or till `max_similarity` is reached for points neighboring anchor
-    Use negative sampling, We only support cosine distances
-    :param data:
-    :param n_neighbors:
-    :param max_similarity:
-    :return:
-    """
-    # Anchor,
-    num_points = data.shape[0]
-    n_init_dims = data.shape[1]
-
-
 def cos_sim(a, b):
     return dot(a, b) / (norm(a) * norm(b))
 
@@ -113,7 +99,6 @@ def recall(y_true: Dict[str, float], y_pred: List[str]):
     norm = min(len(y_pred), len(y_true))
     recall = sum([1 if i in y_true else 0 for i in y_pred])
     return recall/max(norm, 1.0)
-
 
 
 def measure_array_dist_element_displacement(X1, X2):

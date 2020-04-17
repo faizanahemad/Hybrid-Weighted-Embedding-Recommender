@@ -38,14 +38,7 @@ class HybridGCNRec(HybridRecommender):
                                                              affinities: List[Tuple[str, str, float]],
                                                              hyperparams):
 
-        walk_length = 3  # Fixed, change node2vec_generator if changed, see grouper from more itertools or commit 0a7d3b0755ae3ccafec5077edb4c8bf1ed1e3b34
-        # for a generic implementation
-        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 150
-        p = 0.25
-        q = hyperparams["q"] if "q" in hyperparams else 0.25
-        total_examples = len(affinities)
         total_users = len(user_ids)
-        total_items = len(item_ids)
         ratings = np.array([r for i, j, r in affinities])
         min_rating, max_rating = np.min(ratings), np.max(ratings)
         affinities = [(user_id_to_index[i], total_users + item_id_to_index[j], 1 + r - min_rating) for i, j, r in affinities]
@@ -56,28 +49,7 @@ class HybridGCNRec(HybridRecommender):
             for i, j, r in affinities_gen_data:
                 yield (i, j), r
 
-        if num_walks == 0:
-            return affinities_generator
-
-        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-        Walker = RandomWalker
-        walker = Walker(read_edgelist(affinities, weighted=True), p=p, q=q)
-        walker.preprocess_transition_probs()
-
-        def node2vec_generator():
-            g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
-            for walk in g:
-                np.random.shuffle(walk)
-                yield (walk[0], walk[1]), 1
-                yield (walk[1], walk[2]), 1
-                yield (walk[0], walk[2]), 1
-
-        from more_itertools import distinct_combinations, chunked, grouper, interleave_longest
-
-        def sentences_generator():
-            return interleave_longest(node2vec_generator(), affinities_generator())
-
-        return sentences_generator
+        return affinities_generator
 
     def __user_item_affinities_triplet_trainer__(self,
                                                  user_ids: List[str], item_ids: List[str],
@@ -549,45 +521,6 @@ class HybridGCNRec(HybridRecommender):
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
         return predictions
-
-    @staticmethod
-    def persist(model, path: str = "."):
-        import hnswlib
-        logger.info("save_model:: Saving Model...")
-        user_knn_path = os.path.join(path, 'user_knn.bin')
-        item_knn_path = os.path.join(path, 'item_knn.bin')
-
-        model.user_knn.save_index(user_knn_path)
-        model.item_knn.save_index(item_knn_path)
-        logger.debug("save_model:: Saved Serialized HNSW KNN indices.")
-
-        model.user_knn = None
-        model.item_knn = None
-        model_path = os.path.join(path, 'model.pth')
-        with open(model_path, 'wb') as f:
-            dill.dump(model, f)
-        logger.info("save_model:: Saved Model to %s" % model_path)
-
-    @staticmethod
-    def load(path: str = "."):
-        import hnswlib
-        logger.info("load_model:: Loading Model...")
-        logger.debug("Load Dir Contents = %s" % os.listdir(path))
-        user_knn_path = os.path.join(path, 'user_knn.bin')
-        item_knn_path = os.path.join(path, 'item_knn.bin')
-        with open(os.path.join(path, 'model.pth'), 'rb') as f:
-            model = dill.load(f)
-        logger.debug("load_model:: Loaded Main Model without HNSW KNN indices.")
-
-        user_knn = hnswlib.Index(space='cosine', dim=model.n_output_dims)
-        user_knn.load_index(user_knn_path)
-        item_knn = hnswlib.Index(space='cosine', dim=model.n_output_dims)
-        item_knn.load_index(item_knn_path)
-        logger.debug("load_model:: Loaded Serialized HNSW KNN indices.")
-        model.user_knn = user_knn
-        model.item_knn = item_knn
-        logger.info("load_model:: Loaded Full Model.")
-        return model
 
     def prepare_for_knn(self, user_vectors, item_vectors):
         from .utils import unit_length

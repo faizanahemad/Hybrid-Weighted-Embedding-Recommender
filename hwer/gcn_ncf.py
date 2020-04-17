@@ -154,7 +154,7 @@ class GcnNCF(HybridGCNRec):
         walker.preprocess_transition_probs()
         samples_per_node = int(np.ceil(positive_samples / (total_users + total_items)))
         from collections import Counter
-        random_walks = max(100, samples_per_node * 10)
+        random_walks = max(100, samples_per_node * 20)
 
         def sampler():
             for i in range(total_users):
@@ -162,7 +162,7 @@ class GcnNCF(HybridGCNRec):
                 for walk in walker.simulate_walks_single_node(i, random_walks, 4):
                     if len(walk) == 5 and walk[4] != i:
                         cnt.update([walk[4]])
-                results = cnt.most_common(samples_per_node)
+                results = cnt.most_common(min(samples_per_node, int(len(cnt)/20)))
                 if len(results) > 0:
                     results, _ = zip(*results)
                 for r in results:
@@ -174,7 +174,7 @@ class GcnNCF(HybridGCNRec):
                 for walk in walker.simulate_walks_single_node(j, random_walks, 4):
                     if len(walk) == 5 and walk[4] != j:
                         cnt.update([walk[4]])
-                results = cnt.most_common(samples_per_node)
+                results = cnt.most_common(min(samples_per_node, int(len(cnt)/20)))
                 if len(results) > 0:
                     results, _ = zip(*results)
                 for r in results:
@@ -240,11 +240,6 @@ class GcnNCF(HybridGCNRec):
                                                              affinities: List[Tuple[str, str, float]],
                                                              hyperparams):
 
-        walk_length = 3  # Fixed, change node2vec_generator if changed, see grouper from more itertools or commit 0a7d3b0755ae3ccafec5077edb4c8bf1ed1e3b34
-        # for a generic implementation
-        num_walks = hyperparams["num_walks"] if "num_walks" in hyperparams else 10
-        p = 0.25
-        q = hyperparams["q"] if "q" in hyperparams else 0.25
         total_users = len(user_ids)
         total_items = len(item_ids)
         ratings = np.array([r for i, j, r in affinities])
@@ -257,25 +252,7 @@ class GcnNCF(HybridGCNRec):
             for i, j, r in affinities_gen_data:
                 yield (i, j), r
 
-        if num_walks == 0:
-            return affinities_generator
-
-        affinities.extend([(i, i, 1) for i in range(total_users + total_items)])
-        Walker = RandomWalker
-        walker = Walker(read_edgelist(affinities, weighted=True), p=p, q=q)
-        walker.preprocess_transition_probs()
-
-        def node2vec_generator():
-            g = walker.simulate_walks_generator_optimised(num_walks, walk_length=walk_length)
-            for walk in g:
-                yield (walk[0], walk[2]), 1
-
-        from more_itertools import distinct_combinations, chunked, grouper, interleave_longest
-
-        def sentences_generator():
-            return interleave_longest(node2vec_generator(), affinities_generator())
-
-        return sentences_generator
+        return affinities_generator
 
     def __user_item_affinities_triplet_trainer__(self,
                                                  user_ids: List[str], item_ids: List[str],

@@ -198,17 +198,19 @@ class ResnetConv(nn.Module):
         W = nn.Linear(inp * (2 if depth > 1 else 1), out_dims)
         layers.append(W)
         self.prediction_layer = prediction_layer
+        init_fc(W, 'xavier_uniform_', 'leaky_relu', 0.1)
+        layers.append(nn.LeakyReLU(negative_slope=0.1))
 
         if not prediction_layer:
-            init_fc(W, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.append(nn.LeakyReLU(negative_slope=0.1))
             self.skip = None
             if in_dims != out_dims:
                 skip = nn.Linear(in_dims, out_dims)
                 init_fc(skip, 'xavier_uniform_', 'leaky_relu', 0.1)
                 self.skip = nn.Sequential(skip, nn.LeakyReLU(negative_slope=0.1))
         else:
-            init_fc(W, 'xavier_uniform_', 'linear')
+            pred = nn.Linear(in_dims, out_dims)
+            init_fc(pred, 'xavier_uniform_', 'linear', 0.1)
+            self.pred = pred
         self.W = nn.Sequential(*layers)
         self.first_layer = first_layer
 
@@ -223,11 +225,11 @@ class ResnetConv(nn.Module):
             h_residue = nodes.data['h_residue']
             h_concat = torch.cat([h, h_agg, h_residue], 1)
         h_new = self.W(h_concat)
-        if not self.prediction_layer:
-            h_new = h_agg + h_new
+        h_new = h + h_new
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
 
         if self.prediction_layer:
+            h_new = self.pred(h_new)
             return {'h': h_new}
         # skip
         h_agg = self.skip(h_agg) if self.skip is not None else h_agg

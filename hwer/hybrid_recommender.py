@@ -142,7 +142,7 @@ class HybridRecommender(RecommendationBase):
         item_vectors = unit_length(item_vectors, axis=1)
         gc.collect()
 
-        assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
+        # assert user_vectors.shape[1] == item_vectors.shape[1] == self.n_collaborative_dims
         self.log.debug("Hybrid Base: Start Building Prediction Network...")
         if content_data_used:
             prediction_artifacts = self.__build_prediction_network__(user_ids, item_ids, user_item_affinities,

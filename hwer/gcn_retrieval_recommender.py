@@ -32,12 +32,6 @@ class GCNRetriever(HybridGCNRec):
                                      rating_scale: Tuple[float, float], hyperparams: Dict):
         pass
 
-    def __build_svd_model__(self, user_ids: List[str], item_ids: List[str],
-                            user_item_affinities: List[Tuple[str, str, float]],
-                            user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                            rating_scale: Tuple[float, float], **svd_params):
-        pass
-
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         user_embeddings = self.get_embeddings([(u, EntityType.USER) for u, i in user_item_pairs])
         item_embeddings = self.get_embeddings([(i, EntityType.ITEM) for u, i in user_item_pairs])
