@@ -48,7 +48,7 @@ embedding_mapper['title'] = FlairGlove100AndBytePairEmbedding()
 embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=16)
 
 
-recsys = ContentRecommendation(embedding_mapper=embedding_mapper, knn_params=None, n_output_dims=64)
+recsys = ContentRecommendation(embedding_mapper=embedding_mapper, knn_params=None, n_dims=64)
 
 kwargs = {'user_item_affinities':user_item_affinities}
 
@@ -67,7 +67,7 @@ kwargs['item_data'] = item_data
 
 recsys.fit(user_ids=users.user_id.values, item_ids=movies.movie_id.values, **kwargs)
 
-res, dist = zip(*recsys.find_items_for_user(user='1', positive=[], negative=[]))
+res, dist = zip(*recsys.find_closest_neighbours(user='1', positive=[], negative=[]))
 res = res[:20]
 
 

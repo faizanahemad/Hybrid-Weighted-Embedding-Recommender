@@ -16,9 +16,9 @@ from .utils import unit_length, unit_length_violations
 
 class HybridRecommender(RecommendationBase):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
-                 n_collaborative_dims: int = 32, n_output_dims: int = 64):
+                 n_collaborative_dims: int = 32):
         super().__init__(knn_params=knn_params, rating_scale=rating_scale,
-                         n_output_dims=n_output_dims)
+                         n_dims=n_collaborative_dims)
         self.cb = ContentRecommendation(embedding_mapper, knn_params, rating_scale,
                                         np.inf)
         self.n_collaborative_dims = n_collaborative_dims
@@ -64,7 +64,7 @@ class HybridRecommender(RecommendationBase):
                                          user_item_affinities: List[Tuple[str, str, float]],
                                          user_vectors: np.ndarray, item_vectors: np.ndarray,
                                          user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                         n_output_dims: int,
+                                         n_dims: int,
                                          hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
 
         pass
@@ -182,10 +182,10 @@ class HybridRecommender(RecommendationBase):
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         pass
 
-    def find_items_for_user(self, user: str, positive: List[Tuple[str, EntityType]] = None,
-                            negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
+    def find_closest_neighbours(self, user: str, positive: List[Tuple[str, EntityType]] = None,
+                                negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
         start = time.time()
-        results = super().find_items_for_user(user, positive, negative, k=k)
+        results = super().find_closest_neighbours(user, positive, negative, k=k)
         res, dist = zip(*results)
         ratings = self.predict([(user, i) for i in res])
         results = list(sorted(zip(res, ratings), key=operator.itemgetter(1), reverse=True))

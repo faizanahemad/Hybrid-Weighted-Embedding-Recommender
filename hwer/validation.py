@@ -35,7 +35,7 @@ def surprise_get_topk(model, users, items) -> Dict[str, List[Tuple[str, float]]]
 def model_get_topk_knn(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
     predictions = defaultdict(list)
     for u in users:
-        p = model.find_items_for_user(u)
+        p = model.find_closest_neighbours(u)
         predictions[u] = p
     return predictions
 
@@ -289,7 +289,7 @@ def test_content_only(train_affinities, validation_affinities, users, items, hyp
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
     recsys = ContentRecommendation(embedding_mapper=embedding_mapper,
                                    knn_params=hyperparameters["knn_params"],
-                                   rating_scale=rating_scale, n_output_dims=hyperparameters["n_dims"], )
+                                   rating_scale=rating_scale, n_dims=hyperparameters["n_dims"], )
     start = time.time()
     _, _ = recsys.fit(users, items,
                       train_affinities, **kwargs)

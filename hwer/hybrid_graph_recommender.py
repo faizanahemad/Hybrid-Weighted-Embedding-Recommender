@@ -56,7 +56,7 @@ class HybridGCNRec(HybridRecommender):
                                                  user_item_affinities: List[Tuple[str, str, float]],
                                                  user_vectors: np.ndarray, item_vectors: np.ndarray,
                                                  user_id_to_index: Dict[str, int], item_id_to_index: Dict[str, int],
-                                                 n_output_dims: int,
+                                                 n_dims: int,
                                                  hyperparams: Dict) -> Tuple[np.ndarray, np.ndarray]:
         from .gcn import build_dgl_graph
         import torch
@@ -66,7 +66,7 @@ class HybridGCNRec(HybridRecommender):
         import dgl
         self.log.debug(
             "Start Training User-Item Affinities, n_users = %s, n_items = %s, n_samples = %s, in_dims = %s, out_dims = %s",
-            len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_output_dims)
+            len(user_ids), len(item_ids), len(user_item_affinities), user_vectors.shape[1], n_dims)
 
         gcn_lr = hyperparams["gcn_lr"] if "gcn_lr" in hyperparams else 0.1
         gcn_epochs = hyperparams["gcn_epochs"] if "gcn_epochs" in hyperparams else 1

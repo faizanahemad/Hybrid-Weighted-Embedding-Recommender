@@ -1,6 +1,6 @@
 from .content_embedders import FlairGlove100Embedding, FlairGlove100AndBytePairEmbedding, MultiCategoricalEmbedding
 from .content_embedders import ContentEmbeddingBase, CategoricalEmbedding, FasttextEmbedding, NumericEmbedding, IdentityEmbedding
-from .recommendation_base import Feature, FeatureSet, RecommendationBase, FeatureType, EntityType
+from .recommendation_base import Feature, FeatureSet, RecommendationBase, FeatureType, Node, Edge
 from .content_recommender import ContentRecommendation
 from .hybrid_graph_recommender import HybridGCNRec
 from .gcn_retrieval_recommender import GCNRetriever

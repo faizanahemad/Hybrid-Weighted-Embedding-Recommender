@@ -12,9 +12,9 @@ from .utils import unit_length, build_user_item_dict, build_item_user_dict, get_
 
 class ContentRecommendation(RecommendationBase):
     def __init__(self, embedding_mapper: dict, knn_params: Optional[dict], rating_scale: Tuple[float, float],
-                 n_output_dims: int = 32):
+                 n_dims: int = 32):
         super().__init__(knn_params=knn_params, rating_scale=rating_scale,
-                         n_output_dims=n_output_dims)
+                         n_dims=n_dims)
 
         self.embedding_mapper: dict[str, ContentEmbeddingBase] = embedding_mapper
         self.log = getLogger(type(self).__name__)
@@ -124,7 +124,7 @@ class ContentRecommendation(RecommendationBase):
                 user_embeddings.keys())))
         return user_embeddings
 
-    def __concat_feature_vectors__(self, item_embeddings, user_embeddings, n_output_dims):
+    def __concat_feature_vectors__(self, item_embeddings, user_embeddings, n_dims):
         processed_features = list(item_embeddings.keys()) + list(user_embeddings.keys())
         self.log.debug("ContentRecommendation::__concat_feature_vectors__:: Concat Features = %s, " % processed_features)
         # Making Each Embedding vector to have unit length Features
@@ -151,15 +151,15 @@ class ContentRecommendation(RecommendationBase):
         # PCA
         user_vectors_length = len(user_vectors)
         all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)
-        if n_output_dims < all_vectors.shape[1]:
+        if n_dims < all_vectors.shape[1]:
             # all_vectors = StandardScaler().fit_transform(all_vectors)
-            pca = PCA(n_components=n_output_dims, )
+            pca = PCA(n_components=n_dims, )
             all_vectors = pca.fit_transform(all_vectors)
             all_vectors = StandardScaler().fit_transform(all_vectors)
             self.log.info("Content Recommender::__concat_feature_vectors__, PCA explained variance:  %.4f, explained variance ratio: %.4f",
                            np.sum(pca.explained_variance_), np.sum(pca.explained_variance_ratio_))
 
-        if n_output_dims > all_vectors.shape[1] and n_output_dims != np.inf:
+        if n_dims > all_vectors.shape[1] and n_dims != np.inf:
             raise AssertionError("Output Dims are higher than Total Feature Dims.")
         all_vectors = unit_length(all_vectors, axis=1)
         user_vectors = all_vectors[:user_vectors_length]
@@ -174,7 +174,7 @@ class ContentRecommendation(RecommendationBase):
                                      user_data: FeatureSet,
                                      item_data: FeatureSet,
                                      user_item_affinities: List[Tuple[str, str, float]],
-                                     n_output_dims):
+                                     n_dims):
 
         user_embeddings = self.__build_user_only_embeddings__(user_ids, user_data)
         item_embeddings = self.__build_item_embeddings__(item_ids, user_embeddings,
@@ -185,7 +185,7 @@ class ContentRecommendation(RecommendationBase):
 
         self.log.info("Concatenating Content Embeddings ... ")
         user_vectors, item_vectors = self.__concat_feature_vectors__(item_embeddings,
-                                                                     user_embeddings, n_output_dims)
+                                                                     user_embeddings, n_dims)
         self.log.info("Built Content Embeddings, user vectors shape = %s, item vectors shape = %s", user_vectors.shape, item_vectors.shape)
         return user_vectors, item_vectors
 
@@ -209,7 +209,7 @@ class ContentRecommendation(RecommendationBase):
 
         user_vectors, item_vectors = self.__build_content_embeddings__(user_ids, item_ids,
                                                                        user_data, item_data, user_item_affinities,
-                                                                       self.n_output_dims)
+                                                                       self.n_dims)
 
         self.knn_user_vectors = user_vectors
         self.knn_item_vectors = item_vectors

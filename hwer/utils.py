@@ -338,12 +338,9 @@ def get_rng(noise_augmentation):
     return lambda dims: np.zeros(dims) if dims > 1 else 0
 
 
-class UserNotFoundException(Exception):
+class NodeNotFoundException(Exception):
     pass
 
-
-class ItemNotFoundException(Exception):
-    pass
 
 
 def str2bool(v):

@@ -35,7 +35,7 @@ item_data = FeatureSet([f])
 
 kwargs = {'item_data': item_data}
 
-recsys = ContentRecommendation(embedding_mapper=embedding_mapper, knn_params=None, n_output_dims=2, rating_scale=(1, 5))
+recsys = ContentRecommendation(embedding_mapper=embedding_mapper, knn_params=None, n_dims=2, rating_scale=(1, 5))
 _ = recsys.fit(user_ids, item_ids,
                user_item_affinities, **kwargs)
 
