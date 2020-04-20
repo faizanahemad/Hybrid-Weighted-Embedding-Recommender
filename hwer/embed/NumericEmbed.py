@@ -1,27 +1,22 @@
-
-from .BaseEmbed import BaseEmbed
-import abc
-import os
-
 import numpy as np
 import pandas as pd
+
+from .BaseEmbed import BaseEmbed
+
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
 pd.options.display.width = 0
 from scipy.stats.mstats import rankdata
-from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import StandardScaler
-from tqdm import tqdm
 
 from ..logging import getLogger
-from ..utils import auto_encoder_transform, unit_length, clean_text, is_1d_array
-from ..utils import is_num, is_2d_array, NodeNotFoundException
-from enum import Enum
-from typing import List, Tuple, Optional, Dict, Set, Union
+from ..utils import auto_encoder_transform, unit_length
+from typing import List, Union
+
 Feature = List[List[Union[float, int]]]
+
 
 class NumericEmbed(BaseEmbed):
     def __init__(self, n_dims, log=True, log1p=True, sqrt=True,
@@ -79,7 +74,7 @@ class NumericEmbed(BaseEmbed):
 
         inputs = self.__prepare_inputs__(inputs)
         mean, var = self.standard_scaler.mean_, self.standard_scaler.var_
-        mean = np.broadcast_to(mean, (len(inputs),len(mean)))
+        mean = np.broadcast_to(mean, (len(inputs), len(mean)))
         var = np.broadcast_to(var, (len(inputs), len(var)))
         outputs = np.concatenate((inputs, ranks, mean, var), axis=1)
 

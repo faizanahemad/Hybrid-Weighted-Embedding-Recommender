@@ -1,17 +1,13 @@
-from typing import List, Dict, Tuple, Optional, Set, Union
+from typing import List, Dict, Set
 
 import numpy as np
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-from sklearn.preprocessing import OneHotEncoder
 from bidict import bidict
+from sklearn.preprocessing import OneHotEncoder
+
 from .embed import BaseEmbed
 from .logging import getLogger
-from .recommendation_base import RecommendationBase, NodeExternalId, NodeType, Node, Edge, FeatureName
-from .utils import unit_length, build_user_item_dict, build_item_user_dict, get_nan_rows, auto_encoder_transform
-
-# Build their feature vectors independently as big as needed
-# Use the edges and project their feature vectors into a fixed dim size
+from .recommendation_base import RecommendationBase, NodeType, Node, Edge, FeatureName
+from .utils import unit_length, auto_encoder_transform
 
 
 class ContentRecommendation(RecommendationBase):
@@ -32,7 +28,8 @@ class ContentRecommendation(RecommendationBase):
         for nt in self.node_types:
             nt_embedding = None
             nt_nodes = list(filter(lambda n: n.node_type == nt, nodes))
-            assert len(set(nt_nodes) - set(node_data.keys())) == 0 or len(set(nt_nodes) - set(node_data.keys())) == len(set(nt_nodes))
+            assert len(set(nt_nodes) - set(node_data.keys())) == 0 or len(set(nt_nodes) - set(node_data.keys())) == len(
+                set(nt_nodes))
             assert len(set(nt_nodes)) == len(nt_nodes)
             if len(set(nt_nodes) - set(node_data.keys())) == len(set(nt_nodes)):
                 nt_embedding = np.zeros((len(nt_nodes), 1))
@@ -55,7 +52,8 @@ class ContentRecommendation(RecommendationBase):
             if all_embeddings is None:
                 all_embeddings = nt_embedding
             else:
-                c1 = np.concatenate((all_embeddings, np.zeros((all_embeddings.shape[0], nt_embedding.shape[1]))), axis=1)
+                c1 = np.concatenate((all_embeddings, np.zeros((all_embeddings.shape[0], nt_embedding.shape[1]))),
+                                    axis=1)
                 c2 = np.concatenate((np.zeros((nt_embedding.shape[0], all_embeddings.shape[1])), nt_embedding), axis=1)
                 all_embeddings = np.concatenate((c1, c2), axis=0)
 
@@ -63,11 +61,13 @@ class ContentRecommendation(RecommendationBase):
         nts = np.array([n.node_type for n in nodes]).reshape((-1, 1))
         ohe_node_types = OneHotEncoder(sparse=False).fit_transform(nts)
         all_embeddings = np.concatenate((all_embeddings, ohe_node_types), axis=1)
-        self.log.debug("ContentRecommendation::__build_embeddings__:: AutoEncoder with dims = %s" % str(all_embeddings.shape))
-        n_dims = n_dims if n_dims is not None and not np.isinf(n_dims) else 2**int(np.log2(all_embeddings.shape[1]))
+        self.log.debug(
+            "ContentRecommendation::__build_embeddings__:: AutoEncoder with dims = %s" % str(all_embeddings.shape))
+        n_dims = n_dims if n_dims is not None and not np.isinf(n_dims) else 2 ** int(np.log2(all_embeddings.shape[1]))
         all_embeddings, _ = auto_encoder_transform(all_embeddings, all_embeddings, n_dims=n_dims, verbose=2, epochs=25)
         all_embeddings = unit_length(all_embeddings, axis=1)
-        self.log.info("ContentRecommendation::__build_embeddings__:: Built Content Embedding with dims = %s" % str(all_embeddings.shape))
+        self.log.info("ContentRecommendation::__build_embeddings__:: Built Content Embedding with dims = %s" % str(
+            all_embeddings.shape))
         return all_embeddings
 
     def fit(self,

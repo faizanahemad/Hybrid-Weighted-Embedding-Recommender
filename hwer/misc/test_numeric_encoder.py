@@ -1,12 +1,13 @@
-import sys
 import os
+import sys
 from os import path
-from sklearn.preprocessing import MinMaxScaler
+
 sys.path.append(path.join(path.dirname(__file__), '../'))
 
 sys.path.insert(0, "../")
 
 import sys
+
 sys.path.append(os.getcwd())
 
 import numpy as np

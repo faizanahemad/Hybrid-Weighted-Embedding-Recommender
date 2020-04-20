@@ -9,7 +9,6 @@ import pandas as pd
 
 from .content_recommender import ContentRecommendation
 from .logging import getLogger
-from .recommendation_base import EntityType
 from .recommendation_base import RecommendationBase
 from .utils import unit_length, unit_length_violations
 
@@ -182,8 +181,8 @@ class HybridRecommender(RecommendationBase):
     def predict(self, user_item_pairs: List[Tuple[str, str]], clip=True) -> List[float]:
         pass
 
-    def find_closest_neighbours(self, user: str, positive: List[Tuple[str, EntityType]] = None,
-                                negative: List[Tuple[str, EntityType]] = None, k=None) -> List[Tuple[str, float]]:
+    def find_closest_neighbours(self, user: str, positive: List[Tuple[str, object]] = None,
+                                negative: List[Tuple[str, object]] = None, k=None) -> List[Tuple[str, float]]:
         start = time.time()
         results = super().find_closest_neighbours(user, positive, negative, k=k)
         res, dist = zip(*results)

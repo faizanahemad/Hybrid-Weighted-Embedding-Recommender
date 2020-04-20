@@ -2,7 +2,6 @@ import time
 from typing import List, Dict, Tuple, Optional
 
 import numpy as np
-from .recommendation_base import EntityType
 from more_itertools import flatten
 
 from .logging import getLogger

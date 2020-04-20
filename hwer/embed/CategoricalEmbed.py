@@ -1,26 +1,19 @@
-
-from .BaseEmbed import BaseEmbed
-import abc
-import os
-
 import numpy as np
 import pandas as pd
+
+from .BaseEmbed import BaseEmbed
+
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
 pd.options.display.width = 0
-from scipy.stats.mstats import rankdata
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import StandardScaler
-from tqdm import tqdm
 
 from ..logging import getLogger
-from ..utils import auto_encoder_transform, unit_length, clean_text, is_1d_array
-from ..utils import is_num, is_2d_array, NodeNotFoundException
-from enum import Enum
-from typing import List, Tuple, Optional, Dict, Set, Union
+from ..utils import auto_encoder_transform, unit_length, is_1d_array
+from typing import List, Union
 
 Feature = List[List[Union[str, List, int]]]
 
@@ -67,7 +60,8 @@ class CategoricalEmbed(BaseEmbed):
         for column in columns:
             if type(df[column].values[0]) == str or type(df[column].values[0]) == int:
                 categorical_columns.append(column)
-            elif type(df[column].values[0]) == list or type(df[column].values[0]) == tuple or type(df[column].values[0]) == np.ndarray:
+            elif type(df[column].values[0]) == list or type(df[column].values[0]) == tuple or type(
+                    df[column].values[0]) == np.ndarray:
                 multi_columns.append(column)
                 df[column] = df[column].map(tuple)
             else:
@@ -93,7 +87,8 @@ class CategoricalEmbed(BaseEmbed):
         min_max_scaler = MinMaxScaler(feature_range=(0.0, 0.95))
         network_output = min_max_scaler.fit_transform(network_output)
 
-        _, encoder = auto_encoder_transform(network_inputs, network_output, n_dims=self.n_dims, verbose=self.verbose, epochs=self.n_iters)
+        _, encoder = auto_encoder_transform(network_inputs, network_output, n_dims=self.n_dims, verbose=self.verbose,
+                                            epochs=self.n_iters)
         self.encoder = encoder
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:

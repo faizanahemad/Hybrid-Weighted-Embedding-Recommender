@@ -1,20 +1,9 @@
 import abc
-import os
+from typing import List, Union
 
 import numpy as np
-import pandas as pd
-from scipy.stats.mstats import rankdata
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import StandardScaler
-from tqdm import tqdm
 
 from ..logging import getLogger
-from ..utils import auto_encoder_transform, unit_length, clean_text, is_1d_array
-from ..utils import is_num, is_2d_array, NodeNotFoundException
-from enum import Enum
-from typing import List, Tuple, Optional, Dict, Set, Union
 
 Feature = List[Union[List[Union[str, List, int]], str]]
 
@@ -44,7 +33,8 @@ class BaseEmbed(metaclass=abc.ABCMeta):
 
     def check_output_dims(self, output: np.ndarray, feature: Feature):
         if self.n_dims != output.shape[1] or output.shape[0] != len(feature):
-            raise ValueError("Unmatched Dims. Output Dims = %s, Required Dims = (%s,%s)" % (output.shape, len(feature), self.n_dims))
+            raise ValueError(
+                "Unmatched Dims. Output Dims = %s, Required Dims = (%s,%s)" % (output.shape, len(feature), self.n_dims))
         return output
 
 

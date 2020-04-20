@@ -1,26 +1,20 @@
-
-from .BaseEmbed import BaseEmbed
-import abc
 import os
 
 import numpy as np
 import pandas as pd
+
+from .BaseEmbed import BaseEmbed
+
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.max_columns', 500)
 pd.set_option('display.width', 1000)
 pd.options.display.width = 0
-from scipy.stats.mstats import rankdata
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 from ..logging import getLogger
-from ..utils import auto_encoder_transform, unit_length, clean_text, is_1d_array
-from ..utils import is_num, is_2d_array, NodeNotFoundException
-from enum import Enum
-from typing import List, Tuple, Optional, Dict, Set, Union
+from ..utils import unit_length, clean_text, is_1d_array
+from typing import List, Union
+
 Feature = List[Union[List[str], str]]
 
 
@@ -35,7 +29,6 @@ class FastTextEmbed(BaseEmbed):
         self.log = getLogger(type(self).__name__)
 
     def get_sentence_vector(self, text):
-        import fasttext
         result = self.text_model.get_sentence_vector(text)
         if np.sum(result[0:5]) == 0:
             result = np.random.randn(self.n_dims)
@@ -64,8 +57,8 @@ class FastTextEmbed(BaseEmbed):
 
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
         self.log.debug("Start Transform TextEmbedding...")
-        outputs = np.vstack([np.array([self.get_sentence_vector(i) for i in t]).mean(0) if is_1d_array(t) else self.get_sentence_vector(t) for t in tqdm(feature)])
+        outputs = np.vstack([np.array([self.get_sentence_vector(i) for i in t]).mean(0) if is_1d_array(
+            t) else self.get_sentence_vector(t) for t in tqdm(feature)])
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs
         self.log.debug("End Transform TextEmbedding")
         return self.check_output_dims(outputs, feature)
-

@@ -1,23 +1,15 @@
 import abc
+import operator
 from collections import defaultdict
-from enum import Enum
-from typing import List, Tuple, Optional, Dict, Set, Union
-import collections
+from typing import List, Tuple, Dict, Set, Union
 
 import numpy as np
 from bidict import bidict
-
-from .logging import getLogger
-from .utils import is_num, is_2d_array, NodeNotFoundException
-from .utils import normalize_affinity_scores_by_user_item_bs, unit_length, unit_length_violations
-import operator
 from sklearn.neighbors import KDTree
 
-
-class EntityType(Enum):
-    USER = 1
-    ITEM = 2
-    USER_ITEM = 3
+from .logging import getLogger
+from .utils import NodeNotFoundException
+from .utils import unit_length, unit_length_violations
 
 NodeType = str
 NodeExternalId = Union[str, int]
@@ -66,7 +58,7 @@ class Edge:
 
 
 class MultiKNN:
-    def __init__(self, nodes_to_idx: Dict[Node, int], vectors: np.ndarray, leaf_size=128,):
+    def __init__(self, nodes_to_idx: Dict[Node, int], vectors: np.ndarray, leaf_size=128, ):
         self.nodes_to_idx: bidict = nodes_to_idx
         assert len(nodes_to_idx) == len(vectors)
         vl: Dict[str, List[int]] = defaultdict(list)
@@ -85,6 +77,7 @@ class MultiKNN:
         results = [(self.nodes_to_idx.inverse[idx], dt) for idx, dt in zip(neighbors, dist)]
         results = list(sorted(results, key=operator.itemgetter(1), reverse=False))
         return results
+
 
 # Enable KNN For?
 class RecommendationBase(metaclass=abc.ABCMeta):
@@ -141,7 +134,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         """
         src, dst = zip(*node_pairs)
         results = (self.get_embeddings(src) * self.get_embeddings(dst)).sum(1)
-        results = (results + 1)/2
+        results = (results + 1) / 2
         return results
 
     def get_embeddings(self, nodes: List[Node]):
@@ -151,7 +144,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
     def get_average_embeddings(self, entities: List[Node]):
         embeddings = self.get_embeddings(entities)
-        return  unit_length(np.average(embeddings, axis=0))
+        return unit_length(np.average(embeddings, axis=0))
 
     def find_closest_neighbours(self, node_type: str, anchor: Node, positive: List[Node] = None,
                                 negative: List[Node] = None, k=200) -> List[Tuple[Node, float]]:
@@ -168,4 +161,3 @@ class RecommendationBase(metaclass=abc.ABCMeta):
 
         embedding = np.average(embedding_list, axis=0)
         return self.knn.query(embedding, node_type, k=k)
-

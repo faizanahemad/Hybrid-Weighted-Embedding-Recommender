@@ -1,8 +1,7 @@
-import sys
 import os
-from os import path
 
 import sys
+
 sys.path.append(os.getcwd())
 
 import numpy as np
@@ -16,7 +15,6 @@ f1 = [["a", "b", 1, ["ab", "ca"], "c"],
       ["c", "a", 2, ["ab", "ab"], "b"],
       ["a", "b", 1, ["ab", "ca"], "c"],
       ["a", "b", 2, ["ab", "ca"], "c"]]
-
 
 cs = CategoricalEmbed(8, True)
 p = cs.fit_transform(f1)

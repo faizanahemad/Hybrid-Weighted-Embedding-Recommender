@@ -276,49 +276,6 @@ def repeat_args_wrapper(func):
     return wrapper
 
 
-def build_user_item_dict(user_item_affinities: List[Tuple[str, str, float]]):
-    user_item_dict: Dict[str, Dict[str, float]] = {}
-
-    for user, item, affinity in user_item_affinities:
-        if user not in user_item_dict:
-            user_item_dict[user] = {}
-        user_item_dict[user][item] = affinity
-    return user_item_dict
-
-
-def build_item_user_dict(user_item_affinities: List[Tuple[str, str, float]]):
-    item_user_dict: Dict[str, Dict[str, float]] = {}
-    for user, item, affinity in user_item_affinities:
-        if item not in item_user_dict:
-            item_user_dict[item] = {}
-        item_user_dict[item][user] = affinity
-    return item_user_dict
-
-
-def normalize_affinity_scores_by_user_item_bs(user_item_affinities: List[Tuple[str, str, float]], rating_scale=(1, 5)) \
-        -> Tuple[float, Dict[str, float], Dict[str, float], float, List[Tuple[str, str, float]]]:
-    from surprise import BaselineOnly
-    from surprise import Dataset
-    from surprise import Reader
-    train = pd.DataFrame(user_item_affinities)
-    reader = Reader(rating_scale=rating_scale)
-    trainset = Dataset.load_from_df(train, reader).build_full_trainset()
-    trainset_for_testing = trainset.build_testset()
-    algo = BaselineOnly(bsl_options={'method': 'sgd', "n_epochs": 10, "reg": 0.01})
-    algo.fit(trainset)
-    predictions = algo.test(trainset_for_testing)
-    mean = algo.trainset.global_mean
-    bu = {u: algo.bu[algo.trainset.to_inner_uid(u)] for u in set([u for u, i, r in user_item_affinities])}
-    bi = {i: algo.bi[algo.trainset.to_inner_iid(i)] for i in set([i for u, i, r in user_item_affinities])}
-    uid = [[p.uid, p.iid, p.r_ui - p.est] for p in predictions]
-    uid = pd.DataFrame(uid, columns=["user", "item", "rating"])
-    spread = max(uid["rating"].max(), np.abs(uid["rating"].min()))
-    uid = list(zip(uid['user'], uid['item'], uid['rating']))
-    bu = defaultdict(float, bu)
-    bi = defaultdict(float, bi)
-    return mean, bu, bi, spread, uid
-
-
 def is_num(x):
     ans = isinstance(x, int) or isinstance(x, float) or isinstance(x, np.float) or isinstance(x, np.int) or isinstance(x, np.int64)
     return ans
