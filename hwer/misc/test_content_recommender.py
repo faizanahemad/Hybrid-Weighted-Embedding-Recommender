@@ -1,14 +1,17 @@
 
-from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding
-from hwer import Feature, FeatureSet, ContentRecommendation, FeatureType, EntityType
+from hwer import CategoricalEmbed, NumericEmbed, Node, Edge
+from hwer import ContentRecommendation
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 user_ids = ["A", "B", "C"]
-items_per_user = 50
-item_ids = list(map(str, range(items_per_user * 3)))
+items_per_user = 5
+item_ids = list(map(str, range(items_per_user * len(user_ids))))
+
+user_nodes = [Node("user", i) for i in user_ids]
+item_nodes = [Node("item", i) for i in item_ids]
 
 ia = np.random.normal(size=(items_per_user, 2))
 ib = ia + 7
@@ -16,36 +19,33 @@ ib[:, 1] = ib[:, 1] - 3
 ic = ia - 3
 i1_15 = np.concatenate((ia, ib, ic))
 
-user_item_affinities = []
+edges = []
 user_embeddings = []
 for i, user in enumerate(user_ids):
     user_embeddings.append(np.average(i1_15[i*items_per_user:(i+1)*items_per_user], axis=0,))
     for j in range(i*items_per_user, (i+1)*items_per_user):
-        user_item_affinities.append((user, item_ids[j], 3))
+        edges.append(Edge(Node("user", user), Node("item", item_ids[j]), 1))
 
+print(edges)
+print("=" * 60)
 
 user_embeddings = np.vstack(user_embeddings)
 actual_embeddings = np.concatenate((user_embeddings, i1_15))
 
-embedding_mapper = {}
-embedding_mapper['numeric'] = NumericEmbedding(n_dims=3)
+embedding_mapper = {"item": {"numeric": NumericEmbed(n_dims=3)}}
+node_data = {node: {"numeric": i1_15[idx]} for idx, node in enumerate(item_nodes)}
 
-f = Feature("numeric", FeatureType.NUMERIC, i1_15)
-item_data = FeatureSet([f])
 
-kwargs = {'item_data': item_data}
+recsys = ContentRecommendation(embedding_mapper=embedding_mapper, n_dims=2, node_types={"user", "item"})
+_ = recsys.fit(user_nodes + item_nodes, edges, node_data)
 
-recsys = ContentRecommendation(embedding_mapper=embedding_mapper, knn_params=None, n_dims=2, rating_scale=(1, 5))
-_ = recsys.fit(user_ids, item_ids,
-               user_item_affinities, **kwargs)
 
-all_entities = list(zip(user_ids, [EntityType.USER]*len(user_ids))) +\
-               list(zip(item_ids, [EntityType.ITEM]*len(item_ids)))
+embeddings = recsys.get_embeddings(user_nodes + item_nodes)
 
-embeddings = recsys.get_embeddings(all_entities)
+all_entities = list(zip(user_ids, ["user"]*len(user_ids), [5]*len(user_ids))) +\
+               list(zip(item_ids, ["item"]*len(item_ids), [1]*len(item_ids)))
 
-all_entities = list(zip(user_ids, [EntityType.USER]*len(user_ids), [5]*len(user_ids))) +\
-               list(zip(item_ids, [EntityType.ITEM]*len(item_ids), [1]*len(item_ids)))
+all_nodes = user_nodes + item_nodes
 
 print(len(embeddings), len(all_entities))
 
@@ -58,6 +58,8 @@ import operator
 plt.figure(figsize=(8, 8))
 sns.scatterplot(actual_embeddings[:,0],actual_embeddings[:,1], list(map(operator.itemgetter(1), all_entities)), size=list(map(operator.itemgetter(2), all_entities)))
 plt.show()
+
+print(user_nodes[0], recsys.find_closest_neighbours("item", user_nodes[0], k=3))
 
 
 

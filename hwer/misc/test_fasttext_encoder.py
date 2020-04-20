@@ -11,19 +11,70 @@ sys.path.append(os.getcwd())
 
 import numpy as np
 from gensim.test.utils import common_texts
+from hwer.utils import cos_sim
 
-from hwer import FasttextEmbedding, Feature, FeatureType
+from hwer import FastTextEmbed
 
-ft = FasttextEmbedding(32, fasttext_file="/Users/ahemf/mygit/Hybrid-Weighted-Embedding-Recommender/hwer/fasttext.bin")
 
-text = list(map(lambda x: " ".join(x), common_texts))
-f1 = Feature("text", FeatureType.STR, text)
-print(ft.fit_transform(f1))
+print("X"*80)
+f1 = [["the cat sat on the mat"], ["mat is the cat's place"]]
+flair1 = FastTextEmbed(4)
+p = flair1.fit_transform(f1)
+# print(p)
+examples = len(f1)
 
-print("="*40)
-ft = FasttextEmbedding(4,)
+print("-" * 40)
+sims = np.zeros((examples, examples))
+for i in range(examples):
+    for j in range(examples):
+        sims[i][j] = cos_sim(p[i], p[j])
+print(sims)
+print(p.shape)
 
-f1 = Feature("text", FeatureType.STR, text)
-print(ft.fit_transform(f1))
 
-print(ft.fit_transform(f1).shape)
+print("-X-"*80)
+f1 = [["the cat sat on the mat", "Purple pie with a cricket bat"], ["mat is the cat's place"]]
+flair1 = FastTextEmbed(4)
+p = flair1.fit_transform(f1)
+# print(p)
+examples = len(f1)
+
+print("-" * 40)
+sims = np.zeros((examples, examples))
+for i in range(examples):
+    for j in range(examples):
+        sims[i][j] = cos_sim(p[i], p[j])
+print(sims)
+print(p.shape)
+
+print("=X="*80)
+f1 = [["the cat sat on the mat", "the cat sat on the mat"], ["the cat sat on the mat"]]
+flair1 = FastTextEmbed(4)
+p = flair1.fit_transform(f1)
+# print(p)
+examples = len(f1)
+
+print("-" * 40)
+sims = np.zeros((examples, examples))
+for i in range(examples):
+    for j in range(examples):
+        sims[i][j] = cos_sim(p[i], p[j])
+print(sims)
+print(p.shape)
+
+print("<y>"*80)
+f1 = ["the cat sat on the mat", ["the cat sat on the mat"]]
+flair1 = FastTextEmbed(4)
+p = flair1.fit_transform(f1)
+# print(p)
+examples = len(f1)
+
+print("-" * 40)
+sims = np.zeros((examples, examples))
+for i in range(examples):
+    for j in range(examples):
+        sims[i][j] = cos_sim(p[i], p[j])
+print(sims)
+print(p.shape)
+
+

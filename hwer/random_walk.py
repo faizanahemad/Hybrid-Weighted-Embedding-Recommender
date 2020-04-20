@@ -6,7 +6,7 @@ import numpy as np
 
 # from time import time
 
-
+# Make Graph Edge and Node API coherent
 class DiGraph:
     def __init__(self):
         self.e = dict()

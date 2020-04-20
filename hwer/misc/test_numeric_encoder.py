@@ -10,19 +10,27 @@ import sys
 sys.path.append(os.getcwd())
 
 import numpy as np
-from hwer import CategoricalEmbedding, FeatureSet, Feature, NumericEmbedding, FeatureType
 
+from hwer import NumericEmbed
+from hwer.utils import cos_sim
 
-f1 = Feature("f1", FeatureType.NUMERIC, [1.2, 0.1, 2.2, 4.1, 5.0, 6.1, 2.1, 5.0])
-f2 = Feature("f2", FeatureType.NUMERIC, [0.7, 3.0, 2.0, 4.0, 5.0, 6.0, 7.0, 5.0])
-new_vals = list(zip(f1.values,f2.values))
-print(new_vals)
+vals = np.random.random((6, 3))
+examples = len(vals)
 
-f = Feature("f1", FeatureType.NUMERIC, new_vals)
+sims = np.zeros((examples, examples))
+for i in range(examples):
+    for j in range(examples):
+        sims[i][j] = cos_sim(vals[i], vals[j])
+print(sims)
 
+print("=" * 80)
 
-ns = NumericEmbedding(4)
-print(ns.fit_transform(f))
+p = NumericEmbed(n_dims=3).fit_transform(vals)
+print(p)
 
-ns = NumericEmbedding(4)
-print(ns.fit_transform(f1))
+print("=" * 80)
+sims = np.zeros((examples, examples))
+for i in range(examples):
+    for j in range(examples):
+        sims[i][j] = cos_sim(p[i], p[j])
+print(sims)

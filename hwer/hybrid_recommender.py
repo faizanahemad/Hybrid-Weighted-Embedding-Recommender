@@ -10,7 +10,7 @@ import pandas as pd
 from .content_recommender import ContentRecommendation
 from .logging import getLogger
 from .recommendation_base import EntityType
-from .recommendation_base import RecommendationBase, FeatureSet
+from .recommendation_base import RecommendationBase
 from .utils import unit_length, unit_length_violations
 
 
