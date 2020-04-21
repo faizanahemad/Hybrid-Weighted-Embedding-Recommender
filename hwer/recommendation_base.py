@@ -160,4 +160,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
             embedding_list.append(-1 * self.get_average_embeddings(negative))
 
         embedding = np.average(embedding_list, axis=0)
-        return self.knn.query(embedding, node_type, k=k)
+        node_dist_list = self.knn.query(embedding, node_type, k=k)
+        scores = self.predict([(anchor, node) for node, dist in node_dist_list])
+        results = list(sorted(zip([n for n in node_dist_list], scores), key=operator.itemgetter(1), reverse=True))
+        return results

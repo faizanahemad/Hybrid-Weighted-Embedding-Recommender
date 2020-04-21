@@ -521,18 +521,3 @@ class HybridGCNRec(HybridRecommender):
         if clip:
             predictions = np.clip(predictions, self.rating_scale[0], self.rating_scale[1])
         return predictions
-
-    def prepare_for_knn(self, user_vectors, item_vectors):
-        from .utils import unit_length
-        from sklearn.decomposition import PCA
-        user_vectors_length = len(user_vectors)
-        all_vectors = np.concatenate((user_vectors, item_vectors), axis=0)
-        if user_vectors.shape[1] > self.n_collaborative_dims:
-            pca = PCA(n_components=self.n_collaborative_dims, )
-            all_vectors = pca.fit_transform(all_vectors)
-        elif user_vectors.shape[1] < self.n_collaborative_dims:
-            raise ValueError()
-        all_vectors = unit_length(all_vectors, axis=1)
-        user_vectors = all_vectors[:user_vectors_length]
-        item_vectors = all_vectors[user_vectors_length:]
-        return user_vectors, item_vectors
