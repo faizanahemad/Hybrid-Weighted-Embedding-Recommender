@@ -302,37 +302,6 @@ class GraphResnetWithSampling(nn.Module):
         return result
 
 
-def get_score(src, dst, mean, node_biases,
-              h_dst, h_src):
-
-    score = mean + (h_src * h_dst).sum(1) + node_biases[src + 1] + node_biases[dst + 1]
-    return score
-
-
-class GraphSAGERecommender(nn.Module):
-    def __init__(self, gcn, mu, node_biases, zeroed_indices):
-        super(GraphSAGERecommender, self).__init__()
-
-        self.gcn = gcn
-        if node_biases is not None:
-            assert len(node_biases) == gcn.G.number_of_nodes() + 1
-            node_biases[zeroed_indices] = 0.0
-            self.node_biases = nn.Parameter(torch.FloatTensor(node_biases))
-        else:
-            self.node_biases = nn.Parameter(torch.zeros(gcn.G.number_of_nodes() + 1))
-        self.zeroed_indices = zeroed_indices
-        self.mu = nn.Parameter(torch.tensor(mu), requires_grad=True)
-
-    def forward(self, nf, src, dst):
-        h_output = self.gcn(nf)
-        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
-        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        score = get_score(src, dst, self.mu, self.node_biases,
-                          h_dst, h_src)
-
-        return score
-
-
 class GraphSAGETripletEmbedding(nn.Module):
     def __init__(self, gcn, margin=1.0):
         super(GraphSAGETripletEmbedding, self).__init__()

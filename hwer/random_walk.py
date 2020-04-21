@@ -80,12 +80,11 @@ class Node2VecWalker:
             node_cur_nbrs = adjacency_list[node]
             cur, back = random.choices(node_cur_nbrs, alias_nodes[node])[0], node
             walk = [back, cur]
-            for _ in range(walk_length - 1):
+            for _ in range(walk_length - 2):
                 cur_nbrs = adjacency_list[cur]
                 cur, back = random.choices(cur_nbrs, alias_edges[(back, cur)])[0], cur
                 walk.append(cur)
             yield walk
-
 
     def simulate_walks_generator_optimised(self, num_walks, walk_length):
         nodes = self.nodes
@@ -99,7 +98,7 @@ class Node2VecWalker:
                 node_cur_nbrs = adjacency_list[node]
                 cur, back = random.choices(node_cur_nbrs, alias_nodes[node])[0], node
                 walk = [back, cur]
-                for _ in range(walk_length - 1):
+                for _ in range(walk_length - 2):
                     cur_nbrs = adjacency_list[cur]
                     cur, back = random.choices(cur_nbrs, alias_edges[(back, cur)])[0], cur
                     walk.append(cur)
@@ -175,7 +174,7 @@ class MemoryOptimisedNode2VecWalker:
             node_cur_nbrs = adjacency_list[node]
             cur, back = random.choices(node_cur_nbrs, self.node_proba(node))[0], node
             walk = [back, cur]
-            for _ in range(walk_length - 1):
+            for _ in range(walk_length - 2):
                 cur_nbrs = adjacency_list[cur]
                 cur, back = random.choices(cur_nbrs, self.edge_proba((back, cur)))[0], cur
                 walk.append(cur)
@@ -191,7 +190,7 @@ class MemoryOptimisedNode2VecWalker:
                 node_cur_nbrs = adjacency_list[node]
                 cur, back = random.choices(node_cur_nbrs, self.node_proba(node))[0], node
                 walk = [back, cur]
-                for _ in range(walk_length - 1):
+                for _ in range(walk_length - 2):
                     cur_nbrs = adjacency_list[cur]
                     cur, back = random.choices(cur_nbrs, self.edge_proba((back, cur)))[0], cur
                     walk.append(cur)
@@ -240,7 +239,7 @@ class RandomWalker:
             node_cur_nbrs = adjacency_list[node]
             cur, back = random.choice(node_cur_nbrs), node
             walk = [back, cur]
-            for _ in range(walk_length - 1):
+            for _ in range(walk_length - 2):
                 cur_nbrs = adjacency_list[cur]
                 cur, back = random.choice(cur_nbrs), cur
                 walk.append(cur)
@@ -256,7 +255,7 @@ class RandomWalker:
                 node_cur_nbrs = adjacency_list[node]
                 cur, back = random.choice(node_cur_nbrs), node
                 walk = [back, cur]
-                for _ in range(walk_length - 1):
+                for _ in range(walk_length - 2):
                     cur_nbrs = adjacency_list[cur]
                     cur, back = random.choice(cur_nbrs), cur
                     walk.append(cur)

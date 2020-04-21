@@ -15,6 +15,7 @@ from .embed import BaseEmbed
 
 # Binary Link Prediction, Dot product based embeddings for KNN
 
+
 class HybridRecommender(RecommendationBase):
     def __init__(self, embedding_mapper: Dict[NodeType, Dict[str, BaseEmbed]], node_types: Set[str],
                  n_dims: int = 32):
@@ -26,7 +27,8 @@ class HybridRecommender(RecommendationBase):
         self.prediction_artifacts = dict()
 
     def __build_collaborative_embeddings__(self, nodes: List[Node],
-                                           edges: List[Edge], node_vectors: np.ndarray) -> np.ndarray:
+                                           edges: List[Edge], node_vectors: np.ndarray,
+                                           hyperparams: Dict) -> np.ndarray:
 
         self.log.debug("Started Building Collaborative Embeddings...")
         assert len(nodes) == len(node_vectors)
@@ -75,7 +77,7 @@ class HybridRecommender(RecommendationBase):
         import gc
         gc.collect()
 
-        collaborative_vectors = self.__build_collaborative_embeddings__(nodes, edges, content_vectors)
+        collaborative_vectors = self.__build_collaborative_embeddings__(nodes, edges, content_vectors, collaborative_params)
 
         self.log.debug("Hybrid Base: Fit Method, Use content = %s, Unit Length Violations: %s", content_data_used,
                        unit_length_violations(collaborative_vectors, axis=1))

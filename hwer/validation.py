@@ -239,14 +239,14 @@ def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}
 
 def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
                 get_data_mappers, rating_scale, algo):
-    from . import HybridGCNRec, GCNRetriever, GcnNCF
+    from . import GCNRecommender, GCNRetriever, GcnNCF
     embedding_mapper, user_data, item_data = get_data_mappers()
     kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
     if algo in ["gcn_hybrid"]:
-        recsys = HybridGCNRec(embedding_mapper=embedding_mapper,
-                              knn_params=hyperparameters["knn_params"],
-                              rating_scale=rating_scale,
-                              n_collaborative_dims=hyperparameters["n_dims"])
+        recsys = GCNRecommender(embedding_mapper=embedding_mapper,
+                                knn_params=hyperparameters["knn_params"],
+                                rating_scale=rating_scale,
+                                n_collaborative_dims=hyperparameters["n_dims"])
     elif algo in ["gcn_ncf"]:
         recsys = GcnNCF(embedding_mapper=embedding_mapper,
                         knn_params=hyperparameters["knn_params"],
