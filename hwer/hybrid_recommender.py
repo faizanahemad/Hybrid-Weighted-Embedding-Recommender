@@ -103,7 +103,6 @@ class HybridRecommender(RecommendationBase):
         gc.collect()
         return self.vectors
 
-    @abc.abstractmethod
     def prepare_for_knn(self, content_vectors: np.ndarray, collaborative_vectors: np.ndarray) -> np.ndarray:
         from .utils import unit_length
         from sklearn.decomposition import PCA

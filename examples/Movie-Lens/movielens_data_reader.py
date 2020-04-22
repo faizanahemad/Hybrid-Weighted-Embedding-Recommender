@@ -11,9 +11,8 @@ pd.options.display.width = 0
 import warnings
 import os
 
-from hwer import MultiCategoricalEmbedding, FlairGlove100AndBytePairEmbedding, CategoricalEmbedding, NumericEmbedding
-from hwer import Feature, FeatureSet, FeatureType
-from hwer import FasttextEmbedding
+from hwer import CategoricalEmbed, FlairGlove100AndBytePairEmbed, NumericEmbed, Node, Edge
+from hwer.utils import merge_dicts_nested, build_row_dicts
 from ast import literal_eval
 import numpy as np
 
@@ -21,54 +20,54 @@ import numpy as np
 def get_data_mapper(df_user, df_item, dataset="100K"):
 
     def prepare_data_mappers_100K():
-        embedding_mapper = {}
-        embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=32)
-        embedding_mapper['categorical_year'] = CategoricalEmbedding(n_dims=4)
+        user_nodes = [Node("user", n) for n in df_user.user.values]
+        n_users = len(user_nodes)
+        user_data = dict(zip(user_nodes, build_row_dicts("categorical", df_user[["gender", "age", "occupation", "zip"]].values)))
+        user_numeric = dict(zip(user_nodes, build_row_dicts("numeric", df_user[["user_rating_mean", "user_rating_count"]].values)))
+        user_data = merge_dicts_nested(user_data, user_numeric)
 
-        embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
-        embedding_mapper['numeric'] = NumericEmbedding(16)
-        embedding_mapper['user_numeric'] = NumericEmbedding(16)
-        embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=32)
-
-        u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL,
-                     values=df_user[["gender", "age", "occupation", "zip"]].values)
-        u2 = Feature(feature_name="user_numeric", feature_type=FeatureType.NUMERIC,
-                     values=df_user[["user_rating_mean", "user_rating_count"]].values)
-        user_data = FeatureSet([u1, u2])
+        item_nodes = [Node("item", i) for i in df_item.item.values]
+        n_items = len(item_nodes)
         df_item.year = "_" + df_item.year.apply(str) + "_"
+        item_text = dict(zip(item_nodes, build_row_dicts("text", df_item.text.values)))
+        item_cats = dict(zip(item_nodes, build_row_dicts("categorical", df_item[["year", "genres"]].values)))
+        item_numerics = dict(zip(item_nodes, build_row_dicts("numeric", np.abs(df_item[["title_length", "overview_length", "runtime", "item_rating_mean", "item_rating_count"]].values))))
 
-        i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=df_item.text.values)
-        i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=df_item.genres.values)
-        i3 = Feature(feature_name="numeric", feature_type=FeatureType.NUMERIC,
-                     values=np.abs(df_item[["title_length", "overview_length", "runtime", "item_rating_mean", "item_rating_count"]].values) + 1)
-        i4 = Feature(feature_name="categorical_year", feature_type=FeatureType.CATEGORICAL,
-                     values=df_item.year.values)
-        item_data = FeatureSet([i1, i2, i3, i4])
-        return embedding_mapper, user_data, item_data
+        item_data = merge_dicts_nested(item_text, item_cats, item_numerics)
+        assert len(user_data) == n_users
+        assert len(item_data) == n_items
+
+        node_data = dict(user_data)
+        node_data.update(item_data)
+        embedding_mapper = dict(user=dict(categorical=CategoricalEmbed(n_dims=32), numeric=NumericEmbed(32)),
+                                item=dict(text=FlairGlove100AndBytePairEmbed(), categorical=CategoricalEmbed(n_dims=32), numeric=NumericEmbed(32)))
+        return embedding_mapper, node_data
 
     def prepare_data_mappers_1M():
-        embedding_mapper = {}
-        embedding_mapper['categorical'] = CategoricalEmbedding(n_dims=32)
+        user_nodes = [Node("user", n) for n in df_user.user.values]
+        n_users = len(user_nodes)
+        item_nodes = [Node("item", i) for i in df_item.item.values]
+        n_items = len(item_nodes)
 
-        embedding_mapper['text'] = FlairGlove100AndBytePairEmbedding()
-        embedding_mapper['numeric'] = NumericEmbedding(16)
-        embedding_mapper['genres'] = MultiCategoricalEmbedding(n_dims=32)
-        embedding_mapper['user_numeric'] = NumericEmbedding(16)
+        user_data = dict(zip(user_nodes, build_row_dicts("categorical", df_user[["gender", "age", "occupation", "zip"]].values)))
+        user_numeric = dict(zip(user_nodes, build_row_dicts("numeric", df_user[["user_rating_mean", "user_rating_count"]].values)))
+        user_data = merge_dicts_nested(user_data, user_numeric)
 
-        u1 = Feature(feature_name="categorical", feature_type=FeatureType.CATEGORICAL, values=df_user[["gender", "age", "occupation", "zip"]].values)
-        u2 = Feature(feature_name="user_numeric", feature_type=FeatureType.NUMERIC,
-                     values=df_user[["user_rating_mean", "user_rating_count"]].values)
-        user_data = FeatureSet([u1, u2])
+        item_text = dict(zip(item_nodes, build_row_dicts("text", df_item.text.values)))
+        item_cats = dict(zip(item_nodes, build_row_dicts("categorical", df_item["genres"].values)))
+        item_numerics = dict(zip(item_nodes, build_row_dicts("numeric", np.abs(
+            df_item[["title_length", "overview_length", "runtime", "item_rating_mean", "item_rating_count"]].values))))
 
-        # print("Numeric Nans = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]].isna()))
-        # print("Numeric Zeros = \n", np.sum(df_item[["title_length", "overview_length", "runtime"]] <= 0))
+        item_data = merge_dicts_nested(item_text, item_cats, item_numerics)
+        assert len(user_data) == n_users
+        assert len(item_data) == n_items
+        node_data = dict(user_data)
+        node_data.update(item_data)
+        embedding_mapper = dict(user=dict(categorical=CategoricalEmbed(n_dims=32), numeric=NumericEmbed(32)),
+                                item=dict(text=FlairGlove100AndBytePairEmbed(), categorical=CategoricalEmbed(n_dims=32),
+                                          numeric=NumericEmbed(32)))
 
-        i1 = Feature(feature_name="text", feature_type=FeatureType.STR, values=df_item.text.values)
-        i2 = Feature(feature_name="genres", feature_type=FeatureType.MULTI_CATEGORICAL, values=df_item.genres.values)
-        i3 = Feature(feature_name="numeric", feature_type=FeatureType.NUMERIC,
-                     values=np.abs(df_item[["title_length", "overview_length", "runtime", "item_rating_mean", "item_rating_count"]].values) + 1)
-        item_data = FeatureSet([i1, i2, i3])
-        return embedding_mapper, user_data, item_data
+        return embedding_mapper, node_data
 
     if dataset == "100K":
         return prepare_data_mappers_100K
@@ -211,16 +210,14 @@ def get_data_reader(dataset="100K"):
 def build_dataset(dataset, **kwargs):
     read_data = get_data_reader(dataset=dataset)
     df_user, df_item, ratings = read_data(**kwargs)
-
     prepare_data_mappers = get_data_mapper(df_user, df_item, dataset=dataset)
+    user_nodes = [Node("user", n) for n in df_user.user.values]
+    item_nodes = [Node("item", i) for i in df_item.item.values]
+    nodes = user_nodes + item_nodes
     ratings = ratings.sample(frac=1.0)
-    provided_test_set = False
-    assert len(ratings.columns) in [3, 4]
-    if len(ratings.columns) == 3:
-        user_item_affinities = [(row[0], row[1], float(row[2])) for row in ratings.values]
-    if len(ratings.columns) == 4:
-        provided_test_set = True
-        user_item_affinities = [(row[0], row[1], float(row[2]), bool(row[3])) for row in ratings.values]
+    assert len(ratings.columns) == 4
+    user_item_affinities = [(Node("user", row[0]), Node("item", row[1]),
+                             float(row[2]), bool(row[3])) for row in ratings.values]
+    user_item_affinities = [(Edge(src, dst, weight), train_test) for src, dst, weight, train_test in user_item_affinities]
 
-    rating_scale = (np.min([x[2] for x in user_item_affinities]), np.max([x[2] for x in user_item_affinities]))
-    return df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, provided_test_set
+    return nodes, user_item_affinities, {"user", "item"}, prepare_data_mappers

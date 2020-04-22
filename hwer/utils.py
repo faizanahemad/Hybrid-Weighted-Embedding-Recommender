@@ -310,7 +310,6 @@ class NodeNotFoundException(Exception):
     pass
 
 
-
 def str2bool(v):
     if isinstance(v, bool):
        return v
@@ -328,3 +327,21 @@ def save_list_per_line(lines, filename, mode='a'):
     data = '\n'.join(lines)
     with open(filename, mode) as file:
         file.write(data)
+
+
+def merge_dicts_nested(d1: Dict[object, Dict], d2: Dict[object, Dict], *args):
+    from more_itertools import flatten
+    assert set(d1.keys()) == set(d2.keys())
+    other_dict_lens = len(args)
+    if other_dict_lens > 0:
+        assert set(d1.keys()) == set(list(flatten([set(d.keys()) for d in args])))
+    for k, v in d1.items():
+        v.update(d2[k])
+        for i in range(other_dict_lens):
+            v.update(args[i][k])
+    return d1
+
+
+def build_row_dicts(keyword, rows):
+    return [{keyword: row} for row in rows]
+

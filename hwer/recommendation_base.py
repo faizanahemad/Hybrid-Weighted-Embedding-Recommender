@@ -41,9 +41,13 @@ class Edge:
         self.src = src
         self.dst = dst
         self.weight = weight
+        self.contents = [src, dst, weight]
 
     def __key(self):
         return tuple((self.src, self.dst, self.weight))
+
+    def __iter__(self):
+        return iter(self.contents)
 
     def __hash__(self):
         return hash(self.__key())
@@ -79,7 +83,6 @@ class MultiKNN:
         return results
 
 
-# Enable KNN For?
 class RecommendationBase(metaclass=abc.ABCMeta):
     def __init__(self, node_types: Set[str], n_dims: int = 32):
         self.node_types: Set[NodeType] = node_types
@@ -138,7 +141,7 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         return results
 
     def get_embeddings(self, nodes: List[Node]):
-        indexes = [self.nodes_to_idx[node] for node in nodes]
+        indexes = [self.nodes_to_idx[node] if node in self.nodes_to_idx else 0 for node in nodes]
         embeddings = self.vectors[indexes]
         return embeddings
 

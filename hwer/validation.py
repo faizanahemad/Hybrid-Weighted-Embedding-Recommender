@@ -12,39 +12,24 @@ from collections import defaultdict
 import operator
 
 warnings.filterwarnings('ignore')
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Set
 import numpy as np
 import time
 import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy.stats import describe
+from .recommendation_base import RecommendationBase, NodeType, Node, Edge, FeatureName
 
 from .utils import average_precision, reciprocal_rank, ndcg, binary_ndcg, recall, binary_ndcg_v2
 
+# Link Prediction accuracy with same proportion negatives as positives
 
-def surprise_get_topk(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
+
+def model_get_topk_knn(model, anchors: List[Node], node_type: NodeType) -> Dict[Node, List[Tuple[Node, float]]]:
     predictions = defaultdict(list)
-    for u in users:
-        p = [(i, model.predict(u, i).est) for i in items]
-        p = list(sorted(p, key=operator.itemgetter(1), reverse=True))
-        predictions[u] = p
-    return predictions
-
-
-def model_get_topk_knn(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
-    predictions = defaultdict(list)
-    for u in users:
-        p = model.find_closest_neighbours(u)
-        predictions[u] = p
-    return predictions
-
-
-def model_get_all(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
-    predictions = defaultdict(list)
-    for u in users:
-        p = list(zip(items, model.predict([(u, i) for i in items])))
-        p = list(sorted(p, key=operator.itemgetter(1), reverse=True))
+    for u in anchors:
+        p = model.find_closest_neighbours(node_type, u)
         predictions[u] = p
     return predictions
 
@@ -52,25 +37,21 @@ def model_get_all(model, users, items) -> Dict[str, List[Tuple[str, float]]]:
 model_get_topk = model_get_topk_knn
 
 
-def ncf_eval(model, train_affinities, validation_affinities, get_topk, item_list):
+def ncf_eval(model, train_edges: List[Edge], validation_edges: List[Edge], item_list: List[Node]):
     item_list = set(item_list)
     interactions = defaultdict(set)
-    for u, i, _ in train_affinities:
+    for u, i, _ in train_edges:
         interactions[u].add(i)
-    for u, i, _ in validation_affinities:
+    for u, i, _ in validation_edges:
         interactions[u].add(i)
     user_test_item = {}
     actual = {}
-    for u, i, _ in validation_affinities:
+    for u, i, _ in validation_edges:
         user_test_item[u] = [i, *random.sample(item_list - interactions[u], 100)]
         actual[u] = i
 
-    from surprise import SVD, SVDpp
     for u, items in user_test_item.items():
-        if isinstance(model, SVD) or isinstance(model, SVDpp):
-            it = list(zip(items, [model.predict(u, i) for i in items]))
-        else:
-            it = list(zip(items, model.predict([(u, i) for i in items])))
+        it = list(zip(items, model.predict([(u, i) for i in items])))
         it = list(sorted(it, key=operator.itemgetter(1), reverse=True))
         user_test_item[u], _ = zip(*it[:10])
 
@@ -84,22 +65,26 @@ def ncf_eval(model, train_affinities, validation_affinities, get_topk, item_list
     return {"ncf_hr": np.mean(hr), "ncf_ndcg": np.mean(ndcg)}
 
 
-def extraction_efficiency(model, train_affinities, validation_affinities, get_topk, item_list):
-    validation_users = list(set([u for u, i, r in validation_affinities]))
-    train_users = list(set([u for u, i, r in train_affinities]))
+def extraction_efficiency(model, train_edges: List[Edge], validation_edges: List[Edge], get_topk, node_type: NodeType):
+    validation_users = list(set([u for u, i, r in validation_edges]))
+    train_users = list(set([u for u, i, r in train_edges]))
+    validation_items = list(set([i for u, i, r in validation_edges]))
+    train_items = list(set([i for u, i, r in train_edges]))
     all_users = list(set(train_users + validation_users))
+    all_items = list(set(validation_items + train_items))
+    all_items = list(filter(lambda x: x.node_type == node_type, all_items))
     train_uid = defaultdict(set)
     items_extracted_length = []
     s = time.time()
-    predictions = get_topk(model, all_users, item_list)
+    predictions = get_topk(model, all_users, node_type)
     e = time.time()
     pred_time = e - s
-    for u, i, r in train_affinities:
+    for u, i, r in train_edges:
         train_uid[u].add(i)
 
     train_actuals = defaultdict(list)
     train_actuals_score_dict = defaultdict(dict)
-    for u, i, r in train_affinities:
+    for u, i, r in train_edges:
         train_actuals[u].append((i, r))
         train_actuals_score_dict[u][i] = r
 
@@ -124,17 +109,16 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         predictions_100[u] = filtered_items[:100]
 
     from more_itertools import flatten
-    train_diversity = len(set(list(flatten(list(train_predictions.values())))))/len(item_list)
-    diversity = len(set(list(flatten(list(predictions_100.values()))))) / len(item_list)
+    train_diversity = len(set(list(flatten(list(train_predictions.values())))))/len(all_items)
+    diversity = len(set(list(flatten(list(predictions_100.values()))))) / len(all_items)
 
-    train_mean_ap = np.mean([average_precision(train_actuals[u], train_predictions[u]) for u in train_users])
     train_mrr = np.mean([reciprocal_rank(train_actuals[u], train_predictions[u]) for u in train_users])
     train_ndcg = np.mean([ndcg(train_actuals_score_dict[u], train_predictions[u]) for u in train_users])
     train_binary_ndcg = np.mean([binary_ndcg(train_actuals_score_dict[u], train_predictions[u]) for u in train_users])
     train_recall = np.mean([recall(train_actuals_score_dict[u], train_predictions[u]) for u in train_users])
 
     validation_actuals = defaultdict(list)
-    for u, i, r in validation_affinities:
+    for u, i, r in validation_edges:
         validation_actuals[u].append((i, r))
 
     validation_actuals_score_dict = defaultdict(dict)
@@ -146,41 +130,26 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
         items_extracted_length.append(len(remaining_items))
         validation_actuals[u] = remaining_items
 
-    mean_ap = np.mean([average_precision(validation_actuals[u], predictions_100[u]) for u in validation_users])
     mrr = np.mean([reciprocal_rank(validation_actuals[u], predictions_100[u]) for u in validation_users])
     val_ndcg = np.mean([ndcg(validation_actuals_score_dict[u], predictions_100[u]) for u in validation_users])
     val_binary_ndcg = np.mean([binary_ndcg(validation_actuals_score_dict[u], predictions_100[u]) for u in validation_users])
     val_recall = np.mean([recall(validation_actuals_score_dict[u], predictions_100[u]) for u in validation_users])
 
-    mean_ap_10 = np.mean([average_precision(validation_actuals[u], predictions_10[u]) for u in validation_users])
-    mrr_10 = np.mean([reciprocal_rank(validation_actuals[u], predictions_10[u]) for u in validation_users])
     val_ndcg_10 = np.mean([ndcg(validation_actuals_score_dict[u], predictions_10[u]) for u in validation_users])
     val_binary_ndcg_10 = np.mean([binary_ndcg(validation_actuals_score_dict[u], predictions_10[u]) for u in validation_users])
     val_recall_10 = np.mean([recall(validation_actuals_score_dict[u], predictions_10[u]) for u in validation_users])
 
-    mean_ap_20 = np.mean([average_precision(validation_actuals[u], predictions_20[u]) for u in validation_users])
-    mrr_20 = np.mean([reciprocal_rank(validation_actuals[u], predictions_20[u]) for u in validation_users])
-    val_ndcg_20 = np.mean([ndcg(validation_actuals_score_dict[u], predictions_20[u]) for u in validation_users])
-    val_binary_ndcg_20 = np.mean([binary_ndcg(validation_actuals_score_dict[u], predictions_20[u]) for u in validation_users])
     val_recall_20 = np.mean([recall(validation_actuals_score_dict[u], predictions_20[u]) for u in validation_users])
 
-    mean_ap_50 = np.mean([average_precision(validation_actuals[u], predictions_50[u]) for u in validation_users])
-    mrr_50 = np.mean([reciprocal_rank(validation_actuals[u], predictions_50[u]) for u in validation_users])
-    val_ndcg_50 = np.mean([ndcg(validation_actuals_score_dict[u], predictions_50[u]) for u in validation_users])
-    val_binary_ndcg_50 = np.mean([binary_ndcg(validation_actuals_score_dict[u], predictions_50[u]) for u in validation_users])
-    val_recall_50 = np.mean([recall(validation_actuals_score_dict[u], predictions_50[u]) for u in validation_users])
+    ncf_metrics = ncf_eval(model, train_edges, validation_edges, all_items)
 
-    ncf_metrics = ncf_eval(model, train_affinities, validation_affinities, get_topk, item_list)
-
-    metrics = {"train_map": train_mean_ap, "map": mean_ap, "train_mrr": train_mrr, "mrr": mrr,
+    metrics = {"train_mrr": train_mrr, "mrr": mrr,
                "retrieval_time": pred_time,
                "train_ndcg@100": train_ndcg, "ndcg@100": val_ndcg,
                "train_recall@100": train_recall, "recall@100": val_recall,
                "train_b_ndcg@100": train_binary_ndcg, "ndcg_b@100": val_binary_ndcg,
-               "ndcg@50": val_ndcg_50, "ndcg_b@50": val_binary_ndcg_50,
-               "ndcg@20": val_ndcg_20, "ndcg_b@20": val_binary_ndcg_20,
                "ndcg@10": val_ndcg_10, "ndcg_b@10": val_binary_ndcg_10,
-               "recall@10": val_recall_10, "recall@20": val_recall_20, "recall@50": val_recall_50,
+               "recall@10": val_recall_10, "recall@20": val_recall_20,
                "train_diversity": train_diversity, "diversity": diversity, **ncf_metrics}
     return {"actuals": validation_actuals, "predictions": predictions_100,
             "train_actuals": train_actuals, "train_predictions": train_predictions,
@@ -188,177 +157,55 @@ def extraction_efficiency(model, train_affinities, validation_affinities, get_to
             "validation_actuals_score_dict": validation_actuals_score_dict, "metrics": metrics}
 
 
-def test_surprise(train, test, algo=("baseline", "svd", "svdpp"), algo_params={}, rating_scale=(1, 5)):
-    from surprise import SVD, SVDpp, NormalPredictor
-    from surprise import accuracy
-    from surprise import BaselineOnly
-    from surprise import Dataset
-    from surprise import Reader
-    from surprise.prediction_algorithms.co_clustering import CoClustering
-    train_affinities = train
-    validation_affinities = test
-    items = list(set([i for u, i, r in train]))
-    train = pd.DataFrame(train)
-    test = pd.DataFrame(test)
-    reader = Reader(rating_scale=rating_scale)
-    trainset = Dataset.load_from_df(train, reader).build_full_trainset()
-    testset = Dataset.load_from_df(test, reader).build_full_trainset().build_testset()
-    trainset_for_testing = Dataset.load_from_df(pd.DataFrame(train_affinities),
-                                                reader).build_full_trainset().build_testset()
-
-    def use_algo(algo, name):
-        start = time.time()
-        algo.fit(trainset)
-        predictions = algo.test(testset)
-        end = time.time()
-        total_time = end - start
-        rmse = accuracy.rmse(predictions, verbose=False)
-        mae = accuracy.mae(predictions, verbose=False)
-
-        ex_ee = extraction_efficiency(algo, train_affinities, validation_affinities, surprise_get_topk, items)
-
-        train_predictions = algo.test(trainset_for_testing)
-        train_rmse = accuracy.rmse(train_predictions, verbose=False)
-        train_mae = accuracy.mae(train_predictions, verbose=False)
-        train_predictions = [p.est for p in train_predictions]
-        predictions = [p.est for p in predictions]
-        stats = {"algo": name, "rmse": rmse, "mae": mae,
-                 "train_rmse": train_rmse, "train_mae": train_mae, "time": total_time}
-        stats.update(ex_ee["metrics"])
-        return stats
-
-    algo_map = {"svd": SVD(**(algo_params["svd"] if "svd" in algo_params else {})),
-                "svdpp": SVDpp(**(algo_params["svdpp"] if "svdpp" in algo_params else {})),
-                "baseline": BaselineOnly(bsl_options={'method': 'sgd'}),
-                "clustering": CoClustering(
-                    **(algo_params["clustering"] if "clustering" in algo_params else dict(n_cltr_u=5, n_cltr_i=10))),
-                "normal": NormalPredictor()}
-    results = list(map(lambda a: use_algo(algo_map[a], a), algo))
-    return None, results, None, None
-
-
-def test_hybrid(train_affinities, validation_affinities, users, items, hyperparameters,
-                get_data_mappers, rating_scale, algo):
-    from . import GCNRecommender, GCNRetriever, GcnNCF
-    embedding_mapper, user_data, item_data = get_data_mappers()
-    kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
-    if algo in ["gcn_hybrid"]:
-        recsys = GCNRecommender(embedding_mapper=embedding_mapper,
-                                knn_params=hyperparameters["knn_params"],
-                                rating_scale=rating_scale,
-                                n_collaborative_dims=hyperparameters["n_dims"])
-    elif algo in ["gcn_ncf"]:
-        recsys = GcnNCF(embedding_mapper=embedding_mapper,
-                        knn_params=hyperparameters["knn_params"],
-                        rating_scale=rating_scale,
-                        n_collaborative_dims=hyperparameters["n_dims"])
-    elif algo in ["gcn_retriever"]:
-        recsys = GCNRetriever(embedding_mapper=embedding_mapper,
-                              knn_params=hyperparameters["knn_params"],
-                              rating_scale=rating_scale,
-                              n_collaborative_dims=hyperparameters["n_dims"])
+def test_algorithm(train_affinities: List[Edge], validation_affinities: List[Edge],
+                   nodes: List[Node], node_types: Set[NodeType], hyperparameters,
+                   get_data_mappers, algo, node_type: NodeType):
+    from . import GCNRecommender, GcnNCF, ContentRecommendation
+    embedding_mapper, node_data = get_data_mappers()
+    kwargs = dict(hyperparameters=copy.deepcopy(hyperparameters))
+    algo_map = dict(gcn=GCNRecommender, gcn_ncf=GcnNCF, content=ContentRecommendation)
+    recsys = algo_map[algo](embedding_mapper=embedding_mapper,
+                                node_types=node_types,
+                                n_dims=hyperparameters["n_dims"])
 
     start = time.time()
-    _, _ = recsys.fit(users, items,
-                      train_affinities, **kwargs)
+    _ = recsys.fit(nodes, train_affinities, node_data, **kwargs)
     end = time.time()
     total_time = end - start
 
-    default_preds = recsys.predict([(users[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl"),
-                                    (users[0], items[0]),
-                                    ("21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl",
-                                     "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl"),
-                                    ("21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl", items[0])])
+    rnode = Node(list(node_types)[0], "eifjcchchbniufclvfdugvhnftdvjculhjitjihuncce")
+    rnode2 = Node(list(node_types)[0], "eifjcchchbnirdjknkrvtfkbfurvjdfjhllbddtbvicb")
+    default_preds = recsys.predict([(train_affinities[0].src, rnode),
+                                    (train_affinities[0].src, train_affinities[0].dst),
+                                    (rnode, rnode2),
+                                    (rnode2, train_affinities[0].src)])
     print("Default Preds = ", default_preds)
     assert np.sum(np.isnan(default_preds)) == 0
 
     res2 = {"algo": algo, "time": total_time}
     predictions, actuals, stats = get_prediction_details(recsys, train_affinities,
-                                                                                    validation_affinities,
-                                                                                    model_get_topk, items)
+                                                         validation_affinities,
+                                                         model_get_topk, node_type)
     res2.update(stats)
     results = [res2]
 
     return recsys, results, predictions, actuals
 
 
-def test_content_only(train_affinities, validation_affinities, users, items, hyperparameters,
-                      get_data_mappers, rating_scale):
-    from . import ContentRecommendation
-    embedding_mapper, user_data, item_data = get_data_mappers()
-    kwargs = dict(user_data=user_data, item_data=item_data, hyperparameters=copy.deepcopy(hyperparameters))
-    recsys = ContentRecommendation(embedding_mapper=embedding_mapper,
-                                   knn_params=hyperparameters["knn_params"],
-                                   rating_scale=rating_scale, n_dims=hyperparameters["n_dims"], )
-    start = time.time()
-    _, _ = recsys.fit(users, items,
-                      train_affinities, **kwargs)
-    end = time.time()
-    total_time = end - start
-    assert np.sum(np.isnan(recsys.predict([(users[0], "21120eifjcchchbninlkkgjnjjegrjbldkidbuunfjghbdhfl")]))) == 0
-
-    res = {"algo": "Content-Only", "time": total_time}
-    predictions, actuals, stats = get_prediction_details(recsys, train_affinities,
-                                                                                    validation_affinities,
-                                                                                    model_get_topk, items)
-    res.update(stats)
-
-    results = [res]
-    return recsys, results, predictions, actuals
-
-
-def test_once(train_affinities, validation_affinities, users, items, hyperparamters_dict,
-              get_data_mappers, rating_scale, algos):
+def test_multiple_algorithms(train_affinities, validation_affinities, nodes: List[Node], node_types: Set[NodeType],
+                             hyperparamters_dict, get_data_mappers, algos, node_type: NodeType):
     results = []
     recs = []
     assert len(algos) > 0
     algos = set(algos)
-    assert len(algos - {"surprise", "content_only", "gcn_hybrid", "gcn_retriever", "gcn_ncf"}) == 0
-    if "surprise" in algos:
-        hyperparameters_surprise = hyperparamters_dict["surprise"]
-        _, surprise_results, _, _ = test_surprise(train_affinities,
-                                                  validation_affinities,
-                                                  algo=hyperparameters_surprise[
-                                                      "algos"],
-                                                  algo_params=hyperparameters_surprise,
-                                                  rating_scale=rating_scale, )
-        results.extend(surprise_results)
-
-    if "content_only" in algos:
-        hyperparameters = hyperparamters_dict["content_only"]
-        content_rec, res, _, _ = test_content_only(train_affinities,
-                                                   validation_affinities, users,
-                                                   items, hyperparameters,
-                                                   get_data_mappers, rating_scale)
+    assert len(algos - {"content", "gcn", "gcn_ncf"}) == 0
+    for algo in algos:
+        hyperparameters = hyperparamters_dict[algo]
+        rec, res, _, _ = test_algorithm(train_affinities,
+                                        validation_affinities, nodes, node_types, hyperparameters,
+                                        get_data_mappers, algo, node_type)
         results.extend(res)
-        recs.append(content_rec)
-
-    if "gcn_hybrid" in algos:
-        hyperparameters = hyperparamters_dict["gcn_hybrid"]
-        gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
-                                         items, hyperparameters, get_data_mappers,
-                                         rating_scale,
-                                         algo="gcn_hybrid")
-        results.extend(res)
-        recs.append(gcn_rec)
-
-    if "gcn_retriever" in algos:
-        hyperparameters = hyperparamters_dict["gcn_retriever"]
-        gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
-                                         items, hyperparameters, get_data_mappers,
-                                         rating_scale,
-                                         algo="gcn_retriever")
-        results.extend(res)
-        recs.append(gcn_rec)
-
-    if "gcn_ncf" in algos:
-        hyperparameters = hyperparamters_dict["gcn_ncf"]
-        gcn_rec, res, _, _ = test_hybrid(train_affinities, validation_affinities, users,
-                                         items, hyperparameters, get_data_mappers,
-                                         rating_scale,
-                                         algo="gcn_ncf")
-        results.extend(res)
-        recs.append(gcn_rec)
+        recs.append(rec)
 
     return recs, results
 
@@ -378,7 +225,8 @@ def display_results(results: List[Dict[str, Any]]):
     return df
 
 
-def get_prediction_details(recsys, train_affinities, validation_affinities, model_get_topk, items):
+def get_prediction_details(recsys, train_affinities: List[Edge], validation_affinities: List[Edge],
+                           model_get_topk, node_type: NodeType):
     def get_details(recsys, affinities):
         predictions = np.array(recsys.predict([(u, i) for u, i, r in affinities]))
         if np.sum(np.isnan(predictions)) > 0:
@@ -387,91 +235,37 @@ def get_prediction_details(recsys, train_affinities, validation_affinities, mode
                                  np.array(affinities)[np.isnan(predictions)])
 
         actuals = np.array([r for u, i, r in affinities])
-        rmse = np.sqrt(np.mean(np.square(actuals - predictions)))
-        mae = np.mean(np.abs(actuals - predictions))
-        return predictions, actuals, rmse, mae
+        return predictions, actuals
 
-    predictions, actuals, rmse, mae = get_details(recsys, validation_affinities)
-    train_predictions, _, train_rmse, train_mae = get_details(recsys, train_affinities)
-    ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, items)
-    stats = {"rmse": rmse, "mae": mae,
-             "train_rmse": train_rmse, "train_mae": train_mae}
-    stats.update(ex_ee["metrics"])
-    return predictions, actuals, stats
+    predictions, actuals = get_details(recsys, validation_affinities)
+    train_predictions, _ = get_details(recsys, train_affinities)
+    ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, node_type)
+    return predictions, actuals, ex_ee["metrics"]
 
 
-def get_small_subset(df_user, df_item, ratings,
-                     cores):
-    import networkx as nx
-    users = list(set([u for u, i, r in ratings.values]))
-    items = list(set([i for u, i, r in ratings.values]))
-    user_id_to_index = bidict(zip(users, list(range(len(users)))))
-    item_id_to_index = bidict(zip(items, list(range(len(users), len(users) + len(items)))))
-    G = nx.Graph([(user_id_to_index[u], item_id_to_index[i]) for u, i, r in ratings.values])
-    k_core_edges = list(nx.k_core(G, k=cores).edges())
-    users = set([user_id_to_index.inverse[u] for u, i in k_core_edges if u in user_id_to_index.inverse])
-    items = set([item_id_to_index.inverse[i] for u, i in k_core_edges if i in item_id_to_index.inverse])
-    df_user = df_user[df_user.user.isin(set(users))]
-    ratings = ratings[(ratings.user.isin(users)) & (ratings.item.isin(items))]
-    df_item = df_item[df_item["item"].isin(set(ratings.item))]
-    return df_user, df_item, ratings
+def run_model_for_hpo(nodes: List[Node], edges: List[Tuple[Edge, bool]],
+                      node_types: Set[NodeType], retrieved_node_type: NodeType,
+                      prepare_data_mappers,
+                      hyperparameters, algo,):
+    ndcg, ncf_ndcg = run_models_for_testing(nodes, edges, node_types, retrieved_node_type,
+                                                  prepare_data_mappers,
+                                                  [algo], {algo: hyperparameters},
+                                                  display=False)
+
+    return ndcg, ncf_ndcg
 
 
-def run_model_for_hpo(df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale,
-                      hyperparameters, algo, report,
-                      enable_kfold=False, provided_test_set=True):
-    if enable_kfold:
-        provided_test_set = False
-    rmse, ndcg, ncf_ndcg = run_models_for_testing(df_user, df_item, user_item_affinities,
-                                                  prepare_data_mappers, rating_scale,
-                                                  [algo], {algo: hyperparameters}, provided_test_set=provided_test_set,
-                                                  enable_kfold=enable_kfold, display=False, report=report)
+def run_models_for_testing(nodes: List[Node], edges: List[Tuple[Edge, bool]],
+                           node_types: Set[NodeType], retrieved_node_type: NodeType,
+                           prepare_data_mappers,
+                           algos, hyperparamters_dict,
+                           display=True):
+    train_affinities = [e for e, t in edges if not t]
+    validation_affinities = [e for e, t in edges if t]
 
-    return rmse, ndcg, ncf_ndcg
-
-
-def run_models_for_testing(df_user, df_item, user_item_affinities,
-                           prepare_data_mappers, rating_scale,
-                           algos, hyperparamters_dict, enable_baselines=False,
-                           enable_kfold=False, display=True, report=lambda x, y: None,
-                           provided_test_set=False):
-    from sklearn.model_selection import StratifiedKFold
-    from sklearn.model_selection import train_test_split
-    if not enable_kfold:
-        if provided_test_set:
-            train_affinities = [(u, i, r) for u, i, r, t in user_item_affinities if not t]
-            validation_affinities = [(u, i, r) for u, i, r, t in user_item_affinities if t]
-        else:
-            train_affinities, validation_affinities = train_test_split(user_item_affinities, test_size=0.2,
-                                                                       stratify=[u for u, i, r in user_item_affinities])
-
-        recs, results = test_once(train_affinities, validation_affinities,
-                                                             list(df_user.user.values),
-                                                             list(df_item.item.values),
-                                                             hyperparamters_dict,
-                                                             prepare_data_mappers, rating_scale, algos)
-        rmse, ndcg, ncf_ndcg = results[0]['rmse'], results[0]['ndcg@100'], results[0]['ncf_ndcg']
-
-    else:
-        X = np.array(user_item_affinities)
-        y = np.array([u for u, i, r in user_item_affinities])
-        skf = StratifiedKFold(n_splits=5)
-        results = []
-        step = 0
-        for train_index, test_index in skf.split(X, y):
-            train_affinities, validation_affinities = X[train_index], X[test_index]
-            train_affinities = [(u, i, int(r)) for u, i, r in train_affinities]
-            validation_affinities = [(u, i, int(r)) for u, i, r in validation_affinities]
-            #
-            recs, res = test_once(train_affinities, validation_affinities, list(df_user.user.values),
-                                         list(df_item.item.values),
-                                         hyperparamters_dict,
-                                         prepare_data_mappers, rating_scale, algos)
-
-            rmse, ndcg, ncf_ndcg = res[0]['rmse'], res[0]['ndcg@100'], res[0]['ncf_ndcg']
-            report({"rmse": rmse, "ndcg": ndcg, "ncf_ndcg": ncf_ndcg}, step)
-            step += 1
-            results.extend(res)
+    recs, results = test_multiple_algorithms(train_affinities, validation_affinities, nodes, node_types,
+                                             hyperparamters_dict, prepare_data_mappers, algos, retrieved_node_type)
+    ndcg, ncf_ndcg = results[0]['ndcg@100'], results[0]['ncf_ndcg']
 
     if display:
         results = display_results(results)
@@ -479,5 +273,5 @@ def run_models_for_testing(df_user, df_item, user_item_affinities,
     else:
         results = pd.DataFrame.from_records(results)
         results = results.groupby(["algo"]).mean().reset_index()
-        rmse, ndcg, ncf_ndcg = results["rmse"].values[0], results["ndcg@100"].values[0], results["ncf_ndcg"].values[0]
-    return rmse, ndcg, ncf_ndcg
+        ndcg, ncf_ndcg = results["ndcg@100"].values[0], results["ncf_ndcg"].values[0]
+    return ndcg, ncf_ndcg

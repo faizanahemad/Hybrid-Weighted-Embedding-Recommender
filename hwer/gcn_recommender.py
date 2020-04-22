@@ -72,6 +72,7 @@ class GCNRecommender(HybridRecommender):
         margin = hyperparams["margin"] if "margin" in hyperparams else 1.0
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         enable_gcn = hyperparams["enable_gcn"] if "enable_gcn" in hyperparams else False
+        ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 2
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
         total_nodes = len(nodes)
@@ -105,10 +106,10 @@ class GCNRecommender(HybridRecommender):
             dst = torch.LongTensor(dst)
             weights = torch.FloatTensor(weights)
 
-            ns = 2
-            src_neg = torch.randint(0, total_nodes, (len(src) * ns,))
-            dst_neg = torch.randint(0, total_nodes, (len(src) * ns,))
-            weights_neg = torch.tensor([0.0] * len(src) * ns)
+            ns = int(ns_proportion * len(src))
+            src_neg = torch.randint(0, total_nodes, (ns,))
+            dst_neg = torch.randint(0, total_nodes, (ns,))
+            weights_neg = torch.tensor([0.0] * ns)
             src = torch.cat((src, src_neg), 0)
             dst = torch.cat((dst, dst_neg), 0)
             weights = torch.cat((weights, weights_neg), 0)
@@ -198,3 +199,11 @@ class GCNRecommender(HybridRecommender):
         gc.collect()
         assert np.sum(np.isnan(collaborative_node_vectors)) == 0
         return collaborative_node_vectors
+
+    def __build_prediction_network__(self, nodes: List[Node],
+                                     edges: List[Edge],
+                                     content_vectors: np.ndarray, collaborative_vectors: np.ndarray,
+                                     nodes_to_idx: Dict[Node, int],
+                                     hyperparams: Dict):
+
+        pass

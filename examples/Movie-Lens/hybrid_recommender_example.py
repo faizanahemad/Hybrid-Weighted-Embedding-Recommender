@@ -22,12 +22,12 @@ from hwer.utils import str2bool
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--algo', type=str, metavar='N', nargs='+',
-                    choices=["gcn_hybrid", "gcn_ncf", "surprise", "gcn_retriever", "content_only"],
+                    choices=["gcn", "gcn_ncf", "content"],
                     help='')
     ap.add_argument('--dataset', type=str, default="100K", metavar='N',
                     choices=["100K", "1M", "20M"],
                     help='')
-    ap.add_argument('--enable_baselines', type=str2bool, default=False, metavar='N',
+    ap.add_argument('--retrieved_node_type', type=str, required=True, metavar='N',
                     help='')
     ap.add_argument('--test_method', type=str, default="ncf", metavar='N',
                     choices=["ncf", "vae_cf", "stratified-split", "random-split"],
@@ -35,20 +35,18 @@ if __name__ == '__main__':
     args = vars(ap.parse_args())
     algos = args["algo"]
     dataset = args["dataset"]
-    enable_baselines = args["enable_baselines"]
+    retrieved_node_type = args["retrieved_node_type"]
     test_method = args["test_method"]
     hyperparamters_dict = get_best_params(dataset)
 
-    df_user, df_item, user_item_affinities, prepare_data_mappers, rating_scale, ts = build_dataset(dataset, fold=1, test_method=test_method)
+    nodes, edges, node_types, prepare_data_mappers = build_dataset(dataset, fold=1, test_method=test_method)
     #
     verbose = 2  # if os.environ.get("LOGLEVEL") in ["DEBUG", "INFO"] else 0
 
-    print("Total Samples Taken = %s, |Users| = %s |Items| = %s, Rating scale = %s" % (
-        len(user_item_affinities), len(df_user.user.values), len(df_item.item.values), rating_scale))
-    run_models_for_testing(df_user, df_item, user_item_affinities,
-                           prepare_data_mappers, rating_scale,
+    print("Total Nodes = %s, Edges = %s, |Node Types| = %s" % (len(nodes), len(edges), len(node_types)))
+    run_models_for_testing(nodes, edges, node_types, retrieved_node_type,
+                           prepare_data_mappers,
                            algos, hyperparamters_dict,
-                           enable_baselines=enable_baselines,
-                           enable_kfold=False, display=True, provided_test_set=ts)
+                           display=True)
     for algo in algos:
         print("algo = %s" % algo, hyperparamters_dict[algo])

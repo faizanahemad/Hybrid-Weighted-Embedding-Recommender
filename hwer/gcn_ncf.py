@@ -117,10 +117,10 @@ class GcnNCF(GCNRecommender):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 1
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 2
         ncf_layers = hyperparams["ncf_layers"] if "ncf_layers" in hyperparams else 2
-        gcn_batch_size = hyperparams["gcn_batch_size"] if "gcn_batch_size" in hyperparams else 512
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 1
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.0
-        gcn_kernel_l2 = hyperparams["gcn_kernel_l2"] if "gcn_kernel_l2" in hyperparams else 0.0
+        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
@@ -140,7 +140,7 @@ class GcnNCF(GCNRecommender):
         gcn = GraphSageWithSampling(n_content_dims, self.n_dims, gcn_layers, g_train,
                                     gaussian_noise, conv_depth)
         model = RecImplicitEmbedding(gcn=gcn, ncf=ncf)
-        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=gcn_kernel_l2)
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
         generate_training_samples = self.__data_gen_fn__(nodes, edges, node_to_index,
                                                          hyperparams)
 
@@ -186,14 +186,14 @@ class GcnNCF(GCNRecommender):
             loss = 0.0
             def train(src, dst, weights):
 
-                src_batches = src.split(gcn_batch_size)
-                dst_batches = dst.split(gcn_batch_size)
-                weights_batches = weights.split(gcn_batch_size)
+                src_batches = src.split(batch_size)
+                dst_batches = dst.split(batch_size)
+                weights_batches = weights.split(batch_size)
                 model.train()
                 seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
-                    gcn_batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                    batch_size * 2,  # number of nodes to compute at a time, HACK 2
                     5,  # number of neighbors for each node
                     gcn_layers,  # number of layers in GCN
                     seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
@@ -232,7 +232,7 @@ class GcnNCF(GCNRecommender):
         model.eval()
         sampler = dgl.contrib.sampling.NeighborSampler(
             g_train,
-            gcn_batch_size,
+            batch_size,
             5,
             gcn_layers,
             seed_nodes=torch.arange(g_train.number_of_nodes()),
@@ -241,7 +241,7 @@ class GcnNCF(GCNRecommender):
             shuffle=False,
             num_workers=self.cpu
         )
-        src_batches = torch.arange(g_train.number_of_nodes()).split(gcn_batch_size)
+        src_batches = torch.arange(g_train.number_of_nodes()).split(batch_size)
         with torch.no_grad():
             h = []
             for src, nf in zip(src_batches, sampler):
@@ -323,7 +323,6 @@ class GcnNCF(GCNRecommender):
         # probas = probas ** (3/4)
         # probas = probas / probas.sum()
         # probas = torch.tensor(probas)
-
 
         def get_samples():
             src, dst, weights, error_weights = [], [], [], []
@@ -485,7 +484,7 @@ class GcnNCF(GCNRecommender):
     def predict(self, node_pairs: List[Tuple[Node, Node]]) -> List[float]:
         model = self.prediction_artifacts["model"]
         h = self.prediction_artifacts["h"]
-        total_users = self.prediction_artifacts["total_users"]
+        total_nodes = self.prediction_artifacts["total_nodes"]
         batch_size = 512
 
         uip = [(self.nodes_to_idx[u] + 1 if u in self.nodes_to_idx else 0,
