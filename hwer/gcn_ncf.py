@@ -47,19 +47,29 @@ class GcnNCF(GCNRecommender):
         walker.preprocess_transition_probs()
         samples_per_node = int(np.ceil(positive_samples / total_nodes))
         from collections import Counter
-        random_walks = max(100, samples_per_node * 20)
+        random_walks = max(500, samples_per_node * 50)
+
+        def results_filter(cnt):
+            results = cnt.most_common()
+            top_n = results[:5]
+            results = list(filter(lambda res: res[1] / random_walks >= ps_threshold, results))
+            results = results[:samples_per_node]
+            if len(results) == 0:
+                results = top_n
+            return results
+
+
 
         def sampler():
             for i in range(total_nodes):
-                cnt = Counter()
+                cnt_2 = Counter()
+                cnt_3 = Counter()
                 for walk in walker.simulate_walks_single_node(i, random_walks, 4):
                     if len(walk) >= 3 and walk[2] != i:
-                        cnt.update([walk[2]])
+                        cnt_2.update([walk[2]])
                     if len(walk) == 4 and walk[3] != i:
-                        cnt.update([walk[3]])
-                results = cnt.most_common()
-                results = list(filter(lambda res: res[1]/random_walks >= ps_threshold, results))
-                results = results[:min(samples_per_node, int(len(cnt)/10))]
+                        cnt_3.update([walk[3]])
+                results = results_filter(cnt_2) + results_filter(cnt_3)
                 for r, w in results:
                     yield i, r, w/random_walks
 
@@ -268,10 +278,11 @@ class GcnNCF(GCNRecommender):
 
         src, dst, weights, ratings = generate_training_samples()
         model.train()
-
+        positive_examples, negative_examples = torch.sum(ratings == 1).item(), torch.sum(ratings == 0).item()
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
         params = sum([np.prod(p.size()) for p in model_parameters])
-        self.log.info("Built KNN Network, model params = %s, examples = %s, model = \n%s", params, len(src), model)
+        self.log.info("Built KNN Network, model params = %s, examples = %s, positive = %s, negative = %s, model = \n%s",
+                      params, len(src), positive_examples, negative_examples, model)
         gc.collect()
         for epoch in range(epochs):
             model.train()
@@ -426,7 +437,9 @@ class GcnNCF(GCNRecommender):
 
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
         params = sum([np.prod(p.size()) for p in model_parameters])
-        self.log.info("Built Prediction Network, model params = %s, examples = %s, model = \n%s", params, len(src), model)
+        positive_examples, negative_examples = torch.sum(ratings == 1).item(), torch.sum(ratings == 0).item()
+        self.log.info("Built Prediction Network, model params = %s, examples = %s, positive = %s, negative = %s, model = \n%s",
+                      params, len(src), positive_examples, negative_examples, model)
 
         for epoch in range(epochs):
             gc.collect()
