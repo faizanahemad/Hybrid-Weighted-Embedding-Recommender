@@ -19,6 +19,7 @@ from .embed import BaseEmbed
 from .gcn import *
 from .ncf import *
 
+# Take out the training loop with a loss builder fn
 
 class GcnNCF(GCNRecommender):
     def __init__(self, embedding_mapper: Dict[NodeType, Dict[str, BaseEmbed]], node_types: Set[str],
@@ -32,6 +33,8 @@ class GcnNCF(GCNRecommender):
                                     edges: List[Edge],
                                     hyperparams):
         ps_proportion = hyperparams["ps_proportion"] if "ps_proportion" in hyperparams else 1
+        ps_threshold = hyperparams["ps_threshold"] if "ps_threshold" in hyperparams else 0.1
+        assert ps_threshold < 1
         positive_samples = len(edges) * ps_proportion
         node_to_index = self.nodes_to_idx
         p = 0.25
@@ -54,11 +57,11 @@ class GcnNCF(GCNRecommender):
                         cnt.update([walk[2]])
                     if len(walk) == 4 and walk[3] != i:
                         cnt.update([walk[3]])
-                results = cnt.most_common(min(samples_per_node, int(len(cnt)/20)))
-                if len(results) > 0:
-                    results, _ = zip(*results)
-                for r in results:
-                    yield i, r
+                results = cnt.most_common()
+                results = list(filter(lambda res: res[1]/random_walks >= ps_threshold, results))
+                results = results[:min(samples_per_node, int(len(cnt)/10))]
+                for r, w in results:
+                    yield i, r, w/random_walks
 
         return sampler
 
@@ -91,9 +94,128 @@ class GcnNCF(GCNRecommender):
                 candidates = list(all_nodes - neighbours)
                 results = random.choices(candidates, k=samples_per_node[i])
                 for r in results:
-                    yield i, r
+                    yield i, r, 1.0
 
         return nsg
+
+    def __word2vec_neg_sampler(self, nodes: List[Node],
+                        edges: List[Edge], hyperparams):
+
+        ns_w2v_proportion = hyperparams["ns_w2v_proportion"] if "ns_w2v_proportion" in hyperparams else 0
+        ns_w2v_exponent = hyperparams["ns_w2v"] if "ns_w2v" in hyperparams else 3.0 / 4.0
+        proportion = int(len(edges) * ns_w2v_proportion)
+        from collections import Counter
+        total_nodes = len(nodes)
+        node_to_index = self.nodes_to_idx
+        edge_list = [(node_to_index[e.src], node_to_index[e.dst], e.weight) for e in edges]
+        edge_list.extend([(i, i, 1) for i in range(total_nodes)])
+        proba_dict = Counter([u for u, i, r in edge_list])
+        proba_dict.update(Counter([i for u, i, r in edge_list]))
+
+        probas = np.array([proba_dict[i] for i in range(total_nodes)])
+        probas = probas ** ns_w2v_exponent
+        probas = probas / probas.sum()
+        probas = torch.tensor(probas)
+
+        def sampler():
+            src_neg = torch.multinomial(probas, proportion, replacement=True)
+            dst_neg = torch.multinomial(probas, proportion, replacement=True)
+            weights_neg = torch.tensor([1.0] * len(src_neg))
+            return src_neg, dst_neg, weights_neg
+        return sampler
+
+    def __simple_neg_sampler__(self, nodes: List[Node],
+                               edges: List[Edge], hyperparams):
+        ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
+        total_nodes = len(nodes)
+        positive_samples = len(edges)
+        ns = ns_proportion
+        negative_samples = int(ns * positive_samples)
+
+        def sampler():
+            src_neg = torch.randint(0, total_nodes, (negative_samples,))
+            dst_neg = torch.randint(0, total_nodes, (negative_samples,))
+            weights_neg = torch.tensor([1.0] * negative_samples)
+            return src_neg, dst_neg, weights_neg
+
+        return sampler
+
+    def __data_gen_fn__(self, nodes: List[Node],
+                        edges: List[Edge], node_to_index: Dict[Node, int],
+                        hyperparams):
+        nsh = hyperparams["nsh"] if "nsh" in hyperparams else 0
+        ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
+        ps_proportion = hyperparams["ps_proportion"] if "ps_proportion" in hyperparams else 0
+        ps_threshold = hyperparams["ps_threshold"] if "ps_threshold" in hyperparams else 0.1
+        ns_w2v_proportion = hyperparams["ns_w2v_proportion"] if "ns_w2v_proportion" in hyperparams else 0
+        ns_w2v_exponent = hyperparams["ns_w2v_exponent"] if "ns_w2v_exponent" in hyperparams else 3.0/4.0
+
+        affinities = [(node_to_index[e.src], node_to_index[e.dst], e.weight) for e in edges]
+        total_nodes = len(nodes)
+        hard_negative_gen = self.__negative_pair_generator__(nodes, edges, hyperparams)
+        pos_gen = self.__positive_pair_generator__(nodes, edges, hyperparams)
+        w2v_neg_gen = self.__word2vec_neg_sampler(nodes, edges, hyperparams)
+        simple_neg_gen = self.__simple_neg_sampler__(nodes, edges, hyperparams)
+
+        def get_samples():
+            np.random.shuffle(affinities)
+            src, dst, weights, ratings = [], [], [], []
+            for u, v, r in affinities:
+                src.append(u)
+                dst.append(v)
+                weights.append(r)
+                ratings.append(1.0)
+
+            src = torch.LongTensor(src)
+            dst = torch.LongTensor(dst)
+            weights = torch.FloatTensor(weights)
+            ratings = torch.FloatTensor(ratings)
+
+            if ns_proportion > 0:
+                src_neg, dst_neg, weights_neg = simple_neg_gen()
+                ratings_neg = torch.zeros_like(src_neg, dtype=torch.float)
+                src = torch.cat((src, src_neg), 0)
+                dst = torch.cat((dst, dst_neg), 0)
+                weights = torch.cat((weights, weights_neg), 0)
+                ratings = torch.cat((ratings, ratings_neg), 0)
+
+            if ns_w2v_proportion > 0:
+                src_neg, dst_neg, weights_neg = w2v_neg_gen()
+                src = torch.cat((src, src_neg), 0)
+                dst = torch.cat((dst, dst_neg), 0)
+                weights = torch.cat((weights, weights_neg), 0)
+                ratings_neg = torch.zeros_like(src_neg, dtype=torch.float)
+                ratings = torch.cat((ratings, ratings_neg), 0)
+
+            if nsh > 0:
+                h_src_neg, h_dst_neg, weights_hneg = zip(*hard_negative_gen())
+                weights_hneg = torch.FloatTensor(weights_hneg)
+                h_src_neg = torch.LongTensor(h_src_neg)
+                h_dst_neg = torch.LongTensor(h_dst_neg)
+                src = torch.cat((src, h_src_neg), 0)
+                dst = torch.cat((dst, h_dst_neg), 0)
+                weights = torch.cat((weights, weights_hneg), 0)
+                ratings_neg = torch.zeros_like(h_src_neg, dtype=torch.float)
+                ratings = torch.cat((ratings, ratings_neg), 0)
+
+            if ps_proportion > 0:
+                h_src_pos, h_dst_pos, h_weight_pos = zip(*pos_gen())
+                weights_pos = torch.FloatTensor(h_weight_pos)
+                h_src_pos = torch.LongTensor(h_src_pos)
+                h_dst_pos = torch.LongTensor(h_dst_pos)
+                src = torch.cat((src, h_src_pos), 0)
+                dst = torch.cat((dst, h_dst_pos), 0)
+                weights = torch.cat((weights, weights_pos), 0)
+                ratings_pos = torch.ones_like(h_src_pos, dtype=torch.float)
+                ratings = torch.cat((ratings, ratings_pos), 0)
+
+            shuffle_idx = torch.randperm(len(src))
+            src = src[shuffle_idx]
+            dst = dst[shuffle_idx]
+            weights = weights[shuffle_idx]
+            ratings = ratings[shuffle_idx]
+            return src, dst, weights, ratings
+        return get_samples
 
     def __build_collaborative_embeddings__(self,
                                            nodes: List[Node],
@@ -144,37 +266,7 @@ class GcnNCF(GCNRecommender):
         generate_training_samples = self.__data_gen_fn__(nodes, edges, node_to_index,
                                                          hyperparams)
 
-        def get_samples():
-            src, dst, weights, error_weights = [], [], [], []
-            for (u, v), r in generate_training_samples():
-                src.append(u)
-                dst.append(v)
-                weights.append(1.0)
-                error_weights.append(r)
-
-            positive_samples = len(src)
-            src = torch.LongTensor(src)
-            dst = torch.LongTensor(dst)
-            weights = torch.FloatTensor(weights)
-
-            ns = ns_proportion
-            negative_samples = int(ns * positive_samples)
-            src_neg = torch.randint(0, total_nodes, (negative_samples,))
-            dst_neg = torch.randint(0, total_nodes, (negative_samples,))
-            weights_neg = torch.tensor([0.0] * negative_samples)
-            src = torch.cat((src, src_neg), 0)
-            dst = torch.cat((dst, dst_neg), 0)
-            weights = torch.cat((weights, weights_neg), 0)
-
-            shuffle_idx = torch.randperm(positive_samples + negative_samples)
-            src = src[shuffle_idx]
-            dst = dst[shuffle_idx]
-            weights = weights[shuffle_idx]
-            self.log.info("Generate Samples: Positive = %s, Negative = %s", positive_samples, negative_samples)
-            return src, dst, weights
-
-        src, dst, weights = get_samples()
-
+        src, dst, weights, ratings = generate_training_samples()
         model.train()
 
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -182,14 +274,15 @@ class GcnNCF(GCNRecommender):
         self.log.info("Built KNN Network, model params = %s, examples = %s, model = \n%s", params, len(src), model)
         gc.collect()
         for epoch in range(epochs):
+            model.train()
             start = time.time()
             loss = 0.0
-            def train(src, dst, weights):
+            def train(src, dst, weights, ratings):
 
                 src_batches = src.split(batch_size)
                 dst_batches = dst.split(batch_size)
                 weights_batches = weights.split(batch_size)
-                model.train()
+                ratings_batches = ratings.split(batch_size)
                 seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
@@ -205,7 +298,7 @@ class GcnNCF(GCNRecommender):
 
                 # Training
                 total_loss = 0.0
-                for s, d, nodeflow, r in zip(src_batches, dst_batches, sampler, weights_batches):
+                for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
                     h_src, h_dst = model.forward(nodeflow, s, d)
                     score = (h_src * h_dst).sum(1)
                     score = (score + 1)/2
@@ -217,10 +310,10 @@ class GcnNCF(GCNRecommender):
                     opt.step()
                 return total_loss / len(src_batches)
 
-            loss += train(src, dst, weights)
+            loss += train(src, dst, weights, ratings)
             gen_time = time.time()
             if epoch < epochs - 1:
-                src, dst, weights = get_samples()
+                src, dst, weights, ratings = generate_training_samples()
             gen_time = time.time() - gen_time
 
             total_time = time.time() - start
@@ -264,7 +357,7 @@ class GcnNCF(GCNRecommender):
                                      content_vectors: np.ndarray, collaborative_vectors: np.ndarray,
                                      nodes_to_idx: Dict[Node, int],
                                      hyperparams: Dict):
-        from .gcn import build_dgl_graph, GraphSageWithSampling, get_score
+        from .gcn import build_dgl_graph, GraphSageWithSampling
         import torch
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         cpu = torch.device('cpu')
@@ -312,77 +405,17 @@ class GcnNCF(GCNRecommender):
                                     gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
-        hard_negative_gen = self.__negative_pair_generator__(nodes, edges, hyperparams)
-        pos_gen = self.__positive_pair_generator__(nodes, edges, hyperparams)
 
-        # from collections import Counter
-        # proba_dict = Counter([u for u, i, r in user_item_affinities])
-        # proba_dict.update(Counter([i for u, i, r in user_item_affinities]))
-        #
-        # probas = np.array([proba_dict[i] for i in range(total_users + total_items)])
-        # probas = probas ** (3/4)
-        # probas = probas / probas.sum()
-        # probas = torch.tensor(probas)
+        generate_training_samples = self.__data_gen_fn__(nodes, edges, self.nodes_to_idx,
+                                                         hyperparams)
 
         def get_samples():
-            src, dst, weights, error_weights = [], [], [], []
-            for u, v, r in edge_list:
-                src.append(u)
-                dst.append(v)
-                weights.append(1.0)
-                error_weights.append(r)
+            src, dst, weights, ratings = generate_training_samples()
+            src = src + 1
+            dst = dst + 1
+            return src, dst, weights, ratings
 
-            src = torch.LongTensor(src)
-            dst = torch.LongTensor(dst)
-            weights = torch.FloatTensor(weights)
-
-            ns = ns_proportion
-            positive_samples = len(src)
-            negative_samples = int(ns * positive_samples)
-            src_neg = torch.randint(0, total_nodes, (negative_samples,))
-            dst_neg = torch.randint(0, total_nodes, (negative_samples,))
-            # src_neg2 = torch.multinomial(probas, positive_samples, replacement=True)
-            # dst_neg2 = torch.multinomial(probas, positive_samples, replacement=True)
-            # weights_neg2 = torch.tensor([0.0] * len(src_neg2))
-
-            weights_neg = torch.tensor([0.0] * negative_samples)
-            src = torch.cat((src, src_neg), 0)
-            dst = torch.cat((dst, dst_neg), 0)
-            weights = torch.cat((weights, weights_neg), 0)
-            #
-            # src = torch.cat((src, src_neg2), 0)
-            # dst = torch.cat((dst, dst_neg2), 0)
-            # weights = torch.cat((weights, weights_neg2), 0)
-
-            if nsh > 0:
-                h_src_neg, h_dst_neg = zip(*hard_negative_gen())
-                weights_hneg = torch.tensor([0.0] * len(h_src_neg))
-                h_src_neg = torch.LongTensor(h_src_neg)
-                h_dst_neg = torch.LongTensor(h_dst_neg)
-                h_src_neg = h_src_neg + 1
-                h_dst_neg = h_dst_neg + 1
-                src = torch.cat((src, h_src_neg), 0)
-                dst = torch.cat((dst, h_dst_neg), 0)
-                weights = torch.cat((weights, weights_hneg), 0)
-
-            if ps_proportion > 0:
-                h_src_pos, h_dst_pos = zip(*pos_gen())
-                weights_pos = torch.tensor([1.0] * len(h_src_pos))
-                h_src_pos = torch.LongTensor(h_src_pos)
-                h_dst_pos = torch.LongTensor(h_dst_pos)
-                h_src_pos = h_src_pos + 1
-                h_dst_pos = h_dst_pos + 1
-                src = torch.cat((src, h_src_pos), 0)
-                dst = torch.cat((dst, h_dst_pos), 0)
-                weights = torch.cat((weights, weights_pos), 0)
-
-            shuffle_idx = torch.randperm(len(src))
-            src = src[shuffle_idx]
-            dst = dst[shuffle_idx]
-            weights = weights[shuffle_idx]
-            return src, dst, weights
-
-        src, dst, rating = get_samples()
+        src, dst, weights, ratings = get_samples()
         # total_examples = len(src) - 10_000
         # src, dst, rating = src[:total_examples], dst[:total_examples], rating[:total_examples]
         # opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
@@ -400,18 +433,14 @@ class GcnNCF(GCNRecommender):
             start = time.time()
             model.train()
 
-            # shuffle_idx = torch.randperm(len(src))
-            # src = src[shuffle_idx]
-            # dst = dst[shuffle_idx]
-            # rating = rating[shuffle_idx]
-
-            def train(src, dst, rating):
+            def train(src, dst, weights, rating):
                 import gc
                 gc.collect()
 
                 src_batches = src.split(batch_size)
                 dst_batches = dst.split(batch_size)
                 rating_batches = rating.split(batch_size)
+                weights_batches = weights.split(batch_size)
 
                 seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
 
@@ -429,7 +458,7 @@ class GcnNCF(GCNRecommender):
 
                 # Training
                 total_loss = 0.0
-                for s, d, r, nf in zip(src_batches, dst_batches, rating_batches, sampler):
+                for s, d, r, w, nf in zip(src_batches, dst_batches, rating_batches, weights_batches, sampler):
                     score = model(nf, s, d)
                     # loss = ((score - r) ** 2)
                     loss = -1 * (r * torch.log(score + margin) + (1-r)*torch.log(1 - score + margin))
@@ -442,9 +471,9 @@ class GcnNCF(GCNRecommender):
                     # scheduler.step()
                 return total_loss / len(src_batches)
 
-            loss = train(src, dst, rating)
+            loss = train(src, dst, weights, ratings)
             if epoch < epochs - 1:
-                src, dst, rating = get_samples()
+                src, dst, weights, ratings = get_samples()
                 # src, dst, rating = src[:total_examples], dst[:total_examples], rating[:total_examples]
 
             total_time = time.time() - start

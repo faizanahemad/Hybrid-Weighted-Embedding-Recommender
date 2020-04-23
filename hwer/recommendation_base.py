@@ -141,8 +141,10 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         return results
 
     def get_embeddings(self, nodes: List[Node]):
-        indexes = [self.nodes_to_idx[node] if node in self.nodes_to_idx else 0 for node in nodes]
-        embeddings = self.vectors[indexes]
+        indexes = np.array([self.nodes_to_idx[node] if node in self.nodes_to_idx else -1 for node in nodes])
+        mask = indexes == -1
+        embeddings = self.vectors[np.where(indexes >= 0, indexes, 0)]
+        embeddings[mask] = np.clip(embeddings[mask], 1e-6, 1e-5)
         return embeddings
 
     def get_average_embeddings(self, entities: List[Node]):
@@ -165,5 +167,5 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         embedding = np.average(embedding_list, axis=0)
         node_dist_list = self.knn.query(embedding, node_type, k=k)
         scores = self.predict([(anchor, node) for node, dist in node_dist_list])
-        results = list(sorted(zip([n for n in node_dist_list], scores), key=operator.itemgetter(1), reverse=True))
+        results = list(sorted(zip([n for n, d in node_dist_list], scores), key=operator.itemgetter(1), reverse=True))
         return results
