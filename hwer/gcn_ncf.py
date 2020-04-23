@@ -58,8 +58,6 @@ class GcnNCF(GCNRecommender):
                 results = top_n
             return results
 
-
-
         def sampler():
             for i in range(total_nodes):
                 cnt_2 = Counter()
@@ -227,6 +225,67 @@ class GcnNCF(GCNRecommender):
             return src, dst, weights, ratings
         return get_samples
 
+    def __train__(self, model, g_train, epochs, data_generator, hyperparams, loss_fn):
+        lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
+        epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
+        batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
+        kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
+        gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 2
+        margin = hyperparams["margin"] if "margin" in hyperparams else 0.0
+        src, dst, weights, ratings = data_generator()
+        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+        import gc
+        gc.collect()
+        positive_examples, negative_examples = torch.sum(ratings == 1).item(), torch.sum(ratings == 0).item()
+        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        self.log.info("Start Model training...,\nmodel params = %s, examples = %s, positive = %s, negative = %s, \nModel = \n%s",
+                      params, len(src), positive_examples, negative_examples, model)
+        gc.collect()
+        model.train()
+        for epoch in range(epochs):
+            start = time.time()
+            def train(src, dst, weights, ratings):
+                src_batches = src.split(batch_size)
+                dst_batches = dst.split(batch_size)
+                weights_batches = weights.split(batch_size)
+                ratings_batches = ratings.split(batch_size)
+                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
+                sampler = dgl.contrib.sampling.NeighborSampler(
+                    g_train,  # the graph
+                    batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                    5,  # number of neighbors for each node
+                    gcn_layers,  # number of layers in GCN
+                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
+                    prefetch=True,  # whether to prefetch the NodeFlows
+                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
+                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
+                    num_workers=self.cpu,
+                )
+
+                # Training
+                total_loss = 0.0
+                for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
+                    loss = loss_fn(model, s, d, nodeflow, w, r)
+                    total_loss = total_loss + loss.item()
+                    opt.zero_grad()
+                    loss.backward()
+                    opt.step()
+                return total_loss / len(src_batches)
+
+            loss = train(src, dst, weights, ratings)
+            gen_time = time.time()
+            if epoch < epochs - 1:
+                src, dst, weights, ratings = data_generator()
+            gen_time = time.time() - gen_time
+
+            total_time = time.time() - start
+            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
+                                               epochs) + ' Training loss: %.4f' % loss +
+                          ' || Time Taken: %.1f' % total_time + " Generator time: %.1f" % gen_time)
+
+
+
     def __build_collaborative_embeddings__(self,
                                            nodes: List[Node],
                                            edges: List[Edge],
@@ -287,7 +346,6 @@ class GcnNCF(GCNRecommender):
         for epoch in range(epochs):
             model.train()
             start = time.time()
-            loss = 0.0
             def train(src, dst, weights, ratings):
 
                 src_batches = src.split(batch_size)
@@ -321,7 +379,7 @@ class GcnNCF(GCNRecommender):
                     opt.step()
                 return total_loss / len(src_batches)
 
-            loss += train(src, dst, weights, ratings)
+            loss = train(src, dst, weights, ratings)
             gen_time = time.time()
             if epoch < epochs - 1:
                 src, dst, weights, ratings = generate_training_samples()
