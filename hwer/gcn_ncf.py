@@ -51,11 +51,12 @@ class GcnNCF(GCNRecommender):
 
         def results_filter(cnt):
             results = cnt.most_common()
-            top_n = results[:5]
+            # top_n = results[:5]
             results = list(filter(lambda res: res[1] / random_walks >= ps_threshold, results))
+            # results = list(filter(lambda res: res[1] / random_walks >= 5, results))
             results = results[:samples_per_node]
-            if len(results) == 0:
-                results = top_n
+            # if len(results) == 0:
+                # results = top_n
             return results
 
         def sampler():
@@ -69,7 +70,7 @@ class GcnNCF(GCNRecommender):
                         cnt_3.update([walk[3]])
                 results = results_filter(cnt_2) + results_filter(cnt_3)
                 for r, w in results:
-                    yield i, r, w/random_walks
+                    yield i, r, np.sqrt(w/random_walks)
 
         return sampler
 
@@ -343,6 +344,7 @@ class GcnNCF(GCNRecommender):
             score = (h_src * h_dst).sum(1)
             score = (score + 1) / 2
             loss = -1 * (ratings * torch.log(score + margin) + (1 - ratings) * torch.log(1 - score + margin))
+            loss = loss * weights
             loss = loss.mean()
             return loss
 
@@ -441,6 +443,7 @@ class GcnNCF(GCNRecommender):
         def loss_fn(model, src, dst, nodeflow, weights, ratings):
             score = model(nodeflow, src, dst)
             loss = -1 * (ratings * torch.log(score + margin) + (1 - ratings) * torch.log(1 - score + margin))
+            loss = loss * weights
             loss = loss.mean()
             return loss
 
