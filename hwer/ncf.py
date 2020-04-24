@@ -91,7 +91,7 @@ class NCFEmbedding(nn.Module):
 
 
 class RecImplicitEmbedding(nn.Module):
-    def __init__(self, gcn: GraphSageWithSampling, ncf: NCFEmbedding):
+    def __init__(self, gcn: GraphConvModule, ncf: NCFEmbedding):
         super(RecImplicitEmbedding, self).__init__()
         self.gcn = gcn
         self.ncf = ncf
@@ -104,7 +104,7 @@ class RecImplicitEmbedding(nn.Module):
 
 
 class RecImplicit(nn.Module):
-    def __init__(self, gcn: GraphSageWithSampling, ncf: NCF):
+    def __init__(self, gcn: GraphConvModule, ncf: NCF):
         super(RecImplicit, self).__init__()
         self.gcn = gcn
         self.ncf = ncf

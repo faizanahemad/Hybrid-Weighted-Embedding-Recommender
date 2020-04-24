@@ -332,8 +332,8 @@ class GcnNCF(GCNRecommender):
         n_content_dims = content_vectors.shape[1]
         ncf = NCFEmbedding(self.n_dims, ncf_layers, gaussian_noise,
                            content_vectors)
-        gcn = GraphSageWithSampling(n_content_dims, self.n_dims, gcn_layers, g_train,
-                                    gaussian_noise, conv_depth)
+        gcn = GraphConvModule(n_content_dims, self.n_dims, gcn_layers, g_train,
+                              gaussian_noise, conv_depth)
         model = RecImplicitEmbedding(gcn=gcn, ncf=ncf)
         generate_training_samples = self.__data_gen_fn__(nodes, edges, node_to_index,
                                                          hyperparams)
@@ -382,7 +382,7 @@ class GcnNCF(GCNRecommender):
                                      content_vectors: np.ndarray, collaborative_vectors: np.ndarray,
                                      nodes_to_idx: Dict[Node, int],
                                      hyperparams: Dict):
-        from .gcn import build_dgl_graph, GraphSageWithSampling
+        from .gcn import build_dgl_graph, GraphConvModule
         import torch
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         cpu = torch.device('cpu')
@@ -426,8 +426,8 @@ class GcnNCF(GCNRecommender):
         g_train.readonly()
         ncf = NCF(self.n_dims, ncf_layers, gaussian_noise,
                   content_vectors, ncf_gcn_balance)
-        gcn = GraphSageWithSampling(n_content_dims, self.n_dims, gcn_layers, g_train,
-                                    gaussian_noise, conv_depth)
+        gcn = GraphConvModule(n_content_dims, self.n_dims, gcn_layers, g_train,
+                              gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
         generate_training_samples = self.__data_gen_fn__(nodes, edges, self.nodes_to_idx,
                                                          hyperparams)

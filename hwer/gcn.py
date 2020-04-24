@@ -51,6 +51,15 @@ def init_bias(param):
     nn.init.normal_(param, 0, 0.001)
 
 
+def build_content_layer(in_dims, out_dims, noise):
+    w1 = nn.Linear(in_dims, out_dims)
+    init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
+    w = nn.Linear(out_dims, out_dims)
+    init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
+    proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w, nn.LeakyReLU(0.1)]
+    return nn.Sequential(*proj)
+
+
 def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
     init_weight(layer.weight, initializer, nonlinearity, nonlinearity_param)
     try:
@@ -59,9 +68,9 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
         pass
 
 
-class GraphSageConvWithSamplingBase(nn.Module):
+class GraphConv(nn.Module):
     def __init__(self, feature_size, out_dims, prediction_layer, gaussian_noise, depth):
-        super(GraphSageConvWithSamplingBase, self).__init__()
+        super(GraphConv, self).__init__()
         layers = []
         depth = max(1, depth)
         for i in range(depth - 1):
@@ -107,28 +116,18 @@ class GraphSageConvWithSamplingBase(nn.Module):
         return self.post_process(h_concat, h, h_agg)
 
 
-class GraphSageWithSampling(nn.Module):
+class GraphConvModule(nn.Module):
     def __init__(self, n_content_dims, feature_size, n_layers, G,
                  gaussian_noise, conv_depth,
                  init_node_vectors=None,):
-        super(GraphSageWithSampling, self).__init__()
+        super(GraphConvModule, self).__init__()
 
         self.feature_size = feature_size
         self.n_layers = n_layers
-        GraphSageConvWithSampling = GraphSageConvWithSamplingBase
         width = 2
-
         noise = GaussianNoise(gaussian_noise)
-        w1 = nn.Linear(n_content_dims, feature_size * width)
-        init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        w = nn.Linear(feature_size * width, feature_size * width)
-        init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
-        proj = [w1, nn.LeakyReLU(negative_slope=0.1)]
-        self.proj = nn.Sequential(*proj)
-
-
+        self.proj = build_content_layer(n_content_dims, feature_size * width, noise)
         self.G = G
-        import math
         embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
         if init_node_vectors is None:
@@ -145,8 +144,8 @@ class GraphSageWithSampling(nn.Module):
         segments = min(n_layers, 4)
         segments = list(reversed([2**i for i in range(segments)]))
         for i in range(n_layers):
-            conv = GraphSageConvWithSampling(feature_size * width, feature_size * (width if i < n_layers - 1 else 1),
-                                             i == n_layers - 1, gaussian_noise, conv_depth)
+            conv = GraphConv(feature_size * width, feature_size * (width if i < n_layers - 1 else 1),
+                             i == n_layers - 1, gaussian_noise, conv_depth)
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
@@ -237,24 +236,19 @@ class ResnetConv(nn.Module):
         return {'h': h_new, 'h_residue': h_agg}
 
 
-class GraphResnetWithSampling(nn.Module):
+class GraphResnetConvModule(nn.Module):
     def __init__(self, n_content_dims, feature_size, n_layers, G,
                  gaussian_noise, conv_depth,
                  init_node_vectors=None,):
-        super(GraphResnetWithSampling, self).__init__()
+        super(GraphResnetConvModule, self).__init__()
 
         self.feature_size = feature_size
         self.n_layers = n_layers
         noise = GaussianNoise(gaussian_noise)
 
         width = 2
-        w1 = nn.Linear(n_content_dims, feature_size * width)
-        init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        proj = [w1, nn.LeakyReLU(negative_slope=0.1)]
-        self.proj = nn.Sequential(*proj)
-
+        self.proj = build_content_layer(n_content_dims, feature_size * width, noise)
         self.G = G
-        import math
         embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
         if init_node_vectors is None:
@@ -300,31 +294,6 @@ class GraphResnetWithSampling(nn.Module):
         result = nf.layers[self.n_layers].data['h']
         assert (result != result).sum() == 0
         return result
-
-
-class GraphSAGETripletEmbedding(nn.Module):
-    def __init__(self, gcn, margin=1.0):
-        super(GraphSAGETripletEmbedding, self).__init__()
-
-        self.gcn = gcn
-        self.margin = margin
-
-    def forward(self, nf, src, dst, neg):
-        h_output = self.gcn(nf)
-        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
-        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        h_neg = h_output[nf.map_from_parent_nid(-1, neg, True)]
-        d_a_b = 1.0 - (h_src * h_dst).sum(1)
-        d_a_c = 1.0 - (h_src * h_neg).sum(1)
-        score = d_a_b + self.margin - d_a_c
-
-        f = 0.1
-        a = 2*f
-        b = -1 * f ** 2
-
-        score = torch.where(score >= f, score ** 2, a * score + b)
-        # score = torch.where(score >= 0.1, score ** 2, 0.2 * score)
-        return score
 
 
 class GraphSAGELogisticEmbedding(nn.Module):

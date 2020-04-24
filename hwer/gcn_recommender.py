@@ -26,12 +26,12 @@ class GCNRecommender(HybridRecommender):
 
     def __get_triplet_gcn_model__(self, n_content_dims, n_collaborative_dims, gcn_layers,
                                   conv_depth, g_train, triplet_vectors, margin, gaussian_noise):
-        from .gcn import GraphSAGETripletEmbedding, GraphSageWithSampling, GraphSAGENegativeSamplingEmbedding, \
-            GraphResnetWithSampling, GraphSAGELogisticEmbedding, GraphSAGELogisticEmbeddingv2
+        from .gcn import GraphConvModule, GraphSAGENegativeSamplingEmbedding, \
+            GraphResnetConvModule, GraphSAGELogisticEmbedding, GraphSAGELogisticEmbeddingv2
         self.log.info("Getting Triplet Model for GCN")
-        model = GraphSAGELogisticEmbedding(GraphSageWithSampling(n_content_dims, n_collaborative_dims,
-                                                                gcn_layers, g_train,
-                                                                gaussian_noise, conv_depth, triplet_vectors))
+        model = GraphSAGELogisticEmbedding(GraphConvModule(n_content_dims, n_collaborative_dims,
+                                                           gcn_layers, g_train,
+                                                           gaussian_noise, conv_depth, triplet_vectors))
         return model
 
     def __data_gen_fn__(self, nodes: List[Node],
