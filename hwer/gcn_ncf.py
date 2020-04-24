@@ -225,7 +225,7 @@ class GcnNCF(GCNRecommender):
             return src, dst, weights, ratings
         return get_samples
 
-    def __train__(self, model, g_train, epochs, data_generator, hyperparams, loss_fn):
+    def __train__(self, model, g_train, data_generator, hyperparams, loss_fn):
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -234,6 +234,13 @@ class GcnNCF(GCNRecommender):
         margin = hyperparams["margin"] if "margin" in hyperparams else 0.0
         src, dst, weights, ratings = data_generator()
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+        # total_examples = len(src) - 10_000
+        # src, dst, rating = src[:total_examples], dst[:total_examples], rating[:total_examples]
+        # opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
+        # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
+        #                                                 steps_per_epoch=int(
+        #                                                     np.ceil(total_examples / batch_size)),
+        #                                                 div_factor=50, final_div_factor=100)
         import gc
         gc.collect()
         positive_examples, negative_examples = torch.sum(ratings == 1).item(), torch.sum(ratings == 0).item()
@@ -243,48 +250,45 @@ class GcnNCF(GCNRecommender):
                       params, len(src), positive_examples, negative_examples, model)
         gc.collect()
         model.train()
+
+        def train_one_epoch(src, dst, weights, ratings):
+            src_batches = src.split(batch_size)
+            dst_batches = dst.split(batch_size)
+            weights_batches = weights.split(batch_size)
+            ratings_batches = ratings.split(batch_size)
+            seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
+            sampler = dgl.contrib.sampling.NeighborSampler(
+                g_train,  # the graph
+                batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                5,  # number of neighbors for each node
+                gcn_layers,  # number of layers in GCN
+                seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
+                prefetch=True,  # whether to prefetch the NodeFlows
+                add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
+                shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
+                num_workers=self.cpu,
+            )
+
+            total_loss = 0.0
+            for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
+                loss = loss_fn(model, s, d, nodeflow, w, r)
+                total_loss = total_loss + loss.item()
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+            return total_loss / len(src_batches)
+
         for epoch in range(epochs):
             start = time.time()
-            def train(src, dst, weights, ratings):
-                src_batches = src.split(batch_size)
-                dst_batches = dst.split(batch_size)
-                weights_batches = weights.split(batch_size)
-                ratings_batches = ratings.split(batch_size)
-                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
-                sampler = dgl.contrib.sampling.NeighborSampler(
-                    g_train,  # the graph
-                    batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                    5,  # number of neighbors for each node
-                    gcn_layers,  # number of layers in GCN
-                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
-                    prefetch=True,  # whether to prefetch the NodeFlows
-                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
-                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
-                    num_workers=self.cpu,
-                )
-
-                # Training
-                total_loss = 0.0
-                for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
-                    loss = loss_fn(model, s, d, nodeflow, w, r)
-                    total_loss = total_loss + loss.item()
-                    opt.zero_grad()
-                    loss.backward()
-                    opt.step()
-                return total_loss / len(src_batches)
-
-            loss = train(src, dst, weights, ratings)
+            loss = train_one_epoch(src, dst, weights, ratings)
             gen_time = time.time()
             if epoch < epochs - 1:
                 src, dst, weights, ratings = data_generator()
             gen_time = time.time() - gen_time
-
             total_time = time.time() - start
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
                                                epochs) + ' Training loss: %.4f' % loss +
                           ' || Time Taken: %.1f' % total_time + " Generator time: %.1f" % gen_time)
-
-
 
     def __build_collaborative_embeddings__(self,
                                            nodes: List[Node],
@@ -331,66 +335,18 @@ class GcnNCF(GCNRecommender):
         gcn = GraphSageWithSampling(n_content_dims, self.n_dims, gcn_layers, g_train,
                                     gaussian_noise, conv_depth)
         model = RecImplicitEmbedding(gcn=gcn, ncf=ncf)
-        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
         generate_training_samples = self.__data_gen_fn__(nodes, edges, node_to_index,
                                                          hyperparams)
 
-        src, dst, weights, ratings = generate_training_samples()
-        model.train()
-        positive_examples, negative_examples = torch.sum(ratings == 1).item(), torch.sum(ratings == 0).item()
-        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-        params = sum([np.prod(p.size()) for p in model_parameters])
-        self.log.info("Built KNN Network, model params = %s, examples = %s, positive = %s, negative = %s, model = \n%s",
-                      params, len(src), positive_examples, negative_examples, model)
-        gc.collect()
-        for epoch in range(epochs):
-            model.train()
-            start = time.time()
-            def train(src, dst, weights, ratings):
+        def loss_fn(model, src, dst, nodeflow, weights, ratings):
+            h_src, h_dst = model.forward(nodeflow, src, dst)
+            score = (h_src * h_dst).sum(1)
+            score = (score + 1) / 2
+            loss = -1 * (ratings * torch.log(score + margin) + (1 - ratings) * torch.log(1 - score + margin))
+            loss = loss.mean()
+            return loss
 
-                src_batches = src.split(batch_size)
-                dst_batches = dst.split(batch_size)
-                weights_batches = weights.split(batch_size)
-                ratings_batches = ratings.split(batch_size)
-                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
-                sampler = dgl.contrib.sampling.NeighborSampler(
-                    g_train,  # the graph
-                    batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                    5,  # number of neighbors for each node
-                    gcn_layers,  # number of layers in GCN
-                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
-                    prefetch=True,  # whether to prefetch the NodeFlows
-                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
-                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
-                    num_workers=self.cpu,
-                )
-
-                # Training
-                total_loss = 0.0
-                for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
-                    h_src, h_dst = model.forward(nodeflow, s, d)
-                    score = (h_src * h_dst).sum(1)
-                    score = (score + 1)/2
-                    loss = -1 * (r * torch.log(score + margin) + (1 - r) * torch.log(1 - score + margin))
-                    loss = loss.mean()
-                    total_loss = total_loss + loss.item()
-                    opt.zero_grad()
-                    loss.backward()
-                    opt.step()
-                return total_loss / len(src_batches)
-
-            loss = train(src, dst, weights, ratings)
-            gen_time = time.time()
-            if epoch < epochs - 1:
-                src, dst, weights, ratings = generate_training_samples()
-            gen_time = time.time() - gen_time
-
-            total_time = time.time() - start
-            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
-                                               epochs) + ' Training loss: %.4f' % loss +
-                          ' || Time Taken: %.1f' % total_time + " Generator time: %.1f" % gen_time)
-
-            #
+        self.__train__(model, g_train, generate_training_samples, hyperparams, loss_fn)
         model.eval()
         sampler = dgl.contrib.sampling.NeighborSampler(
             g_train,
@@ -473,8 +429,6 @@ class GcnNCF(GCNRecommender):
         gcn = GraphSageWithSampling(n_content_dims, self.n_dims, gcn_layers, g_train,
                                     gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
-        opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
-
         generate_training_samples = self.__data_gen_fn__(nodes, edges, self.nodes_to_idx,
                                                          hyperparams)
 
@@ -484,74 +438,13 @@ class GcnNCF(GCNRecommender):
             dst = dst + 1
             return src, dst, weights, ratings
 
-        src, dst, weights, ratings = get_samples()
-        # total_examples = len(src) - 10_000
-        # src, dst, rating = src[:total_examples], dst[:total_examples], rating[:total_examples]
-        # opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
-        # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
-        #                                                 steps_per_epoch=int(
-        #                                                     np.ceil(total_examples / batch_size)),
-        #                                                 div_factor=50, final_div_factor=100)
+        def loss_fn(model, src, dst, nodeflow, weights, ratings):
+            score = model(nodeflow, src, dst)
+            loss = -1 * (ratings * torch.log(score + margin) + (1 - ratings) * torch.log(1 - score + margin))
+            loss = loss.mean()
+            return loss
 
-        model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
-        params = sum([np.prod(p.size()) for p in model_parameters])
-        positive_examples, negative_examples = torch.sum(ratings == 1).item(), torch.sum(ratings == 0).item()
-        self.log.info("Built Prediction Network, model params = %s, examples = %s, positive = %s, negative = %s, model = \n%s",
-                      params, len(src), positive_examples, negative_examples, model)
-
-        for epoch in range(epochs):
-            gc.collect()
-            start = time.time()
-            model.train()
-
-            def train(src, dst, weights, rating):
-                import gc
-                gc.collect()
-
-                src_batches = src.split(batch_size)
-                dst_batches = dst.split(batch_size)
-                rating_batches = rating.split(batch_size)
-                weights_batches = weights.split(batch_size)
-
-                seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
-
-                sampler = dgl.contrib.sampling.NeighborSampler(
-                    g_train,  # the graph
-                    batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                    5,  # number of neighbors for each node
-                    gcn_layers,  # number of layers in GCN
-                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
-                    prefetch=True,  # whether to prefetch the NodeFlows
-                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
-                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
-                    num_workers=self.cpu,
-                )
-
-                # Training
-                total_loss = 0.0
-                for s, d, r, w, nf in zip(src_batches, dst_batches, rating_batches, weights_batches, sampler):
-                    score = model(nf, s, d)
-                    # loss = ((score - r) ** 2)
-                    loss = -1 * (r * torch.log(score + margin) + (1-r)*torch.log(1 - score + margin))
-                    loss = loss.mean()
-                    total_loss = total_loss + loss.item()
-
-                    opt.zero_grad()
-                    loss.backward()
-                    opt.step()
-                    # scheduler.step()
-                return total_loss / len(src_batches)
-
-            loss = train(src, dst, weights, ratings)
-            if epoch < epochs - 1:
-                src, dst, weights, ratings = get_samples()
-                # src, dst, rating = src[:total_examples], dst[:total_examples], rating[:total_examples]
-
-            total_time = time.time() - start
-
-            self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
-                                               epochs) + ' Training loss: %.4f' % loss + '|| Time Taken: %.1f' % total_time)
-
+        self.__train__(model, g_train, get_samples, hyperparams, loss_fn)
         gc.collect()
         model.eval()
         sampler = dgl.contrib.sampling.NeighborSampler(
