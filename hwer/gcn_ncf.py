@@ -51,12 +51,8 @@ class GcnNCF(GCNRecommender):
 
         def results_filter(cnt):
             results = cnt.most_common()
-            # top_n = results[:5]
             results = list(filter(lambda res: res[1] / random_walks >= ps_threshold, results))
-            # results = list(filter(lambda res: res[1] / random_walks >= 5, results))
             results = results[:samples_per_node]
-            # if len(results) == 0:
-                # results = top_n
             return results
 
         def sampler():

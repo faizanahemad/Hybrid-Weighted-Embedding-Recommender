@@ -1,4 +1,4 @@
-params = dict(n_dims=64, n_content_dims=256,
+params = dict(n_dims=64,  use_content=True,
               link_prediction_params=dict(lr=0.001, epochs=25, batch_size=1024, margin=0.0,
                                           gcn_layers=3, ncf_layers=2, conv_depth=2,
                                           ncf_gcn_balance=1.0,
