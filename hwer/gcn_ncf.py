@@ -12,7 +12,6 @@ import dill
 import sys
 logger = getLogger(__name__)
 logger.addHandler(logging.StreamHandler(sys.stdout))
-from .gcn_recommender import GCNRecommender
 
 from .recommendation_base import RecommendationBase, NodeType, Node, Edge, FeatureName
 from .embed import BaseEmbed
