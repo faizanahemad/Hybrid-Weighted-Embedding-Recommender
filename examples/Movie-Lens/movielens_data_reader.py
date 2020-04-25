@@ -76,31 +76,9 @@ def get_data_mapper(df_user, df_item, dataset="100K"):
 
 def get_data_reader(dataset="100K"):
 
-    def read_data_100K(**kwargs):
-        users = pd.read_csv("100K/users.csv", sep="\t")
-        movies = pd.read_csv("100K/movies.csv", sep="\t")
-        # Based on GC-MC Paper and code: https://github.com/riannevdberg/gc-mc/blob/master/gcmc/preprocessing.py#L326
-        test_method = kwargs["test_method"] if "test_method" in kwargs else "random-split"
-        if test_method == "random-split" or test_method == "stratified-split":
-            if "fold" in kwargs and type(kwargs["fold"]) == int and 1 <= kwargs["fold"] <= 5:
-                train_file = "100K/ml-100k/u%s.base" % kwargs["fold"]
-                test_file = "100K/ml-100k/u%s.test" % kwargs["fold"]
-            else:
-                train_file = "100K/ml-100k/u1.base"
-                test_file = "100K/ml-100k/u1.test"
-            train = pd.read_csv(train_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
-            test = pd.read_csv(test_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])[["user", "item", "rating"]]
-        elif test_method == "ncf":
-            train_file = "100K/ml-100k/u.data"
-            train = pd.read_csv(train_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])
-            train["rating"] = 1
-            test = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).tail(1))
-            train = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).head(-1))
-        else:
-            raise ValueError()
-        train = train[["user", "item", "rating"]]
-        test = test[["user", "item", "rating"]]
-
+    def process_100K_1M(users, movies, train, test):
+        train = train[["user", "item", "rating", "timestamp"]]
+        test = test[["user", "item", "rating", "timestamp"]]
         user_stats = train.groupby(["user"])["rating"].agg(["mean", "count"]).reset_index()
         item_stats = train.groupby(["item"])["rating"].agg(["mean", "count"]).reset_index()
         user_stats.rename(columns={"mean": "user_rating_mean", "count": "user_rating_count"}, inplace=True)
@@ -131,6 +109,30 @@ def get_data_reader(dataset="100K"):
         users = users.fillna(users.mean())
         return users, movies, ratings
 
+    def read_data_100K(**kwargs):
+        users = pd.read_csv("100K/users.csv", sep="\t")
+        movies = pd.read_csv("100K/movies.csv", sep="\t")
+        # Based on GC-MC Paper and code: https://github.com/riannevdberg/gc-mc/blob/master/gcmc/preprocessing.py#L326
+        test_method = kwargs["test_method"] if "test_method" in kwargs else "random-split"
+        if test_method == "random-split" or test_method == "stratified-split":
+            if "fold" in kwargs and type(kwargs["fold"]) == int and 1 <= kwargs["fold"] <= 5:
+                train_file = "100K/ml-100k/u%s.base" % kwargs["fold"]
+                test_file = "100K/ml-100k/u%s.test" % kwargs["fold"]
+            else:
+                train_file = "100K/ml-100k/u1.base"
+                test_file = "100K/ml-100k/u1.test"
+            train = pd.read_csv(train_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])
+            test = pd.read_csv(test_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])
+        elif test_method == "ncf":
+            train_file = "100K/ml-100k/u.data"
+            train = pd.read_csv(train_file, sep="\t", header=None, names=["user", "item", "rating", "timestamp"])
+            train["rating"] = 1
+            test = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).tail(1))
+            train = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).head(-1))
+        else:
+            raise ValueError()
+        return process_100K_1M(users, movies, train, test)
+
     def read_data_1M(**kwargs):
         test_method = kwargs["test_method"] if "test_method" in kwargs else "random-split"
         users = pd.read_csv("1M/users.csv", sep="\t", engine="python")
@@ -152,37 +154,7 @@ def get_data_reader(dataset="100K"):
             train["rating"] = 1
             test = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).tail(1))
             train = train.groupby('user', group_keys=False).apply(lambda x: x.sort_values(["timestamp"]).head(-1))
-        train = train[["user", "item", "rating"]]
-        test = test[["user", "item", "rating"]]
-        train["is_test"] = False
-        test["is_test"] = True
-        user_stats = train.groupby(["user"])["rating"].agg(["mean", "count"]).reset_index()
-        item_stats = train.groupby(["item"])["rating"].agg(["mean", "count"]).reset_index()
-        user_stats.rename(columns={"mean": "user_rating_mean", "count": "user_rating_count"}, inplace=True)
-        item_stats.rename(columns={"mean": "item_rating_mean", "count": "item_rating_count"}, inplace=True)
-        ratings = pd.concat((train, test))
-        users['user_id'] = users['user_id'].astype(str)
-        movies['movie_id'] = movies['movie_id'].astype(str)
-
-        movies.genres = movies.genres.fillna("[]").apply(literal_eval)
-        movies['year'] = movies['year'].fillna(-1).astype(int)
-        movies.keywords = movies.keywords.fillna("[]").apply(literal_eval)
-        movies.keywords = movies.keywords.apply(lambda x: " ".join(x))
-        movies.tagline = movies.tagline.fillna("")
-        text_columns = ["title", "keywords", "overview", "tagline", "original_title"]
-        movies[text_columns] = movies[text_columns].fillna("")
-        movies['text'] = movies["title"] + " " + movies["keywords"] + " " + movies["overview"] + " " + movies["tagline"] + " " + \
-                         movies["original_title"]
-        movies["title_length"] = movies["title"].apply(len)
-        movies["overview_length"] = movies["overview"].apply(len)
-        movies["runtime"] = movies["runtime"].fillna(0.0)
-        movies.rename(columns={"movie_id": "item"}, inplace=True)
-        users.rename(columns={"user_id": "user"}, inplace=True)
-        users = users.merge(user_stats, how="left", on="user")
-        movies = movies.merge(item_stats, how="left", on="item")
-        movies = movies.fillna(movies.mean())
-        users = users.fillna(users.mean())
-        return users, movies, ratings
+        return process_100K_1M(users, movies, train, test)
 
     if dataset == "100K":
         return read_data_100K
@@ -209,7 +181,14 @@ def get_graph_builder(dataset):
         user_nodes = [Node("user", n) for n in df_user.user.values]
         item_nodes = [Node("item", i) for i in df_item.item.values]
         nodes = user_nodes + item_nodes
-        assert len(ratings.columns) == 4
+        assert len(ratings.columns) == 5
+        ts = ratings.groupby(["user"])[["timestamp"]].agg(["min", "max"]).reset_index()
+        ts.columns = ["user", "min", "max"]
+        ts["range"] = ts["max"] - ts["min"]
+        ratings = ratings.merge(ts[["user", "min", "range"]], on="user")
+        ratings["timestamp"] = (ratings["timestamp"] - ratings["min"])/ratings["range"]
+        ratings["rating"] = ratings["timestamp"] + ratings["rating"]
+        ratings = ratings[["user", "item", "rating", "is_test"]]
         user_item_affinities = [(Node("user", row[0]), Node("item", row[1]),
                                  float(row[2]), bool(row[3])) for row in ratings.values]
         edges = [(Edge(src, dst, weight), train_test) for src, dst, weight, train_test in
