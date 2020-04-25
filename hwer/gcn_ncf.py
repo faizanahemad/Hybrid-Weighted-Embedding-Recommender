@@ -316,6 +316,7 @@ class GcnNCF(GCNRecommender):
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
+        label_smoothing_alpha = hyperparams["label_smoothing_alpha"] if "label_smoothing_alpha" in hyperparams else 0.1
         total_nodes = len(nodes)
         assert np.sum(np.isnan(content_vectors)) == 0
         import gc
@@ -336,6 +337,7 @@ class GcnNCF(GCNRecommender):
                                                          hyperparams)
 
         def loss_fn(model, src, dst, nodeflow, weights, ratings):
+            ratings = (1 - label_smoothing_alpha) * ratings + label_smoothing_alpha/2
             h_src, h_dst = model.forward(nodeflow, src, dst)
             score = (h_src * h_dst).sum(1)
             score = (score + 1) / 2
@@ -405,6 +407,7 @@ class GcnNCF(GCNRecommender):
         nsh = hyperparams["nsh"] if "nsh" in hyperparams else 1.0
         ps_proportion = hyperparams["ps_proportion"] if "ps_proportion" in hyperparams else 1
         ncf_gcn_balance = hyperparams["ncf_gcn_balance"] if "ncf_gcn_balance" in hyperparams else 1.0
+        label_smoothing_alpha = hyperparams["label_smoothing_alpha"] if "label_smoothing_alpha" in hyperparams else 0.1
 
         # For unseen users and items creating 2 mock nodes
         content_vectors = np.concatenate((np.zeros((1, content_vectors.shape[1])), content_vectors))
@@ -437,6 +440,7 @@ class GcnNCF(GCNRecommender):
             return src, dst, weights, ratings
 
         def loss_fn(model, src, dst, nodeflow, weights, ratings):
+            ratings = (1 - label_smoothing_alpha) * ratings + label_smoothing_alpha / 2
             score = model(nodeflow, src, dst)
             loss = -1 * (ratings * torch.log(score + margin) + (1 - ratings) * torch.log(1 - score + margin))
             loss = loss * weights
