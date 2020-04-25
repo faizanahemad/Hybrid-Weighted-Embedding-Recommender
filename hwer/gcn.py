@@ -294,62 +294,7 @@ class GraphResnetConvModule(nn.Module):
         result = nf.layers[self.n_layers].data['h']
         assert (result != result).sum() == 0
         return result
-
-
-class GraphSAGELogisticEmbedding(nn.Module):
-    def __init__(self, gcn, **kwargs):
-        super(GraphSAGELogisticEmbedding, self).__init__()
-
-        self.gcn = gcn
-
-    def forward(self, nf, src, dst, label):
-        h_output = self.gcn(nf)
-        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
-        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        dist = (h_src * h_dst).sum(1)
-        dist = dist + 1  # 0 to 2 range
-        dist = dist / 2  # 0 to 1 range
-        score = (dist - label) ** 2
-        return score
-
-
-class GraphSAGELogisticEmbeddingv2(nn.Module):
-    def __init__(self, gcn, **kwargs):
-        super(GraphSAGELogisticEmbeddingv2, self).__init__()
-
-        self.gcn = gcn
-
-    def forward(self, nf, src, dst, label):
-        h_output = self.gcn(nf)
-        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
-        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        dist = (h_src * h_dst).sum(1)
-        dist = dist + 1  # 0 to 2 range
-        dist = dist / 2  # 0 to 1 range
-        dist = dist.clamp(min=1e-7, max=1-1e-7)  # HACK 1
-        score = -1 * (label * torch.log(dist) + (1-label) * torch.log(1 - dist))
-        return score
-
-
-class GraphSAGENegativeSamplingEmbedding(nn.Module):
-    def __init__(self, gcn, negative_samples=10):
-        super(GraphSAGENegativeSamplingEmbedding, self).__init__()
-
-        self.gcn = gcn
-        self.negative_samples = negative_samples
-
-    def forward(self, nf, src, dst, neg):
-        h_output = self.gcn(nf)
-        h_src = h_output[nf.map_from_parent_nid(-1, src, True)]
-        h_dst = h_output[nf.map_from_parent_nid(-1, dst, True)]
-        h_neg = h_output[nf.map_from_parent_nid(-1, neg, True)]
-        h_negs = h_neg[torch.randint(0, h_neg.shape[0], (h_neg.shape[0], 3))]
-        neg_loss = -1 * self.negative_samples * F.logsigmoid(
-            -1 * h_src.unsqueeze(1).expand(h_src.size(0), 1, h_src.size(1)).bmm(torch.transpose(h_negs, 1, 2))).sum(
-            1).sum(1)
-
-        pos_loss = -1 * F.logsigmoid((h_src * h_dst).sum(1))
-        return pos_loss + neg_loss
+# h_src.unsqueeze(1).expand(h_src.size(0), 1, h_src.size(1)).bmm(torch.transpose(h_negs, 1, 2)))
 
 
 def build_dgl_graph(ratings, total_nodes, content_vectors):

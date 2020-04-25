@@ -58,3 +58,14 @@ class GCNRecommender(GcnNCF):
         node_dist_list = zip(nodes, dist)
         results = list(sorted(node_dist_list, key=operator.itemgetter(1), reverse=True))
         return results
+
+    def predict(self, node_pairs: List[Tuple[Node, Node]]) -> List[float]:
+        """
+
+        :param node_pairs: Takes a list of pair of nodes and gives proba of a link existing between them.
+        :return: Probabilities of link existence between respective node pairs
+        """
+        src, dst = zip(*node_pairs)
+        results = (self.get_embeddings(src) * self.get_embeddings(dst)).sum(1)
+        results = (results + 1) / 2
+        return results
