@@ -83,6 +83,8 @@ def get_data_reader(dataset="100K"):
         item_stats = train.groupby(["item"])["rating"].agg(["mean", "count"]).reset_index()
         user_stats.rename(columns={"mean": "user_rating_mean", "count": "user_rating_count"}, inplace=True)
         item_stats.rename(columns={"mean": "item_rating_mean", "count": "item_rating_count"}, inplace=True)
+        user_stats["user"] = user_stats["user"].astype(int)
+        item_stats["item"] = item_stats["item"].astype(int)
 
         train["is_test"] = False
         test["is_test"] = True
@@ -100,8 +102,14 @@ def get_data_reader(dataset="100K"):
         movies["title_length"] = movies["title"].apply(len)
         movies["overview_length"] = movies["overview"].apply(len)
         movies["runtime"] = movies["runtime"].fillna(0.0)
-        users.rename(columns={"id": "user"}, inplace=True)
-        movies.rename(columns={"id": "item"}, inplace=True)
+        if "id" in users.columns:
+            users.rename(columns={"id": "user"}, inplace=True)
+        else:
+            users.rename(columns={"user_id": "user"}, inplace=True)
+        if "id" in movies.columns:
+            movies.rename(columns={"id": "item"}, inplace=True)
+        else:
+            movies.rename(columns={"movie_id": "item"}, inplace=True)
 
         users = users.merge(user_stats, how="left", on="user")
         movies = movies.merge(item_stats, how="left", on="item")
