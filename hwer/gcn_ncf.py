@@ -16,12 +16,12 @@ from .gcn_recommender import GCNRecommender
 
 from .recommendation_base import RecommendationBase, NodeType, Node, Edge, FeatureName
 from .embed import BaseEmbed
+from .hybrid_recommender import HybridRecommender
 from .gcn import *
 from .ncf import *
 
-# Take out the training loop with a loss builder fn
 
-class GcnNCF(GCNRecommender):
+class GcnNCF(HybridRecommender):
     def __init__(self, embedding_mapper: Dict[NodeType, Dict[str, BaseEmbed]], node_types: Set[str],
                  n_dims: int = 32):
         super().__init__(embedding_mapper, node_types, n_dims)
