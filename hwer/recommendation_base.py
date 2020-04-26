@@ -19,7 +19,7 @@ FeatureName = str
 class Node:
     def __init__(self, node_type, node_external_id):
         self.node_type = node_type
-        self.node_external_id = node_external_id
+        self.node_external_id = str(node_external_id)
 
     def __key(self):
         return tuple((self.node_type, self.node_external_id))
@@ -122,7 +122,25 @@ class RecommendationBase(metaclass=abc.ABCMeta):
                       len(nodes), len(edges), sparsity)
 
         # Check if all edges are made by nodes in node list
+        assert set([node.node_type for e in edges for node in [e.src, e.dst]]) == self.node_types
+        print("Assertion 1 Success", self.node_types)
         assert len(set([i for e in edges for i in [e.src, e.dst]]) - set(nodes)) == 0
+
+        node_type_set_nodes = defaultdict(set)
+        for n in nodes:
+            node_type_set_nodes[n.node_type].add(n)
+
+        node_type_set_edges = defaultdict(set)
+        for e in edges:
+            node_type_set_edges[e.src.node_type].add(e.src)
+            node_type_set_edges[e.dst.node_type].add(e.dst)
+
+        print(node_type_set_nodes.keys(), node_type_set_edges.keys())
+        for k, v in node_type_set_nodes.items():
+            if not len(node_type_set_edges[k] - v) == 0:
+                print(k, "failed", "# nodes = %s, # from edges = %s" %(len(v), len(node_type_set_edges[k])))
+        print("Assertion 2 Success")
+
         assert len(set(nodes)) == len(nodes)
         assert len(set([n.node_type for n in nodes]) - self.node_types) == 0
         self.add_nodes(nodes)
