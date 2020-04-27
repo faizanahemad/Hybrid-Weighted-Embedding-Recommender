@@ -46,8 +46,8 @@ def link_prediction_accuracy(model, nodes: List[Node], train_edges: List[Edge], 
     validation_set = [(e.src, e.dst) for e in validation_edges] + list(zip(random.choices(nodes, k=len(validation_edges)), random.choices(nodes, k=len(validation_edges))))
     validation_labels = [1] * len(validation_edges) + [0] * len(validation_edges)
 
-    train_predictions = model.predict(train_set)
-    validation_predictions = model.predict(validation_set)
+    train_predictions = np.array(model.predict(train_set))
+    validation_predictions = np.array(model.predict(validation_set))
 
     lp_train_ap = average_precision_score(train_labels, train_predictions)
     lp_val_ap = average_precision_score(validation_labels, validation_predictions)
