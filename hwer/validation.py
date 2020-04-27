@@ -10,6 +10,7 @@ import warnings
 import copy
 from collections import defaultdict
 import operator
+from sklearn.metrics import precision_recall_fscore_support, average_precision_score, accuracy_score
 
 warnings.filterwarnings('ignore')
 from typing import List, Dict, Any, Tuple, Set
@@ -37,6 +38,32 @@ def model_get_topk_knn(model, anchors: List[Node], node_type: NodeType) -> Dict[
 model_get_topk = model_get_topk_knn
 
 
+def link_prediction_accuracy(model, nodes: List[Node], train_edges: List[Edge], validation_edges: List[Edge]):
+
+    train_set = [(e.src, e.dst) for e in train_edges] + list(zip(random.choices(nodes, k=len(train_edges)), random.choices(nodes, k=len(train_edges))))
+    train_labels = [1] * len(train_edges) + [0] * len(train_edges)
+
+    validation_set = [(e.src, e.dst) for e in validation_edges] + list(zip(random.choices(nodes, k=len(validation_edges)), random.choices(nodes, k=len(validation_edges))))
+    validation_labels = [1] * len(validation_edges) + [0] * len(validation_edges)
+
+    train_predictions = model.predict(train_set)
+    validation_predictions = model.predict(validation_set)
+
+    lp_train_ap = average_precision_score(train_labels, train_predictions)
+    lp_val_ap = average_precision_score(validation_labels, validation_predictions)
+
+    lp_train_precision, lp_train_recall, _, _ = precision_recall_fscore_support(train_labels, train_predictions >= 0.5, average='binary')
+    lp_val_precision, lp_val_recall, _, _ = precision_recall_fscore_support(validation_labels, validation_predictions >= 0.5,
+                                                                                average='binary')
+    lp_train_accuracy = accuracy_score(train_labels, train_predictions >= 0.5)
+    lp_val_accuracy = accuracy_score(validation_labels, validation_predictions >= 0.5)
+
+    results = dict(lp_train_ap=lp_train_ap, lp_val_ap=lp_val_ap, lp_train_precision=lp_train_precision,
+                   lp_train_recall=lp_train_recall, lp_val_precision=lp_val_precision, lp_val_recall=lp_val_recall,
+                   lp_train_accuracy=lp_train_accuracy, lp_val_accuracy=lp_val_accuracy)
+    return results
+
+
 def ncf_eval(model, train_edges: List[Edge], validation_edges: List[Edge], item_list: List[Node]):
     item_list = set(item_list)
     interactions = defaultdict(set)
@@ -44,25 +71,29 @@ def ncf_eval(model, train_edges: List[Edge], validation_edges: List[Edge], item_
         interactions[u].add(i)
     for u, i, _ in validation_edges:
         interactions[u].add(i)
-    user_test_item = {}
-    actual = {}
-    for u, i, _ in validation_edges:
-        user_test_item[u] = [i, *random.sample(item_list - interactions[u], 100)]
-        actual[u] = i
 
-    for u, items in user_test_item.items():
-        it = list(zip(items, model.predict([(u, i) for i in items])))
-        it = list(sorted(it, key=operator.itemgetter(1), reverse=True))
-        user_test_item[u], _ = zip(*it[:10])
+    def calc(edges, interactions, item_list):
+        user_test_item = {}
+        actual = {}
+        for u, i, _ in edges:
+            user_test_item[u] = [i, *random.sample(item_list - interactions[u], 100)]
+            actual[u] = i
 
-    hr = []
-    ndcg = []
-    for u, i in actual.items():
-        preds = user_test_item[u]
-        hr.append(i in preds)
-        ndcg.append(binary_ndcg_v2([i], preds))
+        for u, items in user_test_item.items():
+            it = list(zip(items, model.predict([(u, i) for i in items])))
+            it = list(sorted(it, key=operator.itemgetter(1), reverse=True))
+            user_test_item[u], _ = zip(*it[:10])
 
-    return {"ncf_hr": np.mean(hr), "ncf_ndcg": np.mean(ndcg)}
+        hr = []
+        ndcg = []
+        for u, i in actual.items():
+            preds = user_test_item[u]
+            hr.append(i in preds)
+            ndcg.append(binary_ndcg_v2([i], preds))
+        return np.mean(hr), np.mean(ndcg)
+    ncf_hr, ncf_ndcg = calc(validation_edges, interactions, item_list)
+
+    return {"ncf_hr": ncf_hr, "ncf_ndcg": ncf_ndcg}
 
 
 def extraction_efficiency(model, train_edges: List[Edge], validation_edges: List[Edge], get_topk, node_type: NodeType):
@@ -143,14 +174,12 @@ def extraction_efficiency(model, train_edges: List[Edge], validation_edges: List
 
     ncf_metrics = ncf_eval(model, train_edges, validation_edges, all_items)
 
-    metrics = {"train_mrr": train_mrr, "mrr": mrr,
-               "retrieval_time": pred_time,
-               "train_ndcg@100": train_ndcg, "ndcg@100": val_ndcg,
-               "train_recall@100": train_recall, "recall@100": val_recall,
-               "train_b_ndcg@100": train_binary_ndcg, "ndcg_b@100": val_binary_ndcg,
-               "ndcg@10": val_ndcg_10, "ndcg_b@10": val_binary_ndcg_10,
-               "recall@10": val_recall_10, "recall@20": val_recall_20,
-               "train_diversity": train_diversity, "diversity": diversity, **ncf_metrics}
+    metrics = {"retrieval_time": pred_time,
+               "recall@100": val_recall,
+               "ndcg_b@100": val_binary_ndcg,
+               "ndcg_b@10": val_binary_ndcg_10,
+               "recall@10": val_recall_10,
+               "diversity": diversity, **ncf_metrics}
     return {"actuals": validation_actuals, "predictions": predictions_100,
             "train_actuals": train_actuals, "train_predictions": train_predictions,
             "train_actuals_score_dict": train_actuals_score_dict,
@@ -183,7 +212,7 @@ def test_algorithm(train_affinities: List[Edge], validation_affinities: List[Edg
     assert np.sum(np.isnan(default_preds)) == 0
 
     res2 = {"algo": algo, "time": total_time}
-    predictions, actuals, stats = get_prediction_details(recsys, train_affinities,
+    predictions, actuals, stats = get_prediction_details(recsys, nodes, train_affinities,
                                                          validation_affinities,
                                                          model_get_topk, node_type)
     res2.update(stats)
@@ -225,7 +254,7 @@ def display_results(results: List[Dict[str, Any]]):
     return df
 
 
-def get_prediction_details(recsys, train_affinities: List[Edge], validation_affinities: List[Edge],
+def get_prediction_details(recsys, nodes: List[Node], train_affinities: List[Edge], validation_affinities: List[Edge],
                            model_get_topk, node_type: NodeType):
     def get_details(recsys, affinities):
         predictions = np.array(recsys.predict([(u, i) for u, i, r in affinities]))
@@ -240,7 +269,9 @@ def get_prediction_details(recsys, train_affinities: List[Edge], validation_affi
     predictions, actuals = get_details(recsys, validation_affinities)
     train_predictions, _ = get_details(recsys, train_affinities)
     ex_ee = extraction_efficiency(recsys, train_affinities, validation_affinities, model_get_topk, node_type)
-    return predictions, actuals, ex_ee["metrics"]
+    lp_res = link_prediction_accuracy(recsys, nodes, train_affinities, validation_affinities)
+    lp_res.update(ex_ee["metrics"])
+    return predictions, actuals, lp_res
 
 
 def run_model_for_hpo(nodes: List[Node], edges: List[Tuple[Edge, bool]],
@@ -265,7 +296,7 @@ def run_models_for_testing(nodes: List[Node], edges: List[Tuple[Edge, bool]],
 
     recs, results = test_multiple_algorithms(train_affinities, validation_affinities, nodes, node_types,
                                              hyperparamters_dict, prepare_data_mappers, algos, retrieved_node_type)
-    ndcg, ncf_ndcg = results[0]['ndcg@100'], results[0]['ncf_ndcg']
+    ndcg, ncf_ndcg = results[0]['ndcg_b@100'], results[0]['ncf_ndcg']
 
     if display:
         results = display_results(results)
@@ -273,5 +304,5 @@ def run_models_for_testing(nodes: List[Node], edges: List[Tuple[Edge, bool]],
     else:
         results = pd.DataFrame.from_records(results)
         results = results.groupby(["algo"]).mean().reset_index()
-        ndcg, ncf_ndcg = results["ndcg@100"].values[0], results["ncf_ndcg"].values[0]
+        ndcg, ncf_ndcg = results["ndcg_b@100"].values[0], results["ncf_ndcg"].values[0]
     return ndcg, ncf_ndcg
