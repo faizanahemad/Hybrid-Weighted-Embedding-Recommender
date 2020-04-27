@@ -160,10 +160,10 @@ def extraction_efficiency(model, train_edges: List[Edge], validation_edges: List
 def test_algorithm(train_affinities: List[Edge], validation_affinities: List[Edge],
                    nodes: List[Node], node_types: Set[NodeType], hyperparameters,
                    get_data_mappers, algo, node_type: NodeType):
-    from . import GCNRecommender, GcnNCF, ContentRecommendation
+    from . import GcnNCF, ContentRecommendation
     embedding_mapper, node_data = get_data_mappers()
     kwargs = dict(hyperparameters=copy.deepcopy(hyperparameters))
-    algo_map = dict(gcn=GCNRecommender, gcn_ncf=GcnNCF, content=ContentRecommendation)
+    algo_map = dict(gcn_ncf=GcnNCF, content=ContentRecommendation)
     recsys = algo_map[algo](embedding_mapper=embedding_mapper,
                                 node_types=node_types,
                                 n_dims=hyperparameters["n_dims"])
@@ -198,7 +198,7 @@ def test_multiple_algorithms(train_affinities, validation_affinities, nodes: Lis
     recs = []
     assert len(algos) > 0
     algos = set(algos)
-    assert len(algos - {"content", "gcn", "gcn_ncf"}) == 0
+    assert len(algos - {"content", "gcn_ncf"}) == 0
     for algo in algos:
         hyperparameters = hyperparamters_dict[algo]
         rec, res, _, _ = test_algorithm(train_affinities,

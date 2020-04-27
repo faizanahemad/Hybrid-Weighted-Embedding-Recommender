@@ -22,7 +22,7 @@ from hwer.utils import str2bool
 if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--algo', type=str, metavar='N', nargs='+',
-                    choices=["gcn", "gcn_ncf", "content"],
+                    choices=["gcn_ncf", "content"],
                     help='')
     ap.add_argument('--dataset', type=str, default="100K", metavar='N',
                     choices=["100K", "1M", "20M"],
