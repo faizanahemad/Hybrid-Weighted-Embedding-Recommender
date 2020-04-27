@@ -40,10 +40,11 @@ model_get_topk = model_get_topk_knn
 
 def link_prediction_accuracy(model, nodes: List[Node], train_edges: List[Edge], validation_edges: List[Edge]):
 
-    train_set = [(e.src, e.dst) for e in train_edges] + list(zip(random.choices(nodes, k=len(train_edges)), random.choices(nodes, k=len(train_edges))))
+    m = 10
+    train_set = [(e.src, e.dst) for e in train_edges] + list(zip(random.choices(nodes, k=len(train_edges) * m), random.choices(nodes, k=len(train_edges) * m)))
     train_labels = [1] * len(train_edges) + [0] * len(train_edges)
 
-    validation_set = [(e.src, e.dst) for e in validation_edges] + list(zip(random.choices(nodes, k=len(validation_edges)), random.choices(nodes, k=len(validation_edges))))
+    validation_set = [(e.src, e.dst) for e in validation_edges] + list(zip(random.choices(nodes, k=len(validation_edges) * m), random.choices(nodes, k=len(validation_edges) * m)))
     validation_labels = [1] * len(validation_edges) + [0] * len(validation_edges)
 
     train_predictions = np.array(model.predict(train_set))
