@@ -48,10 +48,9 @@ class GcnNCF(HybridRecommender):
         from collections import Counter
         random_walks = max(500, samples_per_node * 50)
 
-        def results_filter(cnt):
-            results = cnt.most_common()
-            results = list(filter(lambda res: res[1] / random_walks >= ps_threshold, results))
-            results = results[:samples_per_node]
+        def results_filter(cnt, dist):
+            results = cnt.most_common(samples_per_node)
+            results = [(r, w/dist) for r, w in results]
             return results
 
         def sampler():
@@ -59,11 +58,9 @@ class GcnNCF(HybridRecommender):
                 cnt_2 = Counter()
                 cnt_3 = Counter()
                 for walk in walker.simulate_walks_single_node(i, random_walks, 4):
-                    if len(walk) >= 3 and walk[2] != i:
                         cnt_2.update([walk[2]])
-                    if len(walk) == 4 and walk[3] != i:
                         cnt_3.update([walk[3]])
-                results = results_filter(cnt_2) + results_filter(cnt_3)
+                results = results_filter(cnt_2, 2) + results_filter(cnt_3, 3)
                 for r, w in results:
                     yield i, r, np.sqrt(w/random_walks)
 
