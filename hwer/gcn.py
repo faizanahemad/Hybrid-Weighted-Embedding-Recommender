@@ -73,26 +73,24 @@ class GraphConv(nn.Module):
         super(GraphConv, self).__init__()
         layers = []
         depth = max(1, depth)
-        for i in range(depth - 1):
-            in_width = 2 if i == 0 else 4
-            weights = nn.Linear(feature_size * in_width, feature_size * 4)
+        width = 2
+        for i in range(depth):
+            in_width = 2 if i == 0 else width
+            out_width = width if i < depth - 1 else 1
+            weights = nn.Linear(feature_size * in_width, feature_size * out_width)
             init_fc(weights, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.append(GaussianNoise(gaussian_noise))
             layers.append(weights)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
-        layers.append(GaussianNoise(gaussian_noise))
-        W = nn.Linear(feature_size * (4 if depth > 1 else 2), feature_size)
-        layers.append(W)
         self.prediction_layer = prediction_layer
-        self.noise = GaussianNoise(gaussian_noise)
-        init_fc(W, 'xavier_uniform_', 'leaky_relu', 0.1)
-        layers.append(nn.LeakyReLU(0.1))  # tanh
 
         if prediction_layer:
+            pred_prev = nn.Linear(feature_size * out_width, feature_size)
+            init_fc(pred_prev, 'xavier_uniform_', 'leaky_relu', 0.1)
             pred = nn.Linear(feature_size, out_dims)
             init_fc(pred, 'xavier_uniform_', 'linear', 0.1)
-            self.pred = pred
+            self.pred = nn.Sequential(pred_prev, nn.LeakyReLU(0.1), pred)
         self.W = nn.Sequential(*layers)
 
     def pre_process(self, nodes):
@@ -104,7 +102,6 @@ class GraphConv(nn.Module):
 
     def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
-        h_new = h + h_new
         if self.prediction_layer:
             h_new = self.pred(h_new)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
@@ -139,19 +136,13 @@ class GraphConvModule(nn.Module):
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
 
         convs = []
-        # 1/8, 1/4, 1/2, 1
-        # 1/4, 1/2, 1
-        segments = min(n_layers, 4)
-        segments = list(reversed([2**i for i in range(segments)]))
         for i in range(n_layers):
             conv = GraphConv(feature_size * width, feature_size * (width if i < n_layers - 1 else 1),
                              i == n_layers - 1, gaussian_noise, conv_depth)
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
-        expansion = nn.Linear(feature_size, feature_size * width)
-        init_fc(expansion, 'xavier_uniform_', 'leaky_relu', 0.1)
-        self.expansion = nn.Sequential(noise, expansion, nn.LeakyReLU(0.1))
+        self.width = width
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -163,7 +154,7 @@ class GraphConvModule(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
+            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1).repeat(1, self.width)
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
