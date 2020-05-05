@@ -35,34 +35,6 @@ class GcnNCF(RecommendationBase):
         self.prediction_artifacts = dict()
         self.ncf_gcn_balance = 0
 
-    def __positive_pair_generator__(self, nodes: List[Node],
-                                    edges: List[Edge],
-                                    hyperparams):
-        ps_proportion = hyperparams["ps_proportion"] if "ps_proportion" in hyperparams else 1
-        positive_samples = len(edges) * ps_proportion
-        node_to_index = self.nodes_to_idx
-        p = 0.25
-        q = hyperparams["q"] if "q" in hyperparams else 0.25
-        total_nodes = len(nodes)
-        edge_list = [(node_to_index[e.src], node_to_index[e.dst], e.weight) for e in edges]
-        edge_list.extend([(i, i, 1) for i in range(total_nodes)])
-        Walker = RandomWalker
-        walker = Walker(read_edgelist(edge_list, weighted=False), p=p, q=q)
-        walker.preprocess_transition_probs()
-        samples_per_node = int(np.ceil(positive_samples / total_nodes))
-        from collections import Counter
-        random_walks = max(500, samples_per_node * 50)
-        thres = int(random_walks/100)
-
-        def sampler():
-            for i in range(total_nodes):
-                results = Counter([n for n in walker.get_nth_neighbour(i, random_walks, 3)]).most_common(samples_per_node)
-                results = [(r, w) for r, w in results if w >= thres]
-                for r, w in results:
-                    yield i, r, w/random_walks
-
-        return sampler
-
     def __word2vec_neg_sampler(self, nodes: List[Node],
                         edges: List[Edge], hyperparams):
 
@@ -109,13 +81,11 @@ class GcnNCF(RecommendationBase):
                         edges: List[Edge], node_to_index: Dict[Node, int],
                         hyperparams):
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
-        ps_proportion = hyperparams["ps_proportion"] if "ps_proportion" in hyperparams else 0
         ns_w2v_proportion = hyperparams["ns_w2v_proportion"] if "ns_w2v_proportion" in hyperparams else 0
         ns_w2v_exponent = hyperparams["ns_w2v_exponent"] if "ns_w2v_exponent" in hyperparams else 3.0/4.0
 
         affinities = [(node_to_index[e.src], node_to_index[e.dst], e.weight) for e in edges]
         total_nodes = len(nodes)
-        pos_gen = self.__positive_pair_generator__(nodes, edges, hyperparams)
         w2v_neg_gen = self.__word2vec_neg_sampler(nodes, edges, hyperparams)
         simple_neg_gen = self.__simple_neg_sampler__(nodes, edges, hyperparams)
 
@@ -149,17 +119,6 @@ class GcnNCF(RecommendationBase):
                 ratings_neg = torch.zeros_like(src_neg, dtype=torch.float)
                 ratings = torch.cat((ratings, ratings_neg), 0)
 
-            if ps_proportion > 0:
-                h_src_pos, h_dst_pos, h_weight_pos = zip(*pos_gen())
-                weights_pos = torch.FloatTensor(h_weight_pos)
-                h_src_pos = torch.LongTensor(h_src_pos)
-                h_dst_pos = torch.LongTensor(h_dst_pos)
-                src = torch.cat((src, h_src_pos), 0)
-                dst = torch.cat((dst, h_dst_pos), 0)
-                weights = torch.cat((weights, weights_pos), 0)
-                ratings_pos = torch.ones_like(h_src_pos, dtype=torch.float)
-                ratings = torch.cat((ratings, ratings_pos), 0)
-
             shuffle_idx = torch.randperm(len(src))
             src = src[shuffle_idx]
             dst = dst[shuffle_idx]
@@ -176,8 +135,8 @@ class GcnNCF(RecommendationBase):
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 2
         src, dst, weights, ratings = data_generator()
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
-        # total_examples = len(src) - 10_000
-        # src, dst, rating = src[:total_examples], dst[:total_examples], rating[:total_examples]
+        # total_examples = len(src) - 500
+        # src, dst, ratings, weights = src[:total_examples], dst[:total_examples], ratings[:total_examples], weights[:total_examples]
         # opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
         # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
         #                                                 steps_per_epoch=int(
@@ -218,6 +177,7 @@ class GcnNCF(RecommendationBase):
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
+                # scheduler.step()
             return total_loss / len(src_batches)
 
         for epoch in range(epochs):
@@ -226,6 +186,7 @@ class GcnNCF(RecommendationBase):
             gen_time = time.time()
             if epoch < epochs - 1:
                 src, dst, weights, ratings = data_generator()
+                # src, dst, ratings, weights = src[:total_examples], dst[:total_examples], ratings[:total_examples], weights[:total_examples]
             gen_time = time.time() - gen_time
             total_time = time.time() - start
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
