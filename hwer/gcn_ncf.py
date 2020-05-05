@@ -363,15 +363,11 @@ class GcnNCF(RecommendationBase):
                 loss = loss.mean() * ncf_gcn_balance
 
             gcn_score = (h_src * h_dst).sum(1)
-            # m1, m2 = gcn_score.min().item(), gcn_score.max().item()
-
-            gcn_score = (gcn_score + 1)/2
-            # m3, m4 = gcn_score.min().item(), gcn_score.max().item()
-            # print("Before = ", m1, m2, "After = ", m3, m4)
-            # gcn_loss = -1 * (ratings * torch.log(gcn_score) + (1 - ratings) * torch.log(1 - gcn_score))
-            gcn_loss = (ratings - gcn_score) ** 2
-            gcn_loss = gcn_loss * weights
-            gcn_loss = gcn_loss.mean() * (1 - ncf_gcn_balance)
+            eps = 1e-6
+            gcn_score = (gcn_score + 1 + eps)/(2 + 2*eps)
+            gcn_loss = -1 * (ratings * torch.log(gcn_score) + (1 - ratings) * torch.log(1 - gcn_score))
+            gcn_loss = (gcn_loss * weights).mean()
+            gcn_loss = gcn_loss * (1 - ncf_gcn_balance)
             loss = loss + gcn_loss
             return loss
 
