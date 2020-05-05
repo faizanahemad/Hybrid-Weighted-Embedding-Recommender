@@ -71,39 +71,6 @@ class GcnNCF(RecommendationBase):
 
         return sampler
 
-    def __negative_pair_generator__(self, nodes: List[Node],
-                                    edges: List[Edge],
-                                    hyperparams):
-        nsh = hyperparams["nsh"] if "nsh" in hyperparams else 1
-        positive_samples = len(edges)
-        p = 0.25
-        q = hyperparams["q"] if "q" in hyperparams else 0.25
-        negative_samples = int(nsh * positive_samples)
-        total_nodes = len(nodes)
-        node_to_index = self.nodes_to_idx
-
-        edge_list = [(node_to_index[e.src], node_to_index[e.dst], e.weight) for e in edges]
-        edge_list.extend([(i, i, 1) for i in range(total_nodes)])
-        Walker = RandomWalker
-        walker = Walker(read_edgelist(edge_list, weighted=False), p=p, q=q)
-        walker.preprocess_transition_probs()
-        # samples_per_node = {i: int(len(walker.adjacency_list[i]) * nsh) for i in range(total_users + total_items)}
-        spn = int(np.ceil(negative_samples / total_nodes))
-        samples_per_node = {i: spn for i in range(total_nodes)}
-        all_nodes = set([i for i in range(total_nodes)])
-
-        def nsg():
-            for i in range(total_nodes):
-                neighbours = {i}
-                for walk in walker.simulate_walks_single_node(i, 20, 5):
-                    neighbours.update(walk)
-                candidates = list(all_nodes - neighbours)
-                results = random.choices(candidates, k=samples_per_node[i])
-                for r in results:
-                    yield i, r, 1.0
-
-        return nsg
-
     def __word2vec_neg_sampler(self, nodes: List[Node],
                         edges: List[Edge], hyperparams):
 
@@ -149,7 +116,6 @@ class GcnNCF(RecommendationBase):
     def __data_gen_fn__(self, nodes: List[Node],
                         edges: List[Edge], node_to_index: Dict[Node, int],
                         hyperparams):
-        nsh = hyperparams["nsh"] if "nsh" in hyperparams else 0
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
         ps_proportion = hyperparams["ps_proportion"] if "ps_proportion" in hyperparams else 0
         ns_w2v_proportion = hyperparams["ns_w2v_proportion"] if "ns_w2v_proportion" in hyperparams else 0
@@ -157,7 +123,6 @@ class GcnNCF(RecommendationBase):
 
         affinities = [(node_to_index[e.src], node_to_index[e.dst], e.weight) for e in edges]
         total_nodes = len(nodes)
-        hard_negative_gen = self.__negative_pair_generator__(nodes, edges, hyperparams)
         pos_gen = self.__positive_pair_generator__(nodes, edges, hyperparams)
         w2v_neg_gen = self.__word2vec_neg_sampler(nodes, edges, hyperparams)
         simple_neg_gen = self.__simple_neg_sampler__(nodes, edges, hyperparams)
@@ -190,17 +155,6 @@ class GcnNCF(RecommendationBase):
                 dst = torch.cat((dst, dst_neg), 0)
                 weights = torch.cat((weights, weights_neg), 0)
                 ratings_neg = torch.zeros_like(src_neg, dtype=torch.float)
-                ratings = torch.cat((ratings, ratings_neg), 0)
-
-            if nsh > 0:
-                h_src_neg, h_dst_neg, weights_hneg = zip(*hard_negative_gen())
-                weights_hneg = torch.FloatTensor(weights_hneg)
-                h_src_neg = torch.LongTensor(h_src_neg)
-                h_dst_neg = torch.LongTensor(h_dst_neg)
-                src = torch.cat((src, h_src_neg), 0)
-                dst = torch.cat((dst, h_dst_neg), 0)
-                weights = torch.cat((weights, weights_hneg), 0)
-                ratings_neg = torch.zeros_like(h_src_neg, dtype=torch.float)
                 ratings = torch.cat((ratings, ratings_neg), 0)
 
             if ps_proportion > 0:
@@ -311,7 +265,6 @@ class GcnNCF(RecommendationBase):
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
-        nsh = hyperparams["nsh"] if "nsh" in hyperparams else 1.0
         ncf_gcn_balance = hyperparams["ncf_gcn_balance"] if "ncf_gcn_balance" in hyperparams else 1.0
         label_smoothing_alpha = hyperparams["label_smoothing_alpha"] if "label_smoothing_alpha" in hyperparams else 0.1
         ncf_gcn_balance = min(0.999, ncf_gcn_balance)
