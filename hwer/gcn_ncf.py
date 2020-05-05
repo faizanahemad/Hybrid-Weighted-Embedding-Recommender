@@ -52,22 +52,14 @@ class GcnNCF(RecommendationBase):
         samples_per_node = int(np.ceil(positive_samples / total_nodes))
         from collections import Counter
         random_walks = max(500, samples_per_node * 50)
-
-        def results_filter(cnt, dist):
-            results = cnt.most_common(samples_per_node)
-            results = [(r, w/dist) for r, w in results]
-            return results
+        thres = int(random_walks/100)
 
         def sampler():
             for i in range(total_nodes):
-                cnt_2 = Counter()
-                cnt_3 = Counter()
-                for walk in walker.simulate_walks_single_node(i, random_walks, 4):
-                        cnt_2.update([walk[2]])
-                        cnt_3.update([walk[3]])
-                results = results_filter(cnt_2, 2) + results_filter(cnt_3, 3)
+                results = Counter([n for n in walker.get_nth_neighbour(i, random_walks, 3)]).most_common(samples_per_node)
+                results = [(r, w) for r, w in results if w >= thres]
                 for r, w in results:
-                    yield i, r, np.sqrt(w/random_walks)
+                    yield i, r, w/random_walks
 
         return sampler
 

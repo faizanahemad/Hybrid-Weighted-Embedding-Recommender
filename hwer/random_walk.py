@@ -233,10 +233,18 @@ class RandomWalker:
         self.G = G
         self.adjacency_list = {node: list(v.keys()) for node, v in self.G.items()}
 
-    def simulate_walks_single_node(self, node, num_walks, walk_length):
+    def get_nth_neighbour(self, node, num_walks, nth_node):
         adjacency_list = self.adjacency_list
         for _ in range(num_walks):
-            node_cur_nbrs = adjacency_list[node]
+            cur = node
+            for _ in range(nth_node):
+                cur = random.choice(adjacency_list[cur])
+            yield cur
+
+    def simulate_walks_single_node(self, node, num_walks, walk_length):
+        adjacency_list = self.adjacency_list
+        node_cur_nbrs = adjacency_list[node]
+        for _ in range(num_walks):
             cur, back = random.choice(node_cur_nbrs), node
             walk = [back, cur]
             for _ in range(walk_length - 2):
