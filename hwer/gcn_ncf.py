@@ -201,7 +201,6 @@ class GcnNCF(RecommendationBase):
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 3
         ncf_layers = hyperparams["ncf_layers"] if "ncf_layers" in hyperparams else 2
-        conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
         label_smoothing_alpha = hyperparams["label_smoothing_alpha"] if "label_smoothing_alpha" in hyperparams else 0.1
@@ -226,8 +225,7 @@ class GcnNCF(RecommendationBase):
             ncf = None
         else:
             ncf = NCF(self.n_dims, ncf_layers, gaussian_noise)
-        gcn = GraphConvModule(n_content_dims, self.n_dims, gcn_layers, g_train,
-                              gaussian_noise, conv_depth)
+        gcn = GraphConvModule(n_content_dims, self.n_dims, gcn_layers, g_train, gaussian_noise)
         model = RecImplicit(gcn=gcn, ncf=ncf)
         generate_training_samples = self.__data_gen_fn__(nodes, edges, self.nodes_to_idx,
                                                          hyperparams)

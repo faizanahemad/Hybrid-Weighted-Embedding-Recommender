@@ -71,7 +71,7 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
 
 
 class GraphConv(nn.Module):
-    def __init__(self, in_dims, out_dims, prediction_layer, gaussian_noise, depth):
+    def __init__(self, in_dims, out_dims, gaussian_noise):
         super(GraphConv, self).__init__()
         layers = [GaussianNoise(gaussian_noise)]
         expand = nn.Linear(in_dims * 2, in_dims * 4)
@@ -102,8 +102,7 @@ class GraphConv(nn.Module):
 
 class GraphConvModule(nn.Module):
     def __init__(self, n_content_dims, feature_size, n_layers, G,
-                 gaussian_noise, conv_depth,
-                 init_node_vectors=None,):
+                 gaussian_noise, init_node_vectors=None,):
         super(GraphConvModule, self).__init__()
 
         self.feature_size = feature_size
@@ -122,8 +121,7 @@ class GraphConvModule(nn.Module):
 
         convs = []
         for i in range(n_layers):
-            conv = GraphConv(feature_size, feature_size,
-                             i == n_layers - 1, gaussian_noise, conv_depth)
+            conv = GraphConv(feature_size, feature_size, gaussian_noise)
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
