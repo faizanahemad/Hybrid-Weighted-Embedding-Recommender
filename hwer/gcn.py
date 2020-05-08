@@ -73,7 +73,7 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
 class GraphConv(nn.Module):
     def __init__(self, in_dims, out_dims, gaussian_noise):
         super(GraphConv, self).__init__()
-        layers = [GaussianNoise(gaussian_noise)]
+        layers = []
         expand = nn.Linear(in_dims * 2, in_dims * 4)
         init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
@@ -119,7 +119,7 @@ class GraphConvModule(nn.Module):
                 init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
 
-        convs = []
+        convs = [GaussianNoise(gaussian_noise)]
         for i in range(n_layers):
             conv = GraphConv(feature_size, feature_size, gaussian_noise)
             convs.append(conv)
@@ -150,39 +150,25 @@ class GraphConvModule(nn.Module):
 
 
 class ResnetConv(nn.Module):
-    def __init__(self, in_dims, out_dims, first_layer, prediction_layer, gaussian_noise, depth):
+    def __init__(self, in_dims, out_dims, first_layer, gaussian_noise):
         super(ResnetConv, self).__init__()
-        layers = []
-        depth = max(1, depth)
         if first_layer:
             inp = in_dims * 2
         else:
             inp = in_dims * 3
-        for i in range(depth - 1):
-            width = 1 if i == 0 else 2
-            weights = nn.Linear(inp * width, inp * 2)
-            init_fc(weights, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.append(GaussianNoise(gaussian_noise))
-            layers.append(weights)
-            layers.append(nn.LeakyReLU(negative_slope=0.1))
 
-        layers.append(GaussianNoise(gaussian_noise))
-        W = nn.Linear(inp * (2 if depth > 1 else 1), out_dims)
-        layers.append(W)
-        self.prediction_layer = prediction_layer
-        init_fc(W, 'xavier_uniform_', 'leaky_relu', 0.1)
-        layers.append(nn.LeakyReLU(negative_slope=0.1))
-
-        if not prediction_layer:
-            self.skip = None
-            if in_dims != out_dims:
-                skip = nn.Linear(in_dims, out_dims)
-                init_fc(skip, 'xavier_uniform_', 'leaky_relu', 0.1)
-                self.skip = nn.Sequential(skip, nn.LeakyReLU(negative_slope=0.1))
-        else:
-            pred = nn.Linear(in_dims, out_dims)
-            init_fc(pred, 'xavier_uniform_', 'linear', 0.1)
-            self.pred = pred
+        layers = []
+        expand = nn.Linear(inp, inp * 2)
+        init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
+        layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
+        contract = nn.Linear(inp * 2, out_dims)
+        init_fc(expand, 'xavier_uniform_', 'linear', 0.1)
+        layers.append(contract)
+        self.W = nn.Sequential(*layers)
+        self.skip = None
+        if in_dims != out_dims:
+            self.skip = nn.Linear(in_dims, out_dims)
+            init_fc(self.skip, 'xavier_uniform_', 'leaky_relu', 0.1)
         self.W = nn.Sequential(*layers)
         self.first_layer = first_layer
 
@@ -197,12 +183,7 @@ class ResnetConv(nn.Module):
             h_residue = nodes.data['h_residue']
             h_concat = torch.cat([h, h_agg, h_residue], 1)
         h_new = self.W(h_concat)
-        h_new = h + h_new
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
-
-        if self.prediction_layer:
-            h_new = self.pred(h_new)
-            return {'h': h_new}
         # skip
         h_agg = self.skip(h_agg) if self.skip is not None else h_agg
         h_agg = h_agg / h_agg.norm(dim=1, keepdim=True).clamp(min=1e-6)
@@ -211,16 +192,12 @@ class ResnetConv(nn.Module):
 
 class GraphResnetConvModule(nn.Module):
     def __init__(self, n_content_dims, feature_size, n_layers, G,
-                 gaussian_noise, conv_depth,
-                 init_node_vectors=None,):
+                 gaussian_noise, init_node_vectors=None,):
         super(GraphResnetConvModule, self).__init__()
 
         self.feature_size = feature_size
         self.n_layers = n_layers
-        noise = GaussianNoise(gaussian_noise)
-
-        width = 2
-        self.proj = build_content_layer(n_content_dims, feature_size * width, noise)
+        self.proj = build_content_layer(n_content_dims, feature_size)
         self.G = G
         embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
@@ -231,10 +208,7 @@ class GraphResnetConvModule(nn.Module):
                 from sklearn.decomposition import PCA
                 init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
-        self.convs = nn.ModuleList(
-            [ResnetConv(feature_size * width, feature_size * (1 if i >= n_layers - 1 else width), i == 0, i == n_layers - 1, gaussian_noise, conv_depth) for i
-             in
-             range(n_layers)])
+        self.convs = nn.ModuleList([ResnetConv(feature_size, feature_size, i == 0, gaussian_noise) for i in range(n_layers)])
 
         m_init = [FN.copy_src('h', 'h'),
                FN.copy_src('one', 'one')]
@@ -246,17 +220,10 @@ class GraphResnetConvModule(nn.Module):
         self.msg = [m_init if i == 0 else m for i in range(n_layers)]
         self.red = [r_init if i == 0 else r for i in range(n_layers)]
 
-        expansion = nn.Linear(feature_size, feature_size * width)
-        init_fc(expansion, 'xavier_uniform_', 'leaky_relu', 0.1)
-        self.expansion = nn.Sequential(noise, expansion, nn.LeakyReLU(0.1))
-
     def forward(self, nf):
-        '''
-        nf: NodeFlow.
-        '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.expansion(self.node_emb(nf.layer_parent_nid(i) + 1))
+            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
