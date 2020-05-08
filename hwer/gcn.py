@@ -105,9 +105,7 @@ class GraphConvModule(nn.Module):
 
         self.feature_size = feature_size
         self.n_layers = n_layers
-        width = 2
-        noise = GaussianNoise(gaussian_noise)
-        self.proj = build_content_layer(n_content_dims, feature_size * width)
+        self.proj = build_content_layer(n_content_dims, feature_size)
         self.G = G
         embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
@@ -121,12 +119,11 @@ class GraphConvModule(nn.Module):
 
         convs = []
         for i in range(n_layers):
-            conv = GraphConv(feature_size * width, feature_size * (width if i < n_layers - 1 else 1),
+            conv = GraphConv(feature_size, feature_size,
                              i == n_layers - 1, gaussian_noise, conv_depth)
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
-        self.width = width
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -138,7 +135,7 @@ class GraphConvModule(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1).repeat(1, self.width)
+            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
