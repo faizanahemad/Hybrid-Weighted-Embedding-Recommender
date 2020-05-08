@@ -28,18 +28,16 @@ class LinearResnet(nn.Module):
 
 
 class NCF(nn.Module):
-    def __init__(self, feature_size, depth, gaussian_noise, content):
+    def __init__(self, feature_size, depth, gaussian_noise):
         super(NCF, self).__init__()
         noise = GaussianNoise(gaussian_noise)
-
-        w1 = nn.Linear(feature_size * 2, feature_size * max(4, 2 ** (depth - 1)))
-        init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        layers = [noise, w1, nn.LeakyReLU(negative_slope=0.1)]
-
-        for i in reversed(range(depth - 1)):
-            wx = nn.Linear(feature_size * max(4, 2 ** (i+1)), feature_size * (2 ** i))
+        layers = [noise]
+        for layer_idx in range(1, depth + 1):
+            iw = 2 if layer_idx == 1 else 4
+            ow = 1 if layer_idx == depth else 4
+            wx = nn.Linear(feature_size * iw, feature_size * ow)
             init_fc(wx, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.extend([noise, wx, nn.LeakyReLU(negative_slope=0.1)])
+            layers.extend([wx, nn.LeakyReLU(negative_slope=0.1)])
 
         w_out = nn.Linear(feature_size, 1)
         init_fc(w_out, 'xavier_uniform_', 'sigmoid', 0.1)

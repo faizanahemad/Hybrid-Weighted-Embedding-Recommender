@@ -219,14 +219,13 @@ class GcnNCF(RecommendationBase):
         gc.collect()
         edge_list = [(nodes_to_idx[e.src] + 1, nodes_to_idx[e.dst] + 1, e.weight) for e in edges]
         edge_list.extend([(i, i, 1) for i in range(total_nodes)])
-        g_train = build_dgl_graph(edge_list, total_nodes, content_vectors)
         n_content_dims = content_vectors.shape[1]
+        g_train = build_dgl_graph(edge_list, total_nodes, content_vectors)
         g_train.readonly()
         if ncf_epochs == 0:
             ncf = None
         else:
-            ncf = NCF(self.n_dims, ncf_layers, gaussian_noise,
-                      content_vectors)
+            ncf = NCF(self.n_dims, ncf_layers, gaussian_noise)
         gcn = GraphConvModule(n_content_dims, self.n_dims, gcn_layers, g_train,
                               gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
