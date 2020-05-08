@@ -198,7 +198,6 @@ class GcnNCF(RecommendationBase):
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         verbose = hyperparams["verbose"] if "verbose" in hyperparams else 2
-        use_content = hyperparams["use_content"] if "use_content" in hyperparams else False
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 3
         ncf_layers = hyperparams["ncf_layers"] if "ncf_layers" in hyperparams else 2
@@ -215,8 +214,6 @@ class GcnNCF(RecommendationBase):
         assert np.sum(np.isnan(content_vectors)) == 0
 
         total_nodes = len(nodes) + 1
-        if not use_content:
-            content_vectors = np.zeros((content_vectors.shape[0], 1))
 
         import gc
         gc.collect()
