@@ -66,6 +66,10 @@ class ContentRecommendation(RecommendationBase):
         n_dims = n_dims if n_dims is not None and not np.isinf(n_dims) else 2 ** int(np.log2(all_embeddings.shape[1]))
         all_embeddings, _ = auto_encoder_transform(all_embeddings, all_embeddings, n_dims=n_dims, verbose=2, epochs=25)
         all_embeddings = unit_length(all_embeddings, axis=1)
+        extra_dims = 2 ** int(np.ceil(np.log2(ohe_node_types.shape[1]))) - ohe_node_types.shape[1]
+        if extra_dims != 0:
+            ohe_node_types = np.concatenate((ohe_node_types, np.zeros((ohe_node_types.shape[0], extra_dims))), axis=1)
+        all_embeddings = np.concatenate((all_embeddings, ohe_node_types), axis=1)
         self.log.info("ContentRecommendation::__build_embeddings__:: Built Content Embedding with dims = %s" % str(
             all_embeddings.shape))
         return all_embeddings
