@@ -28,16 +28,16 @@ class LinearResnet(nn.Module):
 
 
 class NCF(nn.Module):
-    def __init__(self, feature_size, depth, gaussian_noise, content, ncf_gcn_balance):
+    def __init__(self, feature_size, depth, gaussian_noise, content):
         super(NCF, self).__init__()
         noise = GaussianNoise(gaussian_noise)
 
-        w1 = nn.Linear(feature_size * 2, feature_size * (2 ** (depth - 1)))
+        w1 = nn.Linear(feature_size * 2, feature_size * max(4, 2 ** (depth - 1)))
         init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers = [noise, w1, nn.LeakyReLU(negative_slope=0.1)]
 
         for i in reversed(range(depth - 1)):
-            wx = nn.Linear(feature_size * (2 ** (i+1)), feature_size * (2 ** i))
+            wx = nn.Linear(feature_size * max(4, 2 ** (i+1)), feature_size * (2 ** i))
             init_fc(wx, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.extend([noise, wx, nn.LeakyReLU(negative_slope=0.1)])
 
@@ -45,7 +45,6 @@ class NCF(nn.Module):
         init_fc(w_out, 'xavier_uniform_', 'sigmoid', 0.1)
         layers.extend([w_out, nn.Sigmoid()])
         self.W = nn.Sequential(*layers)
-        self.ncf_gcn_balance = ncf_gcn_balance
 
     def forward(self, src, dst, g_src, g_dst):
         vec = torch.cat([g_src, g_dst], 1)

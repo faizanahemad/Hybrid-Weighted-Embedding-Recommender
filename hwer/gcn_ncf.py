@@ -33,7 +33,7 @@ class GcnNCF(RecommendationBase):
         self.cb = ContentRecommendation(embedding_mapper, node_types, np.inf)
         self.content_data_used = None
         self.prediction_artifacts = dict()
-        self.ncf_gcn_balance = 0
+        self.ncf_enabled = False
 
     def __word2vec_neg_sampler(self, nodes: List[Node],
                         edges: List[Edge], hyperparams):
@@ -91,12 +91,8 @@ class GcnNCF(RecommendationBase):
 
         def get_samples():
             np.random.shuffle(affinities)
-            src, dst, weights, ratings = [], [], [], []
-            for u, v, r in affinities:
-                src.append(u)
-                dst.append(v)
-                weights.append(r)
-                ratings.append(1.0)
+            src, dst, weights = zip(*affinities)
+            ratings = [1.0] * len(src)
 
             src = torch.LongTensor(src)
             dst = torch.LongTensor(dst)
@@ -135,13 +131,6 @@ class GcnNCF(RecommendationBase):
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 2
         src, dst, weights, ratings = data_generator()
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
-        # total_examples = len(src) - 500
-        # src, dst, ratings, weights = src[:total_examples], dst[:total_examples], ratings[:total_examples], weights[:total_examples]
-        # opt = torch.optim.SGD(model.parameters(), lr=lr, weight_decay=kernel_l2, momentum=0.9, nesterov=True)
-        # scheduler = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, epochs=epochs,
-        #                                                 steps_per_epoch=int(
-        #                                                     np.ceil(total_examples / batch_size)),
-        #                                                 div_factor=50, final_div_factor=100)
         import gc
         gc.collect()
         positive_examples, negative_examples = torch.sum(ratings == 1).item(), torch.sum(ratings == 0).item()
@@ -172,12 +161,11 @@ class GcnNCF(RecommendationBase):
 
             total_loss = 0.0
             for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
-                loss = loss_fn(model, s, d, nodeflow, w, r)
+                loss, _, _ = loss_fn(model, s, d, nodeflow, w, r)
                 total_loss = total_loss + loss.item()
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
-                # scheduler.step()
             return total_loss / len(src_batches)
 
         for epoch in range(epochs):
@@ -186,7 +174,6 @@ class GcnNCF(RecommendationBase):
             gen_time = time.time()
             if epoch < epochs - 1:
                 src, dst, weights, ratings = data_generator()
-                # src, dst, ratings, weights = src[:total_examples], dst[:total_examples], ratings[:total_examples], weights[:total_examples]
             gen_time = time.time() - gen_time
             total_time = time.time() - start
             self.log.info('Epoch %2d/%2d: ' % (int(epoch + 1),
@@ -218,9 +205,9 @@ class GcnNCF(RecommendationBase):
         conv_depth = hyperparams["conv_depth"] if "conv_depth" in hyperparams else 1
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
-        ncf_gcn_balance = hyperparams["ncf_gcn_balance"] if "ncf_gcn_balance" in hyperparams else 1.0
         label_smoothing_alpha = hyperparams["label_smoothing_alpha"] if "label_smoothing_alpha" in hyperparams else 0.1
-        ncf_gcn_balance = min(0.999, ncf_gcn_balance)
+        ncf_epochs = hyperparams["ncf_epochs"] if "ncf_epochs" in hyperparams else 0
+        gcn_epochs = hyperparams["gcn_epochs"] if "gcn_epochs" in hyperparams else 1
 
         # For unseen users and items creating 2 mock nodes
         content_vectors = np.concatenate((np.zeros((1, content_vectors.shape[1])), content_vectors))
@@ -238,11 +225,11 @@ class GcnNCF(RecommendationBase):
         g_train = build_dgl_graph(edge_list, total_nodes, content_vectors)
         n_content_dims = content_vectors.shape[1]
         g_train.readonly()
-        if ncf_gcn_balance == 0:
+        if ncf_epochs == 0:
             ncf = None
         else:
             ncf = NCF(self.n_dims, ncf_layers, gaussian_noise,
-                      content_vectors, ncf_gcn_balance)
+                      content_vectors)
         gcn = GraphConvModule(n_content_dims, self.n_dims, gcn_layers, g_train,
                               gaussian_noise, conv_depth)
         model = RecImplicit(gcn=gcn, ncf=ncf)
@@ -255,51 +242,62 @@ class GcnNCF(RecommendationBase):
             dst = dst + 1
             return src, dst, weights, ratings
 
-        def loss_fn(model, src, dst, nodeflow, weights, ratings):
+        def loss_fn_gcn(model, src, dst, nodeflow, weights, ratings):
             ratings = (1 - label_smoothing_alpha) * ratings + label_smoothing_alpha / 2
             h_output = model.gcn(nodeflow)
             h_src = h_output[nodeflow.map_from_parent_nid(-1, src, True)]
             h_dst = h_output[nodeflow.map_from_parent_nid(-1, dst, True)]
-            if ncf_gcn_balance == 0:
-                loss = 0.0
-            else:
-                score = model.ncf(src, dst, h_src, h_dst)
-                loss = -1 * (ratings * torch.log(score) + (1 - ratings) * torch.log(1 - score))
-                loss = loss * weights
-                loss = loss.mean() * ncf_gcn_balance
-
             gcn_score = (h_src * h_dst).sum(1)
             eps = 1e-6
             gcn_score = (gcn_score + 1 + eps)/(2 + 2*eps)
             gcn_loss = -1 * (ratings * torch.log(gcn_score) + (1 - ratings) * torch.log(1 - gcn_score))
             gcn_loss = (gcn_loss * weights).mean()
-            gcn_loss = gcn_loss * (1 - ncf_gcn_balance)
-            loss = loss + gcn_loss
-            return loss
+            gcn_loss = gcn_loss
+            return gcn_loss, h_src, h_dst
 
-        self.__train__(model, g_train, get_samples, hyperparams, loss_fn)
+        def loss_fn_ncf(model, src, dst, nodeflow, weights, ratings):
+            gcn_loss, h_src, h_dst = loss_fn_gcn(model, src, dst, nodeflow, weights, ratings)
+            score = model.ncf(src, dst, h_src, h_dst)
+            loss = -1 * (ratings * torch.log(score) + (1 - ratings) * torch.log(1 - score))
+            loss = loss * weights
+            loss = loss.mean()
+            return loss, h_src, h_dst
+
+        def get_gcn_vectors():
+            model.eval()
+            sampler = dgl.contrib.sampling.NeighborSampler(
+                g_train,
+                batch_size,
+                5,
+                gcn_layers,
+                seed_nodes=torch.arange(g_train.number_of_nodes()),
+                prefetch=True,
+                add_self_loop=True,
+                shuffle=False,
+                num_workers=self.cpu
+            )
+
+            with torch.no_grad():
+                h = []
+                for nf in sampler:
+                    h.append(model.gcn.forward(nf))
+                h = torch.cat(h)
+            return h
+
+        import copy
+        hp_gcn = copy.deepcopy(hyperparams)
+        hp_ncf = copy.deepcopy(hyperparams)
+        hp_gcn["epochs"] = gcn_epochs
+        hp_ncf["epochs"] = ncf_epochs
+        self.__train__(model, g_train, get_samples, hp_gcn, loss_fn_gcn)
+        knn_vectors = get_gcn_vectors()
+        if ncf_epochs > 0:
+            self.__train__(model, g_train, get_samples, hp_ncf, loss_fn_ncf)
         gc.collect()
-        model.eval()
-        sampler = dgl.contrib.sampling.NeighborSampler(
-            g_train,
-            batch_size,
-            5,
-            gcn_layers,
-            seed_nodes=torch.arange(g_train.number_of_nodes()),
-            prefetch=True,
-            add_self_loop=True,
-            shuffle=False,
-            num_workers=self.cpu
-        )
-
-        with torch.no_grad():
-            h = []
-            for nf in sampler:
-                h.append(model.gcn.forward(nf))
-            h = torch.cat(h)
 
         prediction_artifacts = {"model": model.ncf,
-                                "h": h}
+                                "h": get_gcn_vectors(),
+                                "knn_vectors": knn_vectors}
         model_parameters = filter(lambda p: p.requires_grad, model.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
         self.log.info("Built Prediction Network, model params = %s", params)
@@ -307,7 +305,7 @@ class GcnNCF(RecommendationBase):
         return prediction_artifacts
 
     def predict(self, node_pairs: List[Tuple[Node, Node]]) -> List[float]:
-        if self.ncf_gcn_balance == 0:
+        if not self.ncf_enabled:
             src, dst = zip(*node_pairs)
             results = (self.get_embeddings(src) * self.get_embeddings(dst)).sum(1)
             results = (results + 1) / 2
@@ -355,7 +353,7 @@ class GcnNCF(RecommendationBase):
 
         embedding = np.average(embedding_list, axis=0)
         node_dist_list = self.knn.query(embedding, node_type, k=k)
-        if self.ncf_gcn_balance == 0:
+        if not self.ncf_enabled:
             nodes, dist = zip(*node_dist_list)
             dist = np.array(dist)
             dist = (-1 * dist + 2)/2
@@ -377,7 +375,9 @@ class GcnNCF(RecommendationBase):
         hyperparameters = {} if "hyperparameters" not in kwargs else kwargs["hyperparameters"]
         gcn_ncf_params = {} if "gcn_ncf_params" not in hyperparameters else \
             hyperparameters["gcn_ncf_params"]
-        ncf_gcn_balance = gcn_ncf_params["ncf_gcn_balance"] if "ncf_gcn_balance" in gcn_ncf_params else 1.0
+        ncf_epochs = gcn_ncf_params["ncf_epochs"] if "ncf_epochs" in gcn_ncf_params else 0
+        gcn_epochs = gcn_ncf_params["gcn_epochs"] if "gcn_epochs" in gcn_ncf_params else 1
+        assert gcn_epochs >= 1
 
         use_content = hyperparameters["use_content"] if "use_content" in hyperparameters else False
         content_data_used = len(node_data) != 0 and use_content
@@ -406,11 +406,13 @@ class GcnNCF(RecommendationBase):
         gc.collect()
         self.log.debug("Hybrid Base: Built Prediction Network.")
 
-        collaborative_vectors = self.prediction_artifacts["h"][1:].numpy()
-        if ncf_gcn_balance == 0:
+        collaborative_vectors = self.prediction_artifacts["knn_vectors"][1:].numpy()
+        self.prediction_artifacts["knn_vectors"] = None
+        del self.prediction_artifacts["knn_vectors"]
+        if ncf_epochs == 0:
             self.prediction_artifacts = None
             del self.prediction_artifacts
-        self.ncf_gcn_balance = ncf_gcn_balance
+        self.ncf_enabled = ncf_epochs > 0
 
         knn_vectors = self.prepare_for_knn(content_vectors, collaborative_vectors)
         self.__build_knn__(knn_vectors)
