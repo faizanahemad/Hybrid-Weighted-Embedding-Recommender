@@ -88,8 +88,6 @@ class GraphConv(nn.Module):
 
     def post_process(self, h_concat, h, h_agg):
         h_new = self.W(h_concat)
-        if self.prediction_layer:
-            h_new = self.pred(h_new)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
 
