@@ -51,12 +51,12 @@ def init_bias(param):
     nn.init.normal_(param, 0, 0.001)
 
 
-def build_content_layer(in_dims, out_dims, noise):
-    w1 = nn.Linear(in_dims, out_dims)
+def build_content_layer(in_dims, out_dims):
+    w1 = nn.Linear(in_dims, out_dims * 2)
     init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-    w = nn.Linear(out_dims, out_dims)
+    w = nn.Linear(out_dims * 2, out_dims)
     init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
-    proj = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w, nn.LeakyReLU(0.1)]
+    proj = [w1, nn.LeakyReLU(negative_slope=0.1), w, nn.LeakyReLU(0.1)]
     return nn.Sequential(*proj)
 
 
@@ -71,7 +71,7 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
 class GraphConv(nn.Module):
     def __init__(self, feature_size, out_dims, prediction_layer, gaussian_noise, depth):
         super(GraphConv, self).__init__()
-        layers = []
+        layers = [GaussianNoise(gaussian_noise)]
         depth = max(1, depth)
         width = 2
         for i in range(depth):
@@ -79,7 +79,6 @@ class GraphConv(nn.Module):
             out_width = width if i < depth - 1 else 1
             weights = nn.Linear(feature_size * in_width, feature_size * out_width)
             init_fc(weights, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.append(GaussianNoise(gaussian_noise))
             layers.append(weights)
             layers.append(nn.LeakyReLU(negative_slope=0.1))
 
@@ -123,7 +122,7 @@ class GraphConvModule(nn.Module):
         self.n_layers = n_layers
         width = 2
         noise = GaussianNoise(gaussian_noise)
-        self.proj = build_content_layer(n_content_dims, feature_size * width, noise)
+        self.proj = build_content_layer(n_content_dims, feature_size * width)
         self.G = G
         embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
