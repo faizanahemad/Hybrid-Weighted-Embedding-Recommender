@@ -37,7 +37,9 @@ class GaussianNoise(nn.Module):
 
 def mix_embeddings(ndata, proj):
     """Adds external (categorical and numeric) features into node representation G.ndata['h']"""
-    ndata['h'] = ndata['h'] + proj(ndata['content'])
+    h = ndata['h']
+    c = proj(ndata['content'])
+    ndata['h'] = h + c[:, :h.shape[1]]
 
 
 def init_weight(param, initializer, nonlinearity, nonlinearity_param=None):
@@ -73,8 +75,8 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
 class GraphConv(nn.Module):
     def __init__(self, in_dims, out_dims, gaussian_noise):
         super(GraphConv, self).__init__()
-        layers = []
-        expand = nn.Linear(in_dims * 2, in_dims * 4)
+        layers = [GaussianNoise(gaussian_noise)]
+        expand = nn.Linear(in_dims * 3, in_dims * 4)
         init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
         contract = nn.Linear(in_dims * 4, out_dims)
@@ -86,7 +88,7 @@ class GraphConv(nn.Module):
         h_agg = nodes.data['h_agg']
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
-        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
+        h_agg = (h_agg - h[:, :h_agg.shape[1]]) / (w - 1).clamp(min=1)  # HACK 1
         return h, h_agg
 
     def post_process(self, h_concat, h, h_agg):
@@ -108,6 +110,9 @@ class GraphConvModule(nn.Module):
         self.feature_size = feature_size
         self.n_layers = n_layers
         self.proj = build_content_layer(n_content_dims, feature_size)
+        # proj = [build_content_layer(n_content_dims, max(8, int(self.feature_size / (2 ** (n_layers - i))))) for i in
+        #         range(n_layers + 1)]
+        # self.proj = nn.ModuleList(proj)
         self.G = G
         embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
@@ -119,9 +124,10 @@ class GraphConvModule(nn.Module):
                 init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
 
-        convs = [GaussianNoise(gaussian_noise)]
+        convs = []
         for i in range(n_layers):
-            conv = GraphConv(feature_size, feature_size, gaussian_noise)
+            conv = GraphConv(max(8, int(self.feature_size/(2 ** (n_layers - i)))),
+                             max(8, int(self.feature_size/(2 ** (n_layers - i - 1)))), gaussian_noise if i == 0 else 0)
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
@@ -136,7 +142,7 @@ class GraphConvModule(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
+            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)[:, :max(8, int(self.feature_size/(2 ** (nf.num_layers - i - 1))))]
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
@@ -157,7 +163,7 @@ class ResnetConv(nn.Module):
         else:
             inp = in_dims * 3
 
-        layers = []
+        layers = [GaussianNoise(gaussian_noise)]
         expand = nn.Linear(inp, inp * 2)
         init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
@@ -208,7 +214,7 @@ class GraphResnetConvModule(nn.Module):
                 from sklearn.decomposition import PCA
                 init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
             self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
-        self.convs = nn.ModuleList([ResnetConv(feature_size, feature_size, i == 0, gaussian_noise) for i in range(n_layers)])
+        self.convs = nn.ModuleList([ResnetConv(feature_size, feature_size, i == 0, gaussian_noise if i == 0 else 0) for i in range(n_layers)])
 
         m_init = [FN.copy_src('h', 'h'),
                FN.copy_src('one', 'one')]
