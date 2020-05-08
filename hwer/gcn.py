@@ -69,27 +69,14 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
 
 
 class GraphConv(nn.Module):
-    def __init__(self, feature_size, out_dims, prediction_layer, gaussian_noise, depth):
+    def __init__(self, in_dims, out_dims, prediction_layer, gaussian_noise, depth):
         super(GraphConv, self).__init__()
         layers = [GaussianNoise(gaussian_noise)]
-        depth = max(1, depth)
-        width = 2
-        for i in range(depth):
-            in_width = 2 if i == 0 else width
-            out_width = width if i < depth - 1 else 1
-            weights = nn.Linear(feature_size * in_width, feature_size * out_width)
-            init_fc(weights, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.append(weights)
-            layers.append(nn.LeakyReLU(negative_slope=0.1))
-
-        self.prediction_layer = prediction_layer
-
-        if prediction_layer:
-            pred_prev = nn.Linear(feature_size * out_width, feature_size)
-            init_fc(pred_prev, 'xavier_uniform_', 'leaky_relu', 0.1)
-            pred = nn.Linear(feature_size, out_dims)
-            init_fc(pred, 'xavier_uniform_', 'linear', 0.1)
-            self.pred = nn.Sequential(pred_prev, nn.LeakyReLU(0.1), pred)
+        expand = nn.Linear(in_dims * 2, in_dims * 4)
+        init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
+        layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
+        contract = nn.Linear(in_dims * 4, out_dims)
+        layers.append(contract)
         self.W = nn.Sequential(*layers)
 
     def pre_process(self, nodes):
@@ -103,7 +90,7 @@ class GraphConv(nn.Module):
         h_new = self.W(h_concat)
         if self.prediction_layer:
             h_new = self.pred(h_new)
-            h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
+        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
 
     def forward(self, nodes):
