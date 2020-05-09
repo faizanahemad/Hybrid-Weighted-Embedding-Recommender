@@ -33,8 +33,8 @@ class NCF(nn.Module):
         noise = GaussianNoise(gaussian_noise)
         layers = [noise]
         for layer_idx in range(1, depth + 1):
-            iw = 2 if layer_idx == 1 else 4
-            ow = 1 if layer_idx == depth else 4
+            iw = 4 if layer_idx == 2 else 2
+            ow = 1 if layer_idx == depth else (4 if layer_idx == 1 else 2)
             wx = nn.Linear(feature_size * iw, feature_size * ow)
             init_fc(wx, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.extend([wx, nn.LeakyReLU(negative_slope=0.1)])
