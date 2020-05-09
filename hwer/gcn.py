@@ -89,7 +89,7 @@ class GraphConv(nn.Module):
         super(GraphConv, self).__init__()
         layers = [GaussianNoise(gaussian_noise)]
         if prediction_layer:
-            expand = nn.Linear(in_dims * (2 if prediction_layer else 3), in_dims * 4)
+            expand = nn.Linear(in_dims * (2 if prediction_layer else 5), in_dims * 4)
             init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
             contract = nn.Linear(in_dims * 4, out_dims)
@@ -97,7 +97,7 @@ class GraphConv(nn.Module):
             layers.append(contract)
             self.W = nn.Sequential(*layers)
         else:
-            w = nn.Linear(in_dims * 3, out_dims)
+            w = nn.Linear(in_dims * 5, out_dims)
             self.W = w
 
     def forward(self, nodes):
@@ -120,25 +120,21 @@ class GraphConvModule(nn.Module):
         self.n_layers = n_layers
         self.proj = build_content_layer(n_content_dims, feature_size)
         self.G = G
-        embedding_dim = feature_size
+        embedding_dim = int(feature_size/2)
+        assert feature_size % 2 == 0
+        assert feature_size % 16 == 0
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
-        if init_node_vectors is None:
-            nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
-        else:
-            if embedding_dim != feature_size:
-                from sklearn.decomposition import PCA
-                init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
-            self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
-
+        nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
+        self.embedding_dim = embedding_dim
         convs = []
         for i in range(n_layers):
-            conv = GraphConv(max(8, int(self.feature_size/(2 ** (n_layers - i - 1)))),
-                             max(8, int(self.feature_size/(2 ** max(0, n_layers - i - 2)))),
+            conv = GraphConv(max(4, int(self.feature_size/(4 ** (n_layers - i - 1)))),
+                             max(4, int(self.feature_size/(4 ** max(0, n_layers - i - 2)))),
                              gaussian_noise if i == 0 else 0, i == n_layers - 1)
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
-        self.layer_dims = [max(8, int(self.feature_size/(2 ** (n_layers - i - 1)))) for i in range(n_layers + 1)]
+        self.layer_dims = [max(4, int(self.feature_size/(4 ** max(0, n_layers - i - 1)))) for i in range(n_layers + 1)]
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -150,7 +146,8 @@ class GraphConvModule(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)[:, :self.layer_dims[i]]
+            nh = self.node_emb(nf.layer_parent_nid(i) + 1)
+            nf.layers[i].data['h'] = nh[:, :self.layer_dims[i]] if self.layer_dims[i] <= self.embedding_dim else nh.repeat(1, int(self.layer_dims[i]/self.embedding_dim))
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:

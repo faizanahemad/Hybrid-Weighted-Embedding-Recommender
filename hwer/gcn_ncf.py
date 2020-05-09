@@ -203,7 +203,6 @@ class GcnNCF(RecommendationBase):
         ncf_layers = hyperparams["ncf_layers"] if "ncf_layers" in hyperparams else 2
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
         gaussian_noise = hyperparams["gaussian_noise"] if "gaussian_noise" in hyperparams else 0.0
-        label_smoothing_alpha = hyperparams["label_smoothing_alpha"] if "label_smoothing_alpha" in hyperparams else 0.1
         ncf_epochs = hyperparams["ncf_epochs"] if "ncf_epochs" in hyperparams else 0
         gcn_epochs = hyperparams["gcn_epochs"] if "gcn_epochs" in hyperparams else 1
 
@@ -239,7 +238,6 @@ class GcnNCF(RecommendationBase):
         eps = 5e-7
 
         def loss_fn_gcn(model, src, dst, nodeflow, weights, ratings):
-            ratings = (1 - label_smoothing_alpha) * ratings + label_smoothing_alpha / 2
             h_output = model.gcn(nodeflow)
             h_src = h_output[nodeflow.map_from_parent_nid(-1, src, True)]
             h_dst = h_output[nodeflow.map_from_parent_nid(-1, dst, True)]
