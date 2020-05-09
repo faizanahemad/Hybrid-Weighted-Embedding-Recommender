@@ -59,8 +59,8 @@ def build_content_layer(in_dims, out_dims):
     w1 = nn.Linear(in_dims, inter_dims)
     init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
     w = nn.Linear(inter_dims, out_dims)
-    init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)  # TODO: Try Linear layer instead of Relu
-    proj = [w1, nn.LeakyReLU(negative_slope=0.1), w, nn.LeakyReLU(negative_slope=0.1)]
+    init_fc(w, 'xavier_uniform_', 'linear', 0.1)
+    proj = [w1, nn.LeakyReLU(negative_slope=0.1), w]
     return nn.Sequential(*proj)
 
 
