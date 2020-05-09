@@ -88,13 +88,17 @@ class GraphConv(nn.Module):
     def __init__(self, in_dims, out_dims, gaussian_noise, prediction_layer):
         super(GraphConv, self).__init__()
         layers = [GaussianNoise(gaussian_noise)]
-        expand = nn.Linear(in_dims * (2 if prediction_layer else 3), in_dims * 4)
-        init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
-        layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
-        contract = nn.Linear(in_dims * 4, out_dims)
-        init_fc(expand, 'xavier_uniform_', 'linear', 0.1)
-        layers.append(contract)
-        self.W = nn.Sequential(*layers)
+        if prediction_layer:
+            expand = nn.Linear(in_dims * (2 if prediction_layer else 3), in_dims * 4)
+            init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
+            layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
+            contract = nn.Linear(in_dims * 4, out_dims)
+            init_fc(expand, 'xavier_uniform_', 'linear', 0.1)
+            layers.append(contract)
+            self.W = nn.Sequential(*layers)
+        else:
+            w = nn.Linear(in_dims * 3, out_dims)
+            self.W = w
 
     def forward(self, nodes):
         h_agg = nodes.data['h_agg']
