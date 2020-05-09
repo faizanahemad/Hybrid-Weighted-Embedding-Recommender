@@ -4,29 +4,6 @@ import torch.nn.functional as F
 from .gcn import *
 
 
-class LinearResnet(nn.Module):
-    def __init__(self, in_dims, out_dims, gaussian_noise=0.0):
-        super(LinearResnet, self).__init__()
-        noise = GaussianNoise(gaussian_noise)
-        w1 = nn.Linear(in_dims, out_dims)
-        init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-        w2 = nn.Linear(out_dims, out_dims)
-        init_fc(w2, 'xavier_uniform_', 'leaky_relu', 0.1)
-        residuals = [w1, nn.LeakyReLU(negative_slope=0.1), noise, w2, nn.LeakyReLU(negative_slope=0.1)]
-        self.residuals = nn.Sequential(*residuals)
-
-        self.skip = None
-        if in_dims != out_dims:
-            skip = nn.Linear(in_dims, out_dims)
-            init_fc(skip, 'xavier_uniform_', 'leaky_relu', 0.1)
-            self.skip = nn.Sequential(skip, nn.LeakyReLU(negative_slope=0.1))
-
-    def forward(self, x):
-        r = self.residuals(x)
-        x = x if self.skip is None else self.skip(x)
-        return x + r
-
-
 class NCF(nn.Module):
     def __init__(self, feature_size, depth, gaussian_noise):
         super(NCF, self).__init__()

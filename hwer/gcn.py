@@ -59,7 +59,7 @@ def build_content_layer(in_dims, out_dims):
     w1 = nn.Linear(in_dims, inter_dims)
     init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
     w = nn.Linear(inter_dims, out_dims)
-    init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)
+    init_fc(w, 'xavier_uniform_', 'leaky_relu', 0.1)  # TODO: Try Linear layer instead of Relu
     proj = [w1, nn.LeakyReLU(negative_slope=0.1), w, nn.LeakyReLU(negative_slope=0.1)]
     return nn.Sequential(*proj)
 
@@ -84,22 +84,15 @@ class GraphConv(nn.Module):
         layers.append(contract)
         self.W = nn.Sequential(*layers)
 
-    def pre_process(self, nodes):
+    def forward(self, nodes):
         h_agg = nodes.data['h_agg']
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
         h_agg = (h_agg - h[:, :h_agg.shape[1]]) / (w - 1).clamp(min=1)  # HACK 1
-        return h, h_agg
-
-    def post_process(self, h_concat, h, h_agg):
+        h_concat = torch.cat([h, h_agg], 1)
         h_new = self.W(h_concat)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
-
-    def forward(self, nodes):
-        h, h_agg = self.pre_process(nodes)
-        h_concat = torch.cat([h, h_agg], 1)
-        return self.post_process(h_concat, h, h_agg)
 
 
 class GraphConvModule(nn.Module):
@@ -152,92 +145,6 @@ class GraphConvModule(nn.Module):
         assert (result != result).sum() == 0
         return result
 
-
-class ResnetConv(nn.Module):
-    def __init__(self, in_dims, out_dims, first_layer, gaussian_noise):
-        super(ResnetConv, self).__init__()
-        if first_layer:
-            inp = in_dims * 2
-        else:
-            inp = in_dims * 3
-
-        layers = [GaussianNoise(gaussian_noise)]
-        expand = nn.Linear(inp, inp * 2)
-        init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
-        layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
-        contract = nn.Linear(inp * 2, out_dims)
-        init_fc(expand, 'xavier_uniform_', 'linear', 0.1)
-        layers.append(contract)
-        self.W = nn.Sequential(*layers)
-        self.skip = None
-        if in_dims != out_dims:
-            self.skip = nn.Linear(in_dims, out_dims)
-            init_fc(self.skip, 'xavier_uniform_', 'leaky_relu', 0.1)
-        self.W = nn.Sequential(*layers)
-        self.first_layer = first_layer
-
-    def forward(self, nodes):
-        h_agg = nodes.data['h_agg']
-        h = nodes.data['h']
-        w = nodes.data['w'][:, None]
-        h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
-        if self.first_layer:
-            h_concat = torch.cat([h, h_agg], 1)
-        else:
-            h_residue = nodes.data['h_residue']
-            h_concat = torch.cat([h, h_agg, h_residue], 1)
-        h_new = self.W(h_concat)
-        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-6)
-        # skip
-        h_agg = self.skip(h_agg) if self.skip is not None else h_agg
-        h_agg = h_agg / h_agg.norm(dim=1, keepdim=True).clamp(min=1e-6)
-        return {'h': h_new, 'h_residue': h_agg}
-
-
-class GraphResnetConvModule(nn.Module):
-    def __init__(self, n_content_dims, feature_size, n_layers, G,
-                 gaussian_noise, init_node_vectors=None,):
-        super(GraphResnetConvModule, self).__init__()
-
-        self.feature_size = feature_size
-        self.n_layers = n_layers
-        self.proj = build_content_layer(n_content_dims, feature_size)
-        self.G = G
-        embedding_dim = feature_size
-        self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
-        if init_node_vectors is None:
-            nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
-        else:
-            if embedding_dim != feature_size:
-                from sklearn.decomposition import PCA
-                init_node_vectors = torch.FloatTensor(PCA(n_components=embedding_dim, ).fit_transform(init_node_vectors))
-            self.node_emb = nn.Embedding.from_pretrained(init_node_vectors, freeze=False)
-        self.convs = nn.ModuleList([ResnetConv(feature_size, feature_size, i == 0, gaussian_noise if i == 0 else 0) for i in range(n_layers)])
-
-        m_init = [FN.copy_src('h', 'h'),
-               FN.copy_src('one', 'one')]
-        r_init = [FN.sum('h', 'h_agg'), FN.sum('one', 'w')]
-        m = [FN.copy_src('h', 'h'),
-             FN.copy_src('h_residue', 'h_residue'),
-             FN.copy_src('one', 'one')]
-        r = [FN.sum('h', 'h_agg'), FN.sum('h_residue', 'h_residue'), FN.sum('one', 'w')]
-        self.msg = [m_init if i == 0 else m for i in range(n_layers)]
-        self.red = [r_init if i == 0 else r for i in range(n_layers)]
-
-    def forward(self, nf):
-        nf.copy_from_parent(edge_embed_names=None)
-        for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)
-            nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
-            mix_embeddings(nf.layers[i].data, self.proj)
-        if self.n_layers == 0:
-            return nf.layers[i].data['h']
-        for i in range(self.n_layers):
-            nf.block_compute(i, self.msg[i], self.red[i], self.convs[i])
-
-        result = nf.layers[self.n_layers].data['h']
-        assert (result != result).sum() == 0
-        return result
 # h_src.unsqueeze(1).expand(h_src.size(0), 1, h_src.size(1)).bmm(torch.transpose(h_negs, 1, 2)))
 
 
