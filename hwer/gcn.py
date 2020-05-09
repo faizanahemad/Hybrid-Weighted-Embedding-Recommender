@@ -55,7 +55,19 @@ def init_bias(param):
 
 
 def build_content_layer(in_dims, out_dims):
-    inter_dims = 2 ** int((np.log2(in_dims*2)))
+    f = lambda x: 2 ** int((np.log2(x)))
+    g = lambda x: 2 ** int((np.log2(x * 2)))
+
+    h = lambda x: 2 ** int((np.log2(x / 2)))
+    i = lambda x: 2 ** int((np.log2(x / 4)))
+
+    if f(in_dims) + i(in_dims) > in_dims:
+        inter_dims = f(in_dims) + i(in_dims)
+    elif f(in_dims) + h(in_dims) > in_dims:
+        inter_dims = f(in_dims) + h(in_dims)
+    else:
+        inter_dims = g(in_dims)
+
     w1 = nn.Linear(in_dims, inter_dims)
     init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
     w = nn.Linear(inter_dims, out_dims)
