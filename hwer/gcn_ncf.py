@@ -236,15 +236,16 @@ class GcnNCF(RecommendationBase):
             dst = dst + 1
             return src, dst, weights, ratings
 
+        eps = 5e-7
+
         def loss_fn_gcn(model, src, dst, nodeflow, weights, ratings):
             ratings = (1 - label_smoothing_alpha) * ratings + label_smoothing_alpha / 2
             h_output = model.gcn(nodeflow)
             h_src = h_output[nodeflow.map_from_parent_nid(-1, src, True)]
             h_dst = h_output[nodeflow.map_from_parent_nid(-1, dst, True)]
             gcn_score = (h_src * h_dst).sum(1)
-            eps = 1e-6
-            gcn_score = (gcn_score + 1 + eps)/(2 + 2*eps)
-            gcn_loss = -1 * (ratings * torch.log(gcn_score) + (1 - ratings) * torch.log(1 - gcn_score))
+            gcn_score = ((gcn_score + 1.0)/2.0).clamp(min=eps, max=1-eps)
+            gcn_loss = -1 * (ratings * torch.log(gcn_score + eps) + (1 - ratings) * torch.log(1 - (gcn_score - eps)))
             gcn_loss = (gcn_loss * weights).mean()
             gcn_loss = gcn_loss
             return gcn_loss, h_src, h_dst

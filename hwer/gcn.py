@@ -134,6 +134,7 @@ class GraphConvModule(nn.Module):
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
+        self.layer_dims = [max(8, int(self.feature_size/(2 ** (n_layers - i - 1)))) for i in range(n_layers + 1)]
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -145,7 +146,7 @@ class GraphConvModule(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)[:, :max(8, int(self.feature_size/(2 ** (nf.num_layers - i - 2))))]
+            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)[:, :self.layer_dims[i]]
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
