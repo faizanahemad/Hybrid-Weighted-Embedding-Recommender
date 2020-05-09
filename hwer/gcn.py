@@ -73,10 +73,10 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
 
 
 class GraphConv(nn.Module):
-    def __init__(self, in_dims, out_dims, gaussian_noise):
+    def __init__(self, in_dims, out_dims, gaussian_noise, prediction_layer):
         super(GraphConv, self).__init__()
         layers = [GaussianNoise(gaussian_noise)]
-        expand = nn.Linear(in_dims * 3, in_dims * 4)
+        expand = nn.Linear(in_dims * (2 if prediction_layer else 3), in_dims * 4)
         init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
         layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
         contract = nn.Linear(in_dims * 4, out_dims)
@@ -110,9 +110,6 @@ class GraphConvModule(nn.Module):
         self.feature_size = feature_size
         self.n_layers = n_layers
         self.proj = build_content_layer(n_content_dims, feature_size)
-        # proj = [build_content_layer(n_content_dims, max(8, int(self.feature_size / (2 ** (n_layers - i))))) for i in
-        #         range(n_layers + 1)]
-        # self.proj = nn.ModuleList(proj)
         self.G = G
         embedding_dim = feature_size
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
@@ -126,8 +123,9 @@ class GraphConvModule(nn.Module):
 
         convs = []
         for i in range(n_layers):
-            conv = GraphConv(max(8, int(self.feature_size/(2 ** (n_layers - i)))),
-                             max(8, int(self.feature_size/(2 ** (n_layers - i - 1)))), gaussian_noise if i == 0 else 0)
+            conv = GraphConv(max(8, int(self.feature_size/(2 ** (n_layers - i - 1)))),
+                             max(8, int(self.feature_size/(2 ** max(0, n_layers - i - 2)))),
+                             gaussian_noise if i == 0 else 0, i == n_layers - 1)
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
@@ -142,7 +140,7 @@ class GraphConvModule(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)[:, :max(8, int(self.feature_size/(2 ** (nf.num_layers - i - 1))))]
+            nf.layers[i].data['h'] = self.node_emb(nf.layer_parent_nid(i) + 1)[:, :max(8, int(self.feature_size/(2 ** (nf.num_layers - i - 2))))]
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
