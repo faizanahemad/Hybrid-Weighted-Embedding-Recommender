@@ -89,7 +89,7 @@ class GraphConv(nn.Module):
         super(GraphConv, self).__init__()
         layers = [GaussianNoise(gaussian_noise)]
         if prediction_layer:
-            expand = nn.Linear(in_dims * (2 if prediction_layer else 5), in_dims * 4)
+            expand = nn.Linear(in_dims, in_dims * 4)
             init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
             layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
             contract = nn.Linear(in_dims * 4, out_dims)
@@ -105,19 +105,19 @@ class GraphConv(nn.Module):
         w = nodes.data['w'][:, None]
         
         if self.prediction_layer:
-            h_agg = (h_agg - h[:, :h_agg.shape[1]]) / (w - 1).clamp(min=1)  # HACK 1
+            h_agg = (h_agg - h) / (w - 1).clamp(min=1)  # HACK 1
             h_concat = torch.cat([h, h_agg], 1)
             h_new = self.W(h_concat)
         else:
             h_agg = h_agg / w
-            h_new = torch.cat([h_agg,h[:, h_agg.shape[1]:]], 1)
+            h_new = torch.cat([h_agg, h], 1)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
 
 
 class GraphConvModule(nn.Module):
     def __init__(self, n_content_dims, feature_size, n_layers, G,
-                 gaussian_noise, init_node_vectors=None,):
+                 gaussian_noise):
         super(GraphConvModule, self).__init__()
 
         self.feature_size = feature_size
@@ -138,8 +138,9 @@ class GraphConvModule(nn.Module):
             convs.append(conv)
 
         self.convs = nn.ModuleList(convs)
-        self.layer_dims = [max(4, int(self.feature_size/(4 ** max(0, n_layers - i - 1)))) for i in range(n_layers + 1)]
-        
+        layer_dims = [0] + [max(4, min(embedding_dim, int(self.feature_size/(4 ** max(0, n_layers - i - 1))))) for i in range(n_layers + 1)]
+        layer_dims = [[layer_dims[idx], layer_dims[min(idx+1, len(layer_dims) - 1)]] for idx, dim in enumerate(layer_dims)]
+        self.layer_dims = [[s, e] if s != e else [0, e] for s, e in layer_dims]
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -152,7 +153,7 @@ class GraphConvModule(nn.Module):
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
             nh = self.node_emb(nf.layer_parent_nid(i) + 1)
-            nf.layers[i].data['h'] = nh[:, :self.layer_dims[i]] if self.layer_dims[i] <= self.embedding_dim else nh.repeat(1, int(self.layer_dims[i]/self.embedding_dim))
+            nf.layers[i].data['h'] = nh[:, self.layer_dims[i][0]:self.layer_dims[i][1]]
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
         if self.n_layers == 0:
