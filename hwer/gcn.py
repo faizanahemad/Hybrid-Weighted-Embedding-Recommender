@@ -96,17 +96,21 @@ class GraphConv(nn.Module):
             init_fc(expand, 'xavier_uniform_', 'linear', 0.1)
             layers.append(contract)
             self.W = nn.Sequential(*layers)
-        else:
-            w = nn.Linear(in_dims * 5, out_dims)
-            self.W = w
+        
+        self.prediction_layer = prediction_layer
 
     def forward(self, nodes):
         h_agg = nodes.data['h_agg']
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
-        h_agg = (h_agg - h[:, :h_agg.shape[1]]) / (w - 1).clamp(min=1)  # HACK 1
-        h_concat = torch.cat([h, h_agg], 1)
-        h_new = self.W(h_concat)
+        
+        if self.prediction_layer:
+            h_agg = (h_agg - h[:, :h_agg.shape[1]]) / (w - 1).clamp(min=1)  # HACK 1
+            h_concat = torch.cat([h, h_agg], 1)
+            h_new = self.W(h_concat)
+        else:
+            h_agg = h_agg / w
+            h_new = torch.cat([h_agg,h[:, h_agg.shape[1]:]], 1)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
 
@@ -135,6 +139,7 @@ class GraphConvModule(nn.Module):
 
         self.convs = nn.ModuleList(convs)
         self.layer_dims = [max(4, int(self.feature_size/(4 ** max(0, n_layers - i - 1)))) for i in range(n_layers + 1)]
+        
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
