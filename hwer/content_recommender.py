@@ -3,6 +3,7 @@ from typing import List, Dict, Set
 import numpy as np
 from bidict import bidict
 from sklearn.preprocessing import OneHotEncoder
+from collections import defaultdict
 
 from .embed import BaseEmbed
 from .logging import getLogger
@@ -72,6 +73,15 @@ class ContentRecommendation(RecommendationBase):
         all_embeddings = np.concatenate((all_embeddings, ohe_node_types), axis=1)
         self.log.info("ContentRecommendation::__build_embeddings__:: Built Content Embedding with dims = %s" % str(
             all_embeddings.shape))
+        edges = list(edges) + [Edge(n, n, 1.0) for n in nodes]
+        adjacency_list = defaultdict(list)
+        for src, dst, w in edges:
+            adjacency_list[src].append(dst)
+            adjacency_list[dst].append(src)
+        nodes_to_idx = self.nodes_to_idx
+        adjacent_vectors = np.vstack([all_embeddings[[nodes_to_idx[adj] for adj in adjacency_list[n]]].mean(0) for n in nodes])
+        assert adjacent_vectors.shape == all_embeddings.shape
+        all_embeddings = (all_embeddings + adjacent_vectors)/2.0
         return all_embeddings
 
     def fit(self,
