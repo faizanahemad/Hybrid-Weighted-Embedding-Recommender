@@ -82,6 +82,7 @@ class ContentRecommendation(RecommendationBase):
 
         super().fit(nodes, edges, node_data)
         embeddings = self.__build_content_embeddings__(nodes, edges, node_data, self.n_dims)
+        embeddings = unit_length(embeddings, axis=1)
         self.__build_knn__(embeddings)
 
         # AutoEncoder them so that error is minimised and distance is maintained

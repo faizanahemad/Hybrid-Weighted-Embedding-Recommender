@@ -200,26 +200,23 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.5, patience=4, min_lr=0.0001)
     nan_prevent = tf.keras.callbacks.TerminateOnNaN()
     input_layer = tf.keras.Input(shape=(Inputs.shape[1],))
-    encoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=1e-5))(input_layer)
-    encoded = tf.keras.layers.Dense(n_dims * 2, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=1e-5))(encoded)
-    encoded = tf.keras.layers.Dense(n_dims, activation='elu')(encoded)
+    encoded = tf.keras.layers.Dense(n_dims * 4, activation='relu', kernel_regularizer=keras.regularizers.l1_l2(l2=1e-5), use_bias=False)(input_layer)
+    encoded = tf.keras.layers.Dense(n_dims, activation='linear', use_bias=False)(encoded)
     encoded = K.l2_normalize(encoded, axis=-1)
 
-    decoded = tf.keras.layers.Dense(n_dims * 2, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=1e-5))(encoded)
-    decoded = tf.keras.layers.Dense(n_dims * 4, activation='elu', activity_regularizer=keras.regularizers.l1_l2(l2=1e-5))(decoded)
-    decoded = tf.keras.layers.Dense(Outputs.shape[1])(decoded)
-    decoded = tf.keras.layers.LeakyReLU(alpha=0.1)(decoded)
+    decoded = tf.keras.layers.Dense(n_dims * 4, activation='relu', kernel_regularizer=keras.regularizers.l1_l2(l2=1e-5), use_bias=False)(encoded)
+    decoded = tf.keras.layers.Dense(Outputs.shape[1], use_bias=False)(decoded)
 
     autoencoder = tf.keras.Model(input_layer, decoded)
     encoder = tf.keras.Model(input_layer, encoded)
-    adam = tf.keras.optimizers.Adam(lr=0.01, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
+    adam = tf.keras.optimizers.Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
     autoencoder.compile(optimizer=adam, loss=loss, metrics=["mean_squared_error"])
     Inputs = Inputs.astype(float)
     Outputs = Outputs.astype(float)
     X1, X2, Y1, Y2 = train_test_split(Inputs, Outputs, test_size=0.5)
     autoencoder.fit(X1, Y1,
                     epochs=epochs,
-                    batch_size=1024,
+                    batch_size=2048,
                     shuffle=True,
                     verbose=verbose,
                     validation_data=(X2, Y2),
@@ -230,7 +227,7 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="val_loss", factor=0.2, patience=4, min_lr=0.00001)
     autoencoder.fit(X2, Y2,
                     epochs=epochs,
-                    batch_size=1024,
+                    batch_size=2048,
                     shuffle=True,
                     verbose=verbose,
                     validation_data=(X1, Y1),
@@ -239,8 +236,8 @@ def auto_encoder_transform(Inputs, Outputs, n_dims=32, verbose=0, epochs=10):
     K.set_value(autoencoder.optimizer.lr, 0.001)
     reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor="loss", factor=0.2, patience=1, min_lr=0.00001)
     autoencoder.fit(Inputs, Outputs,
-                    epochs=5,
-                    batch_size=1024,
+                    epochs=epochs,
+                    batch_size=2048,
                     shuffle=True,
                     verbose=verbose,
                     callbacks=[reduce_lr, nan_prevent])

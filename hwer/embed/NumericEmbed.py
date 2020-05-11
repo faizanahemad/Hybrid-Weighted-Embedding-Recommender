@@ -29,24 +29,18 @@ class NumericEmbed(BaseEmbed):
         self.sign = True
         self.scaler = None
         self.encoder = None
-        self.standard_scaler = None
         self.verbose = kwargs["verbose"] if "verbose" in kwargs else 0
         self.log = getLogger(type(self).__name__)
 
     def __prepare_inputs__(self, inputs):
         assert np.sum(np.isnan(inputs)) == 0
         assert np.sum(np.isinf(inputs)) == 0
-        if self.standard_scaler is None:
-            self.standard_scaler = StandardScaler()
-            standardized_inputs = self.standard_scaler.fit_transform(inputs)
-        else:
-            standardized_inputs = self.standard_scaler.transform(inputs)
 
         self.log_enabled = self.log_enabled and np.sum(inputs <= 1e-9) == 0
         self.sqrt = self.sqrt and np.sum(inputs < 0) == 0
         self.log1p_enabled = self.log1p_enabled and np.sum(inputs <= -1.0) == 0
         self.sign = self.sign and not self.log_enabled
-        results = np.concatenate((inputs, standardized_inputs), axis=1)
+        results = inputs.copy()
         if self.sign:
             results = np.concatenate((results, np.sign(inputs)), axis=1)
         if self.log_enabled:
@@ -72,8 +66,8 @@ class NumericEmbed(BaseEmbed):
 
         ranks = rankdata(inputs, axis=0) / len(inputs)
 
+        mean, var = np.mean(inputs, axis=0) / np.mean(inputs), np.std(inputs, axis=0) / np.std(inputs)
         inputs = self.__prepare_inputs__(inputs)
-        mean, var = self.standard_scaler.mean_, self.standard_scaler.var_
         mean = np.broadcast_to(mean, (len(inputs), len(mean)))
         var = np.broadcast_to(var, (len(inputs), len(var)))
         outputs = np.concatenate((inputs, ranks, mean, var), axis=1)
