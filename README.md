@@ -12,6 +12,9 @@ A Hybrid Recommendation system which uses Content embeddings and augments them w
 - Make system independent of content so recsys with no content can be used.
 - Make a section in readme of how to reproduce
 - From Factorization meets the neighborhood paper take section 6 - `evaluation of a top-K recommender` and implement its metric system
+- Priming of GCN vectors can be done by unbiased svd instead of word2vec
+- Positive, Negative and Anchor can be weighed separately
+- Validation module, try predicting link prediction accuracy by taking test links and mixing fake links in same proportion
 
 # TODO:
 - Paper: Figure out sections and relevant papers to take content arrangement hints.

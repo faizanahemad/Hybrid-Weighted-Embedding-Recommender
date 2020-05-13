@@ -15,11 +15,7 @@ import stanfordnlp
 
 # If you don't have stanfordnlp installed and the English models downloaded, please uncomment this statement
 # stanfordnlp.download('en', force=True)
-ap = argparse.ArgumentParser()
-ap.add_argument('--data', type=str, metavar='N', required=True,
-                    help='MovieLens 100K data location')
-args = vars(ap.parse_args())
-data = args["data"]
+data = "ml-100k"
 ml = movielens.MovieLens(data)
 
 
@@ -50,7 +46,7 @@ def init_bias(param):
     nn.init.normal_(param, 0, 0.001)
     
 from hwer.gcn import GaussianNoise
-from hwer.gcn import GraphSageConvWithSamplingBase as GraphSageConvWithSampling
+from hwer.gcn import GraphConv as GraphSageConvWithSampling
 
 
 class GraphSageWithSampling(nn.Module):
@@ -60,7 +56,7 @@ class GraphSageWithSampling(nn.Module):
         self.feature_size = feature_size
         self.n_layers = n_layers
 
-        self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size, i == n_layers - 1, gaussian_noise, conv_depth) for i in range(n_layers)])
+        self.convs = nn.ModuleList([GraphSageConvWithSampling(feature_size * 2, feature_size, i == n_layers - 1, gaussian_noise) for i in range(n_layers)])
         noise = GaussianNoise(gaussian_noise)
         self.emb = nn.ModuleDict()
         self.proj = nn.ModuleDict()

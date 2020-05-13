@@ -61,13 +61,16 @@ def ml100k_default_reader(directory):
 
     # read ratings
     print("Current dir = ", os.getcwd(), "Data dir =", directory)
-    with open(os.path.join(directory, 'u1.base')) as f:
+    i_dir = os.path.join(os.getcwd(), directory)
+    directory = os.getcwd()
+    print("dir =", directory, "I Dir =", i_dir)
+    with open(os.path.join(i_dir, 'u1.base')) as f:
         for l in f:
             rating = read_rating_line(l)
             rating["test"] = False
             rating["train"] = True
             ratings.append(rating)
-    with open(os.path.join(directory, 'u1.test')) as f:
+    with open(os.path.join(i_dir, 'u1.test')) as f:
         for l in f:
             rating = read_rating_line(l)
             rating["test"] = True
@@ -81,14 +84,14 @@ def ml100k_default_reader(directory):
 
     # read users - if user feature does not exist, we find all unique user IDs
     # appeared in the rating table and create an empty table from that.
-    user_file = os.path.join(directory, 'u.user')
+    user_file = os.path.join(i_dir, 'u.user')
     with open(user_file) as f:
         for l in f:
             users.append(read_user_line(l))
     users = pd.DataFrame(users).set_index('id').astype('category')
 
     # read products
-    with open(os.path.join(directory, 'u.item'), encoding='latin1') as f:
+    with open(os.path.join(i_dir, 'u.item'), encoding='latin1') as f:
         for l in f:
             products.append(read_product_line(l))
     products = (
@@ -113,7 +116,7 @@ def ml100k_default_reader(directory):
 
 class MovieLens(object):
 
-    def __init__(self, directory, split_by_time=None):
+    def __init__(self, directory="ml-100k", split_by_time=None):
         """
 
         :param directory:

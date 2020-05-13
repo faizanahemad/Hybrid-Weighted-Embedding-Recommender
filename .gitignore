@@ -117,7 +117,6 @@ tmdb_api_key.txt
 
 
 examples/Movie-Lens/1M/movies.csv
-examples/Movie-Lens/1M/placeholder.txt
 examples/Movie-Lens/1M/ratings.csv
 examples/Movie-Lens/1M/tmdb_data.csv
 examples/Movie-Lens/1M/users.csv
@@ -128,34 +127,9 @@ examples/Movie-Lens/tmbd_api_key.txt
 *.txt
 examples/Movie-Lens/1M/sentences.txt
 
-examples/KDD-2019-Hands-on/1_community_detection/
-examples/KDD-2019-Hands-on/2_clustering/.gitignore
-examples/KDD-2019-Hands-on/2_clustering/gnn_cluster.ipynb
-examples/KDD-2019-Hands-on/2_clustering/gnn_clustering.pdf
-examples/KDD-2019-Hands-on/2_clustering/gnn_utils.py
-examples/KDD-2019-Hands-on/2_clustering/img/
-examples/KDD-2019-Hands-on/2_clustering/launch.sh
-examples/KDD-2019-Hands-on/2_clustering/tracks.pickle
-examples/KDD-2019-Hands-on/3_recommender_system/Rec.pptx
-examples/KDD-2019-Hands-on/3_recommender_system/Recommendation-nodeflow.ipynb
-examples/KDD-2019-Hands-on/3_recommender_system/Recommendation-old.ipynb
-examples/KDD-2019-Hands-on/3_recommender_system/Recommendation-pytorch.ipynb
-examples/KDD-2019-Hands-on/3_recommender_system/Recommendation.ipynb
-examples/KDD-2019-Hands-on/3_recommender_system/ml-100k/
-examples/KDD-2019-Hands-on/3_recommender_system/movielens.py
-examples/KDD-2019-Hands-on/3_recommender_system/movielens_torch.py
-examples/KDD-2019-Hands-on/3_recommender_system/movies.dat
-examples/KDD-2019-Hands-on/3_recommender_system/ratings.dat
-examples/KDD-2019-Hands-on/3_recommender_system/recommendation-pytorch.py
-examples/KDD-2019-Hands-on/3_recommender_system/sampling.pptx
-examples/KDD-2019-Hands-on/3_recommender_system/users.dat
-examples/KDD-2019-Hands-on/Dockerfile
-examples/KDD-2019-Hands-on/README.md
-examples/KDD-2019-Hands-on/install_env.sh
 examples/Movie-Lens/100K/ml-100k/
 examples/Movie-Lens/20M/Movie-Lens-20M-Content-Builder.ipynb
 examples/approximating_functions_with_nn.py
 examples/basic_negative_sampling_loss.py
-examples/numba_example.py
 examples/Movie-Lens/hyperopt_trials/
 *.png
