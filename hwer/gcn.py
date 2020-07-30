@@ -122,11 +122,11 @@ class GraphConv(nn.Module):
             self.gaussian_noise = GaussianNoise(gaussian_noise)
             self.n_layer = layer
             self.in_dims = in_dims
-            self.pos_encoder = PositionalEncoding(in_dims)
-            self.ln = nn.LayerNorm(in_dims)
-            self.self_ln = nn.LayerNorm(in_dims)
-            decoder_layer = TransformerDecoderLayer(in_dims, 2, in_dims * 4, 0.0, "gelu")
-            self.decoder = TransformerDecoder(decoder_layer, 2)
+            lin0 = nn.Linear(in_dims * (layer + 1), out_dims * 4)
+            init_fc(lin0, "xavier_uniform", "leaky_relu")
+            lin1 = nn.Linear(out_dims * 4, out_dims)
+            init_fc(lin1, "xavier_uniform", "linear")
+            self.fc = nn.Sequential(lin0, nn.LeakyReLU(), self.gaussian_noise, lin1)
         
         self.prediction_layer = prediction_layer
 
@@ -135,14 +135,9 @@ class GraphConv(nn.Module):
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
         h_agg = h_agg / w
-
+        h_new = torch.cat([h_agg, h], 1)
         if self.prediction_layer:
-            h_agg = h_agg.reshape((h_agg.size(0), self.n_layer, self.in_dims))
-            h_agg = h_agg.transpose(0, 1)
-            h = h.unsqueeze(1).transpose(0, 1)
-            h_new = self.decoder(h, h_agg).transpose(0, 1).squeeze()
-        else:
-            h_new = torch.cat([h_agg, h], 1)
+            h_new = self.fc(h_new)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
 
