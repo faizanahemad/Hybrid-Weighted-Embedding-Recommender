@@ -39,7 +39,7 @@ class GcnNCF(RecommendationBase):
                         edges: List[Edge], hyperparams):
 
         ns_w2v_proportion = hyperparams["ns_w2v_proportion"] if "ns_w2v_proportion" in hyperparams else 0
-        ns_w2v_exponent = hyperparams["ns_w2v"] if "ns_w2v" in hyperparams else 3.0 / 4.0
+        ns_w2v_exponent = hyperparams["ns_w2v_exponent"] if "ns_w2v_exponent" in hyperparams else 3.0 / 4.0
         proportion = int(len(edges) * ns_w2v_proportion)
         from collections import Counter
         total_nodes = len(nodes)
@@ -82,7 +82,6 @@ class GcnNCF(RecommendationBase):
                         hyperparams):
         ns_proportion = hyperparams["ns_proportion"] if "ns_proportion" in hyperparams else 1
         ns_w2v_proportion = hyperparams["ns_w2v_proportion"] if "ns_w2v_proportion" in hyperparams else 0
-        ns_w2v_exponent = hyperparams["ns_w2v_exponent"] if "ns_w2v_exponent" in hyperparams else 3.0/4.0
 
         affinities = [(node_to_index[e.src], node_to_index[e.dst], e.weight) for e in edges]
         total_nodes = len(nodes)

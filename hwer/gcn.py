@@ -5,6 +5,8 @@ import dgl
 import dgl.function as FN
 import numpy as np
 dgl.load_backend('pytorch')
+from torch.nn import TransformerDecoder, TransformerDecoderLayer, TransformerEncoder, LayerNorm, TransformerEncoderLayer
+import math
 
 
 class GaussianNoise(nn.Module):
@@ -55,24 +57,9 @@ def init_bias(param):
 
 
 def build_content_layer(in_dims, out_dims):
-    f = lambda x: 2 ** int((np.log2(x)))
-    g = lambda x: 2 ** int((np.log2(x * 2)))
-
-    h = lambda x: 2 ** int((np.log2(x / 2)))
-    i = lambda x: 2 ** int((np.log2(x / 4)))
-
-    if f(in_dims) + i(in_dims) > in_dims:
-        inter_dims = f(in_dims) + i(in_dims)
-    elif f(in_dims) + h(in_dims) > in_dims:
-        inter_dims = f(in_dims) + h(in_dims)
-    else:
-        inter_dims = g(in_dims)
-
-    w1 = nn.Linear(in_dims, inter_dims)
+    w1 = nn.Linear(in_dims, out_dims)
     init_fc(w1, 'xavier_uniform_', 'leaky_relu', 0.1)
-    w = nn.Linear(inter_dims, out_dims)
-    init_fc(w, 'xavier_uniform_', 'linear', 0.1)
-    proj = [w1, nn.LeakyReLU(negative_slope=0.1), w]
+    proj = [w1, nn.LeakyReLU(negative_slope=0.1), nn.LayerNorm(out_dims)]
     return nn.Sequential(*proj)
 
 
@@ -83,19 +70,69 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
     except AttributeError:
         pass
 
+class PositionalEncoding(nn.Module):
+    r"""Inject some information about the relative or absolute position of the tokens
+        in the sequence. The positional encodings have the same dimension as
+        the embeddings, so that the two can be summed. Here, we use sine and cosine
+        functions of different frequencies.
+    .. math::
+        \text{PosEncoder}(pos, 2i) = sin(pos/10000^(2i/d_model))
+        \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
+        \text{where pos is the word position and i is the embed idx)
+    Args:
+        d_model: the embed dim (required).
+        dropout: the dropout value (default=0.1).
+        max_len: the max. length of the incoming sequence (default=5000).
+    Examples:
+        >>> pos_encoder = PositionalEncoding(d_model)
+    """
+
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        r"""Inputs of forward function
+        Args:
+            x: the sequence fed to the positional encoder model (required).
+        Shape:
+            x: [sequence length, batch size, embed dim]
+            output: [sequence length, batch size, embed dim]
+        Examples:
+            >>> output = pos_encoder(x)
+        """
+
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
 
 class GraphConv(nn.Module):
-    def __init__(self, in_dims, out_dims, gaussian_noise, prediction_layer):
+    def __init__(self, in_dims, out_dims, layer, gaussian_noise, prediction_layer):
         super(GraphConv, self).__init__()
-        layers = [GaussianNoise(gaussian_noise)]
+        # TODO: h transform for non-prediction layer
         if prediction_layer:
-            expand = nn.Linear(in_dims, in_dims * 2)
-            init_fc(expand, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.extend([expand, nn.LeakyReLU(negative_slope=0.1)])
-            contract = nn.Linear(in_dims * 2, out_dims)
-            init_fc(expand, 'xavier_uniform_', 'linear', 0.1)
-            layers.append(contract)
-            self.W = nn.Sequential(*layers)
+            self.gaussian_noise = GaussianNoise(gaussian_noise)
+            self.n_layer = layer
+            self.in_dims = in_dims
+            self.pos_encoder = PositionalEncoding(in_dims)
+            self.ln = nn.LayerNorm(in_dims)
+            self.self_ln = nn.LayerNorm(in_dims)
+            decoder_layer = TransformerDecoderLayer(in_dims, 2, in_dims * 4, 0.1, "gelu")
+            self.decoder = TransformerDecoder(decoder_layer, 2)
+        else:
+            ht = nn.Linear(in_dims, in_dims * 2)
+            init_fc(ht, "xavier_uniform", "leaky_relu")
+            ht2 = nn.Linear(in_dims * 2, in_dims)
+            init_fc(ht2, "xavier_uniform", "linear")
+            self.ht = nn.Sequential(ht, nn.LeakyReLU(), nn.Dropout(0.1), ht2)
         
         self.prediction_layer = prediction_layer
 
@@ -104,9 +141,18 @@ class GraphConv(nn.Module):
         h = nodes.data['h']
         w = nodes.data['w'][:, None]
         h_agg = h_agg / w
-        h_new = torch.cat([h_agg, h], 1)
+
         if self.prediction_layer:
-            h_new = self.W(h_new)
+            h_agg = h_agg.reshape((h_agg.size(0), self.n_layer, self.in_dims))
+            h_agg = h_agg.transpose(0, 1)
+            # h_agg = self.ln(self.pos_encoder(h_agg * math.sqrt(self.in_dims)))
+            h = h.unsqueeze(1).transpose(0, 1)
+            # h = self.self_ln(h)
+            h_new = self.decoder(h, h_agg).transpose(0, 1).squeeze()
+        else:
+            h = self.ht(h)
+            h = h / h.norm(dim=1, keepdim=True).clamp(min=1e-5)
+            h_new = torch.cat([h_agg, h], 1)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
 
@@ -126,20 +172,16 @@ class GraphConvModule(nn.Module):
         self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
         nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
         self.embedding_dim = embedding_dim
+        self.emb_expand = nn.Linear(embedding_dim, feature_size)
+        init_fc(self.emb_expand, "xavier_uniform", "linear")
         convs = []
         for i in range(n_layers):
-            in_dims = max(4, int(self.feature_size/(4 ** (n_layers - i - 1))))
-            out_dims = max(4, int(self.feature_size/(4 ** max(0, n_layers - i - 2))))
-            # in_dims = (in_dims + embedding_dim) if i == n_layers - 1 else in_dims
-            conv = GraphConv(in_dims,
-                             out_dims,
+            conv = GraphConv(feature_size,
+                             feature_size,
+                             i+1,
                              gaussian_noise if i == 0 else 0, i == n_layers - 1)
             convs.append(conv)
-
         self.convs = nn.ModuleList(convs)
-        layer_dims = [0] + [max(4, min(embedding_dim, int(self.feature_size/(4 ** max(0, n_layers - i - 1))))) for i in range(n_layers + 1)]
-        layer_dims = [[layer_dims[idx], layer_dims[min(idx+1, len(layer_dims) - 1)]] for idx, dim in enumerate(layer_dims)]
-        self.layer_dims = [[s, e] if s != e else [0, e] for s, e in layer_dims]
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -151,14 +193,11 @@ class GraphConvModule(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nh = self.node_emb(nf.layer_parent_nid(i) + 1)
-            nf.layers[i].data['h'] = nh[:, self.layer_dims[i][0]:self.layer_dims[i][1]]
+            nh = self.emb_expand(self.node_emb(nf.layer_parent_nid(i) + 1))
+            nf.layers[i].data['h'] = nh
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
-        # if i == nf.num_layers - 1:
-        #     h = nf.layers[i].data['h']
-        #     nf.layers[i].data['h'] = torch.cat([self.node_emb.weight.mean(0).unsqueeze(0).expand(*h.shape), h], 1)
-        #     ## nf.layers[i].data['h'] = torch.cat([h.mean(0).unsqueeze(0).expand(*h.shape), h], 1)
+            nf.layers[i].data['h'] = nf.layers[i].data['h'] / nf.layers[i].data['h'].norm(dim=1, keepdim=True).clamp(min=1e-5)
         if self.n_layers == 0:
             return nf.layers[i].data['h']
         for i in range(self.n_layers):
