@@ -125,14 +125,8 @@ class GraphConv(nn.Module):
             self.pos_encoder = PositionalEncoding(in_dims)
             self.ln = nn.LayerNorm(in_dims)
             self.self_ln = nn.LayerNorm(in_dims)
-            decoder_layer = TransformerDecoderLayer(in_dims, 2, in_dims * 4, 0.1, "gelu")
+            decoder_layer = TransformerDecoderLayer(in_dims, 2, in_dims * 4, 0.0, "gelu")
             self.decoder = TransformerDecoder(decoder_layer, 2)
-        else:
-            ht = nn.Linear(in_dims, in_dims * 2)
-            init_fc(ht, "xavier_uniform", "leaky_relu")
-            ht2 = nn.Linear(in_dims * 2, in_dims)
-            init_fc(ht2, "xavier_uniform", "linear")
-            self.ht = nn.Sequential(ht, nn.LeakyReLU(), nn.Dropout(0.1), ht2)
         
         self.prediction_layer = prediction_layer
 
@@ -145,13 +139,9 @@ class GraphConv(nn.Module):
         if self.prediction_layer:
             h_agg = h_agg.reshape((h_agg.size(0), self.n_layer, self.in_dims))
             h_agg = h_agg.transpose(0, 1)
-            # h_agg = self.ln(self.pos_encoder(h_agg * math.sqrt(self.in_dims)))
             h = h.unsqueeze(1).transpose(0, 1)
-            # h = self.self_ln(h)
             h_new = self.decoder(h, h_agg).transpose(0, 1).squeeze()
         else:
-            h = self.ht(h)
-            h = h / h.norm(dim=1, keepdim=True).clamp(min=1e-5)
             h_new = torch.cat([h_agg, h], 1)
         h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
