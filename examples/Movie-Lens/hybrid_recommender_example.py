@@ -12,7 +12,7 @@ import warnings
 warnings.filterwarnings('ignore')
 import numpy as np
 
-from movielens_data_reader import *
+from movielens_data_reader import build_dataset
 from param_fetcher import get_best_params
 from hwer.utils import str2bool
 

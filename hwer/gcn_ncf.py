@@ -235,8 +235,6 @@ class GcnNCF(RecommendationBase):
             dst = dst + 1
             return src, dst, weights, ratings
 
-        eps = 1e-5
-
         def loss_fn_gcn(model, src, dst, nodeflow, weights, ratings):
             h_output = model.gcn(nodeflow)
             h_src = h_output[nodeflow.map_from_parent_nid(-1, src, True)]
