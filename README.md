@@ -75,30 +75,6 @@ pip install --upgrade pip
 pip install tensorflow
 ```
 
-Install DGL from source [Docs](https://docs.dgl.ai/install/index.html#install-from-source)
-```bash
-git clone --progress --recursive https://github.com/dmlc/dgl.git
-cd dgl
-mkdir build && cd build
-cmake -D CMAKE_C_COMPILER=/usr/local/opt/gcc/bin/gcc-9 -D CMAKE_CXX_COMPILER=/usr/local/opt/gcc/bin/g++-9 OpenMP_C=/usr/local/opt/gcc/bin/gcc-9 -D OpenMP_CXX=/usr/local/opt/gcc/bin/g++-9  ..
-cd ../python
-python setup.py install
-```
-
-Install tf-dlpack
-```bash
-git clone --recursive https://github.com/VoVAllen/tf-dlpack.git
-cd tf-dlpack
-mkdir build && cd build
-cmake -DUSE_CUDA=OFF ..
-make -j4
-cp libtfdlpack.dylib ../python/tfdlpack
-cd ../python && python setup.py develop --no-deps
-export PYTHONPATH=$(pwd)/tf-dlpack/python/:${PYTHONPATH}
-export TFDLPACK_LIBRARY_PATH=$(pwd)/tf-dlpack/python/tfdlpack
-
-```
-
 pip install -r requirements.txt
 
 
