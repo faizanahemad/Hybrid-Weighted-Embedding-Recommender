@@ -50,3 +50,18 @@ class IdentityEmbedding(BaseEmbed):
     def transform(self, feature: Feature, **kwargs) -> np.ndarray:
         outputs = np.array(feature)
         return self.check_output_dims(outputs, feature)
+
+
+class FeatureHashingEmbed(BaseEmbed):
+    def __init__(self, n_dims=128, **kwargs):
+        super().__init__(n_dims, make_unit_length=True)
+        from sklearn.feature_extraction.text import HashingVectorizer
+        self.log = getLogger(type(self).__name__)
+        self.vectorizer = HashingVectorizer(n_features=n_dims, ngram_range=(1, 2), analyzer='char_wb')
+
+    def fit(self, feature: Feature, **kwargs):
+        super().fit(feature, **kwargs)
+
+    def transform(self, feature: Feature, **kwargs) -> np.ndarray:
+        outputs = self.vectorizer.fit_transform(feature).toarray()
+        return self.check_output_dims(outputs, feature)
