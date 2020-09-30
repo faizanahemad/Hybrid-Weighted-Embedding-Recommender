@@ -8,16 +8,16 @@ class NCF(nn.Module):
     def __init__(self, feature_size, depth, gaussian_noise):
         super(NCF, self).__init__()
         noise = GaussianNoise(gaussian_noise)
-        layers = [noise]
+        layers = [noise, nn.LayerNorm(2 * feature_size)]
         for layer_idx in range(1, depth + 1):
             iw = 4 if layer_idx == 2 else 2
             ow = 1 if layer_idx == depth else (4 if layer_idx == 1 else 2)
             wx = nn.Linear(feature_size * iw, feature_size * ow)
-            init_fc(wx, 'xavier_uniform_', 'leaky_relu', 0.1)
-            layers.extend([wx, nn.LeakyReLU(negative_slope=0.1)])
+            init_fc(wx, 'xavier_uniform_', 'leaky_relu', 0.01)
+            layers.extend([wx, nn.LeakyReLU(negative_slope=0.01)])
 
         w_out = nn.Linear(feature_size, 1)
-        init_fc(w_out, 'xavier_uniform_', 'sigmoid', 0.1)
+        init_fc(w_out, 'xavier_uniform_', 'sigmoid')
         layers.extend([w_out, nn.Sigmoid()])
         self.W = nn.Sequential(*layers)
 

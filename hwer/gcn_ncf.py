@@ -123,7 +123,7 @@ class GcnNCF(RecommendationBase):
             return src, dst, weights, ratings
         return get_samples
 
-    def __train__(self, model, g_train, data_generator, hyperparams, loss_fn):
+    def __train__(self, model, g_train, data_generator, hyperparams, loss_fn, trainer="gcn"):
         lr = hyperparams["lr"] if "lr" in hyperparams else 0.001
         epochs = hyperparams["epochs"] if "epochs" in hyperparams else 15
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
@@ -149,20 +149,23 @@ class GcnNCF(RecommendationBase):
             weights_batches = weights.split(batch_size)
             ratings_batches = ratings.split(batch_size)
             seed_nodes = torch.cat(sum([[s, d] for s, d in zip(src_batches, dst_batches)], []))
-            sampler = dgl.contrib.sampling.NeighborSampler(
-                g_train,  # the graph
-                batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                5,  # number of neighbors for each node
-                gcn_layers,  # number of layers in GCN
-                seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
-                prefetch=True,  # whether to prefetch the NodeFlows
-                add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
-                shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
-                num_workers=self.cpu,
-            )
+            if trainer == "gcn":
+                sampler = dgl.contrib.sampling.NeighborSampler(
+                    g_train,  # the graph
+                    batch_size * 2,  # number of nodes to compute at a time, HACK 2
+                    5,  # number of neighbors for each node
+                    gcn_layers,  # number of layers in GCN
+                    seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
+                    prefetch=True,  # whether to prefetch the NodeFlows
+                    add_self_loop=True,  # whether to add a self-loop in the NodeFlows, HACK 1
+                    shuffle=False,  # whether to shuffle the seed nodes.  Should be False here.
+                    num_workers=self.cpu,
+                )
+            else:
+                sampler = range(len(src_batches))
 
             total_loss = 0.0
-            for s, d, nodeflow, w, r in tqdm(zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches), msg="GCN Batches", total=len(src_batches)):
+            for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
                 loss, _, _ = loss_fn(model, s, d, nodeflow, w, r)
                 total_loss = total_loss + loss.item()
                 opt.zero_grad()
@@ -171,7 +174,7 @@ class GcnNCF(RecommendationBase):
                 scheduler.step()
             return total_loss / len(src_batches)
 
-        for epoch in trange(epochs, msg="Training Epochs"):
+        for epoch in range(epochs):
             start = time.time()
             loss = train_one_epoch(src, dst, weights, ratings)
             gen_time = time.time()
@@ -228,7 +231,6 @@ class GcnNCF(RecommendationBase):
         else:
             ncf = NCF(self.n_dims, ncf_layers, gaussian_noise)
         gcn = GraphConvModule(n_content_dims, self.n_dims, gcn_layers, g_train, gaussian_noise)
-        model = RecImplicit(gcn=gcn, ncf=ncf)
         generate_training_samples = self.__data_gen_fn__(nodes, edges, self.nodes_to_idx,
                                                          hyperparams)
 
@@ -239,7 +241,7 @@ class GcnNCF(RecommendationBase):
             return src, dst, weights, ratings
 
         def loss_fn_gcn(model, src, dst, nodeflow, weights, ratings):
-            h_output = model.gcn(nodeflow)
+            h_output = model(nodeflow)
             h_src = h_output[nodeflow.map_from_parent_nid(-1, src, True)]
             h_dst = h_output[nodeflow.map_from_parent_nid(-1, dst, True)]
             gcn_score = (h_src * h_dst).sum(1)
@@ -252,16 +254,8 @@ class GcnNCF(RecommendationBase):
             gcn_loss = gcn_loss
             return gcn_loss, h_src, h_dst
 
-        def loss_fn_ncf(model, src, dst, nodeflow, weights, ratings):
-            _, h_src, h_dst = loss_fn_gcn(model, src, dst, nodeflow, weights, ratings)
-            score = model.ncf(src, dst, h_src, h_dst)
-            loss = -1 * (ratings * torch.log(score) + (1 - ratings) * torch.log(1 - score))
-            loss = loss * weights
-            loss = loss.mean()
-            return loss, h_src, h_dst
-
         def get_gcn_vectors():
-            model.eval()
+            gcn.eval()
             sampler = dgl.contrib.sampling.NeighborSampler(
                 g_train,
                 batch_size,
@@ -277,7 +271,7 @@ class GcnNCF(RecommendationBase):
             with torch.no_grad():
                 h = []
                 for nf in sampler:
-                    h.append(model.gcn.forward(nf))
+                    h.append(gcn(nf))
                 h = torch.cat(h)
             return h
 
@@ -286,16 +280,26 @@ class GcnNCF(RecommendationBase):
         hp_ncf = copy.deepcopy(hyperparams)
         hp_gcn["epochs"] = gcn_epochs
         hp_ncf["epochs"] = ncf_epochs
-        self.__train__(model, g_train, get_samples, hp_gcn, loss_fn_gcn)
+        self.__train__(gcn, g_train, get_samples, hp_gcn, loss_fn_gcn)
         knn_vectors = get_gcn_vectors()
+
+        def loss_fn_ncf(model, src, dst, nodeflow, weights, ratings):
+            h_src, h_dst = knn_vectors[src], knn_vectors[dst]
+            score = model(src, dst, h_src, h_dst)
+            loss = -1 * (ratings * torch.log(score) + (1 - ratings) * torch.log(1 - score))
+            assert torch.isnan(loss).sum() == 0
+            loss = loss * weights
+            loss = loss.mean()
+            return loss, h_src, h_dst
+
         if ncf_epochs > 0:
-            self.__train__(model, g_train, get_samples, hp_ncf, loss_fn_ncf)
+            self.__train__(ncf, g_train, generate_training_samples, hp_ncf, loss_fn_ncf, trainer="ncf")
         gc.collect()
 
-        prediction_artifacts = {"model": model.ncf,
-                                "h": get_gcn_vectors(),
+        prediction_artifacts = {"model": ncf,
+                                "h": knn_vectors,
                                 "knn_vectors": knn_vectors}
-        model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+        model_parameters = filter(lambda p: p.requires_grad, gcn.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
         self.log.info("Built Prediction Network, model params = %s", params)
         gc.collect()
