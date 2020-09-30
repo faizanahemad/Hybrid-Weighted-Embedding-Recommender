@@ -140,7 +140,7 @@ torchvision==0.4.1
 tornado==6.0.3
 tqdm==4.36.1
 traitlets==4.3.3
-transformers==2.1.1
+transformers==3.0.2
 umap-learn==0.3.10
 urllib3==1.24.3
 wasabi==0.3.0

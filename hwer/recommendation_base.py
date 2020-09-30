@@ -126,20 +126,6 @@ class RecommendationBase(metaclass=abc.ABCMeta):
         assert edge_node_types == self.node_types
         assert len(set([i for e in edges for i in [e.src, e.dst]]) - set(nodes)) == 0
 
-        node_type_set_nodes = defaultdict(set)
-        for n in nodes:
-            node_type_set_nodes[n.node_type].add(n)
-
-        node_type_set_edges = defaultdict(set)
-        for e in edges:
-            node_type_set_edges[e.src.node_type].add(e.src)
-            node_type_set_edges[e.dst.node_type].add(e.dst)
-
-        print(node_type_set_nodes.keys(), node_type_set_edges.keys())
-        for k, v in node_type_set_nodes.items():
-            if not len(node_type_set_edges[k] - v) == 0:
-                print(k, "failed", "# nodes = %s, # from edges = %s" %(len(v), len(node_type_set_edges[k])))
-
         assert len(set(nodes)) == len(nodes)
         assert len(set([n.node_type for n in nodes]) - self.node_types) == 0
         self.add_nodes(nodes)

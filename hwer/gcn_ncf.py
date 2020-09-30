@@ -17,7 +17,7 @@ logger = getLogger(__name__)
 logger.addHandler(logging.StreamHandler(sys.stdout))
 
 from .recommendation_base import RecommendationBase, NodeType, Node, Edge, FeatureName
-from .utils import unit_length, unit_length_violations
+from .utils import unit_length, unit_length_violations, get_cosine_schedule_with_warmup, get_constant_schedule_with_warmup
 from .embed import BaseEmbed
 from .gcn import *
 from .ncf import *
@@ -131,7 +131,9 @@ class GcnNCF(RecommendationBase):
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 2
         src, dst, weights, ratings = data_generator()
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
+        scheduler = get_constant_schedule_with_warmup(opt, epochs, batch_size, len(src))
         import gc
+        from tqdm.auto import tqdm, trange
         gc.collect()
         positive_examples, negative_examples = torch.sum(ratings == 1).item(), torch.sum(ratings == 0).item()
         model_parameters = list(filter(lambda p: p.requires_grad, model.parameters()))
@@ -160,15 +162,16 @@ class GcnNCF(RecommendationBase):
             )
 
             total_loss = 0.0
-            for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
+            for s, d, nodeflow, w, r in tqdm(zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches), msg="GCN Batches", total=len(src_batches)):
                 loss, _, _ = loss_fn(model, s, d, nodeflow, w, r)
                 total_loss = total_loss + loss.item()
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
+                scheduler.step()
             return total_loss / len(src_batches)
 
-        for epoch in range(epochs):
+        for epoch in trange(epochs, msg="Training Epochs"):
             start = time.time()
             loss = train_one_epoch(src, dst, weights, ratings)
             gen_time = time.time()
@@ -250,7 +253,7 @@ class GcnNCF(RecommendationBase):
             return gcn_loss, h_src, h_dst
 
         def loss_fn_ncf(model, src, dst, nodeflow, weights, ratings):
-            gcn_loss, h_src, h_dst = loss_fn_gcn(model, src, dst, nodeflow, weights, ratings)
+            _, h_src, h_dst = loss_fn_gcn(model, src, dst, nodeflow, weights, ratings)
             score = model.ncf(src, dst, h_src, h_dst)
             loss = -1 * (ratings * torch.log(score) + (1 - ratings) * torch.log(1 - score))
             loss = loss * weights

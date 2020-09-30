@@ -11,6 +11,26 @@ from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
 import argparse
 
+from transformers import optimization
+
+
+def get_cosine_schedule_with_warmup(optimizer, epochs, batch_size, n_samples):
+    warmup_proportion = 0.3
+    n_steps = int(np.ceil(n_samples / batch_size))
+    num_training_steps = n_steps * epochs
+    num_warmup_steps = int(warmup_proportion * num_training_steps)
+    sch = optimization.get_cosine_schedule_with_warmup(optimizer, num_warmup_steps, num_training_steps)
+    return sch
+
+
+def get_constant_schedule_with_warmup(optimizer, epochs, batch_size, n_samples):
+    warmup_proportion = 0.3
+    n_steps = int(np.ceil(n_samples / batch_size))
+    num_training_steps = n_steps * epochs
+    num_warmup_steps = int(warmup_proportion * num_training_steps)
+    sch = optimization.get_constant_schedule_with_warmup(optimizer, num_warmup_steps)
+    return sch
+
 
 def cos_sim(a, b):
     return dot(a, b) / (norm(a) * norm(b))
