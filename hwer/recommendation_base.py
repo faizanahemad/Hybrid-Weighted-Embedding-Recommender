@@ -122,7 +122,9 @@ class RecommendationBase(metaclass=abc.ABCMeta):
                       len(nodes), len(edges), sparsity)
 
         # Check if all edges are made by nodes in node list
-        assert set([node.node_type for e in edges for node in [e.src, e.dst]]) == self.node_types
+        edge_node_types = set([node.node_type for e in edges for node in [e.src, e.dst]])
+        print("Edge node types = ", edge_node_types, "Actual Node types = ", self.node_types)
+        assert edge_node_types == self.node_types
         assert len(set([i for e in edges for i in [e.src, e.dst]]) - set(nodes)) == 0
 
         node_type_set_nodes = defaultdict(set)
