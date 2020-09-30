@@ -117,13 +117,12 @@ class RecommendationBase(metaclass=abc.ABCMeta):
             **kwargs):
         # self.build_content_embeddings(item_data, user_item_affinities)
         assert not self.fit_done
+        edge_node_types = set([node.node_type for e in edges for node in [e.src, e.dst]])
+        print("Edge node types = ", edge_node_types, "Actual Node types = ", self.node_types)
         sparsity = 1 - len(edges) / (len(nodes) * len(nodes))
         self.log.info("Start Fitting Base Recommender with nodes = %s, edges = %s, sparsity = %s",
                       len(nodes), len(edges), sparsity)
-
         # Check if all edges are made by nodes in node list
-        edge_node_types = set([node.node_type for e in edges for node in [e.src, e.dst]])
-        print("Edge node types = ", edge_node_types, "Actual Node types = ", self.node_types)
         assert edge_node_types == self.node_types
         assert len(set([i for e in edges for i in [e.src, e.dst]]) - set(nodes)) == 0
 
