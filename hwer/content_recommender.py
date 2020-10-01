@@ -65,7 +65,8 @@ class ContentRecommendation(RecommendationBase):
         self.log.debug(
             "ContentRecommendation::__build_embeddings__:: AutoEncoder with dims = %s" % str(all_embeddings.shape))
         n_dims = n_dims if n_dims is not None and not np.isinf(n_dims) else 2 ** int(np.log2(all_embeddings.shape[1]))
-        all_embeddings, _ = auto_encoder_transform(all_embeddings, all_embeddings, n_dims=n_dims, verbose=2, epochs=25)
+        from sklearn.decomposition import IncrementalPCA
+        all_embeddings, _ = IncrementalPCA(n_components=n_dims, batch_size=2**16).fit_transform(all_embeddings)
         all_embeddings = unit_length(all_embeddings, axis=1)
         extra_dims = 2 ** int(np.ceil(np.log2(ohe_node_types.shape[1]))) - ohe_node_types.shape[1]
         if extra_dims != 0:
