@@ -8,7 +8,7 @@ class NCF(nn.Module):
     def __init__(self, feature_size, depth, gaussian_noise):
         super(NCF, self).__init__()
         noise = GaussianNoise(gaussian_noise)
-        layers = [noise, nn.LayerNorm(2 * feature_size)]
+        layers = [noise]
         for layer_idx in range(1, depth + 1):
             iw = 4 if layer_idx == 2 else 2
             ow = 1 if layer_idx == depth else (4 if layer_idx == 1 else 2)

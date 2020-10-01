@@ -9,7 +9,11 @@ pd.set_option('display.width', 1000)
 pd.options.display.width = 0
 from scipy.stats.mstats import rankdata
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import QuantileTransformer
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.preprocessing import PowerTransformer
 
 from ..logging import getLogger
 from ..utils import auto_encoder_transform, unit_length
@@ -19,16 +23,22 @@ Feature = List[List[Union[float, int]]]
 
 
 class NumericEmbed(BaseEmbed):
-    def __init__(self, n_dims, log=True, log1p=True, sqrt=True,
-                 make_unit_length=True, n_iters=20, **kwargs):
+    def __init__(self, n_dims, log=True, log1p=True, sqrt=True, quantile=True,
+                 inverse=True, polynomial=True, power_transform=True,
+                 cbrt=True, make_unit_length=True, n_iters=20, **kwargs):
         super().__init__(n_dims, make_unit_length, **kwargs)
         self.log_enabled = log
         self.log1p_enabled = log1p
         self.sqrt = sqrt
+        self.cbrt = cbrt
         self.n_iters = n_iters
         self.sign = True
         self.scaler = None
         self.encoder = None
+        self.inverse = inverse
+        self.power_transform = power_transform
+        self.quantile = quantile
+        self.polynomial = polynomial
         self.verbose = kwargs["verbose"] if "verbose" in kwargs else 0
         self.log = getLogger(type(self).__name__)
 
@@ -49,6 +59,29 @@ class NumericEmbed(BaseEmbed):
             results = np.concatenate((results, np.log1p(inputs)), axis=1)
         if self.sqrt:
             results = np.concatenate((results, np.sqrt(inputs)), axis=1)
+        if self.cbrt:
+            results = np.concatenate((results, np.cbrt(inputs)), axis=1)
+        if self.inverse:
+            results = np.concatenate((results, 1 / (inputs + 1e-3)), axis=1)
+
+        if self.polynomial and isinstance(self.polynomial, bool):
+            self.polynomial = PolynomialFeatures(interaction_only=True, include_bias=False)
+            results = np.concatenate((results, self.polynomial.fit_transform(np.concatenate((results, 1 / (inputs + 1e-3)), axis=1))), axis=1)
+        elif self.polynomial:
+            results = np.concatenate((results, self.polynomial.transform(np.concatenate((results, 1 / (inputs + 1e-3)), axis=1))), axis=1)
+
+        if self.power_transform and isinstance(self.power_transform, bool):
+            self.power_transform = PowerTransformer()
+            results = np.concatenate((results, self.power_transform.fit_transform(inputs)), axis=1)
+        elif self.power_transform:
+            results = np.concatenate((results, self.power_transform.transform(inputs)), axis=1)
+
+        if self.quantile and isinstance(self.quantile, bool):
+            self.quantile = QuantileTransformer(n_quantiles=100, random_state=0)
+            results = np.concatenate((results, self.quantile.fit_transform(inputs)), axis=1)
+        elif self.quantile:
+            results = np.concatenate((results, self.quantile.transform(inputs)), axis=1)
+
         results = np.concatenate((results, np.square(inputs)), axis=1)
 
         if self.scaler is None:
@@ -64,16 +97,12 @@ class NumericEmbed(BaseEmbed):
         if len(inputs.shape) == 1:
             inputs = inputs.reshape(-1, 1)
 
-        ranks = rankdata(inputs, axis=0) / len(inputs)
-
-        mean, var = np.mean(inputs, axis=0) / np.mean(inputs), np.std(inputs, axis=0) / np.std(inputs)
+        pre_shape = inputs.shape
         inputs = self.__prepare_inputs__(inputs)
-        mean = np.broadcast_to(mean, (len(inputs), len(mean)))
-        var = np.broadcast_to(var, (len(inputs), len(var)))
-        outputs = np.concatenate((inputs, ranks, mean, var), axis=1)
-
-        _, encoder = auto_encoder_transform(inputs, outputs, n_dims=self.n_dims, verbose=self.verbose,
-                                            epochs=self.n_iters)
+        self.log.info("PreShape PostShape = %s, %s" % (pre_shape, inputs.shape))
+        encoder = PCA(n_components=self.n_dims, whiten=True)
+        encoder.fit(inputs)
+        self.log.info("Explained Variance Ratio = %s" % (sum(encoder.explained_variance_ratio_)))
         self.encoder = encoder
         self.log.debug("End Fitting NumericEmbed")
 
@@ -83,7 +112,7 @@ class NumericEmbed(BaseEmbed):
         if len(inputs.shape) == 1:
             inputs = inputs.reshape(-1, 1)
         inputs = self.__prepare_inputs__(inputs)
-        outputs = self.encoder.predict(inputs)
+        outputs = self.encoder.transform(inputs)
         assert np.sum(np.isnan(outputs)) == 0
         assert np.sum(np.isinf(outputs)) == 0
         outputs = unit_length(outputs, axis=1) if self.make_unit_length else outputs

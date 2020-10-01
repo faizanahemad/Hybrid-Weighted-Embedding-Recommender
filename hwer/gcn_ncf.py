@@ -131,7 +131,7 @@ class GcnNCF(RecommendationBase):
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 2
         src, dst, weights, ratings = data_generator()
         opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=kernel_l2)
-        scheduler = get_constant_schedule_with_warmup(opt, epochs, batch_size, len(src))
+        scheduler = get_cosine_schedule_with_warmup(opt, epochs, batch_size, len(src))
         import gc
         from tqdm.auto import tqdm, trange
         gc.collect()
@@ -168,10 +168,10 @@ class GcnNCF(RecommendationBase):
             for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
                 loss, _, _ = loss_fn(model, s, d, nodeflow, w, r)
                 total_loss = total_loss + loss.item()
+                scheduler.step()
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
-                scheduler.step()
             return total_loss / len(src_batches)
 
         for epoch in range(epochs):
@@ -280,11 +280,29 @@ class GcnNCF(RecommendationBase):
         hp_ncf = copy.deepcopy(hyperparams)
         hp_gcn["epochs"] = gcn_epochs
         hp_ncf["epochs"] = ncf_epochs
+        hp_ncf["lr"] = lr / 2.0
         self.__train__(gcn, g_train, get_samples, hp_gcn, loss_fn_gcn)
         knn_vectors = get_gcn_vectors()
+        if ncf_epochs > 0:
+            recimplicit = RecImplicit(gcn=gcn, ncf=ncf)
+
+            def loss_fn_recimplicit(model, src, dst, nodeflow, weights, ratings):
+                _, h_src, h_dst = loss_fn_gcn(model.gcn, src, dst, nodeflow, weights, ratings)
+                score = model.ncf(src, dst, h_src, h_dst)
+                loss = -1 * (ratings * torch.log(score) + (1 - ratings) * torch.log(1 - score))
+                assert torch.isnan(loss).sum() == 0
+                loss = loss * weights
+                loss = loss.mean()
+                return loss, h_src, h_dst
+
+            hp_recimplicit = copy.deepcopy(hyperparams)
+            hp_recimplicit["epochs"] = ncf_epochs // 3
+            self.__train__(recimplicit, g_train, generate_training_samples, hp_recimplicit, loss_fn_recimplicit, trainer="gcn")
+
+        ncf_vectors = get_gcn_vectors()
 
         def loss_fn_ncf(model, src, dst, nodeflow, weights, ratings):
-            h_src, h_dst = knn_vectors[src], knn_vectors[dst]
+            h_src, h_dst = ncf_vectors[src], ncf_vectors[dst]
             score = model(src, dst, h_src, h_dst)
             loss = -1 * (ratings * torch.log(score) + (1 - ratings) * torch.log(1 - score))
             assert torch.isnan(loss).sum() == 0
@@ -297,7 +315,7 @@ class GcnNCF(RecommendationBase):
         gc.collect()
 
         prediction_artifacts = {"model": ncf,
-                                "h": knn_vectors,
+                                "h": ncf_vectors,
                                 "knn_vectors": knn_vectors}
         model_parameters = filter(lambda p: p.requires_grad, gcn.parameters())
         params = sum([np.prod(p.size()) for p in model_parameters])
