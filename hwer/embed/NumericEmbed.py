@@ -11,6 +11,7 @@ from scipy.stats.mstats import rankdata
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import IncrementalPCA
 from sklearn.preprocessing import QuantileTransformer
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.preprocessing import PowerTransformer
@@ -100,7 +101,7 @@ class NumericEmbed(BaseEmbed):
         pre_shape = inputs.shape
         inputs = self.__prepare_inputs__(inputs)
         self.log.info("PreShape PostShape = %s, %s" % (pre_shape, inputs.shape))
-        encoder = PCA(n_components=self.n_dims, whiten=True)
+        encoder = IncrementalPCA(n_components=self.n_dims, whiten=True, batch_size=2**16)
         encoder.fit(inputs)
         self.log.info("Explained Variance Ratio = %s" % (sum(encoder.explained_variance_ratio_)))
         self.encoder = encoder
