@@ -25,7 +25,7 @@ Feature = List[List[Union[float, int]]]
 
 class NumericEmbed(BaseEmbed):
     def __init__(self, n_dims, log=True, log1p=True, sqrt=True, quantile=True,
-                 inverse=True, polynomial=True, power_transform=True,
+                 inverse=True, polynomial=False, power_transform=True,
                  cbrt=True, make_unit_length=True, n_iters=20, **kwargs):
         super().__init__(n_dims, make_unit_length, **kwargs)
         self.log_enabled = log
