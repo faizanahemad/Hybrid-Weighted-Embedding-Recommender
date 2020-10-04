@@ -15,6 +15,7 @@ from sklearn.decomposition import IncrementalPCA
 from sklearn.preprocessing import QuantileTransformer
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.preprocessing import PowerTransformer
+from sklearn.pipeline import make_union
 
 from ..logging import getLogger
 from ..utils import auto_encoder_transform, unit_length
@@ -86,7 +87,7 @@ class NumericEmbed(BaseEmbed):
         results = np.concatenate((results, np.square(inputs)), axis=1)
 
         if self.scaler is None:
-            self.scaler = MinMaxScaler(feature_range=(-0.95, 0.95))
+            self.scaler = make_union(MinMaxScaler(feature_range=(-0.95, 0.95)), StandardScaler())
             results = self.scaler.fit_transform(results)
         else:
             results = self.scaler.transform(results)
