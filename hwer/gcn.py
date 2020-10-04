@@ -70,6 +70,7 @@ def init_fc(layer, initializer, nonlinearity, nonlinearity_param=None):
     except AttributeError:
         pass
 
+
 class PositionalEncoding(nn.Module):
     r"""Inject some information about the relative or absolute position of the tokens
         in the sequence. The positional encodings have the same dimension as
@@ -138,7 +139,7 @@ class GraphConv(nn.Module):
         h_new = torch.cat([h_agg, h], 1)
         if self.prediction_layer:
             h_new = self.fc(h_new)
-        h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
+            h_new = h_new / h_new.norm(dim=1, keepdim=True).clamp(min=1e-5)
         return {'h': h_new}
 
 
@@ -151,14 +152,10 @@ class GraphConvModule(nn.Module):
         self.n_layers = n_layers
         self.proj = build_content_layer(n_content_dims, feature_size)
         self.G = G
-        embedding_dim = int(feature_size/2)
         assert feature_size % 2 == 0
         assert feature_size % 16 == 0
-        self.node_emb = nn.Embedding(G.number_of_nodes() + 1, embedding_dim)
-        nn.init.normal_(self.node_emb.weight, std=1 / embedding_dim)
-        self.embedding_dim = embedding_dim
-        self.emb_expand = nn.Linear(embedding_dim, feature_size)
-        init_fc(self.emb_expand, "xavier_uniform", "linear")
+        self.node_emb = nn.Embedding(G.number_of_nodes() + 1, feature_size)
+        nn.init.normal_(self.node_emb.weight, std=1 / feature_size)
         convs = []
         for i in range(n_layers):
             conv = GraphConv(feature_size,
@@ -167,6 +164,7 @@ class GraphConvModule(nn.Module):
                              gaussian_noise if i == 0 else 0, i == n_layers - 1)
             convs.append(conv)
         self.convs = nn.ModuleList(convs)
+        self.previous = nn.Parameter(data=torch.zeros(G.number_of_nodes() + 1, feature_size), requires_grad=False)
 
     msg = [FN.copy_src('h', 'h'),
            FN.copy_src('one', 'one')]
@@ -178,17 +176,19 @@ class GraphConvModule(nn.Module):
         '''
         nf.copy_from_parent(edge_embed_names=None)
         for i in range(nf.num_layers):
-            nh = self.emb_expand(self.node_emb(nf.layer_parent_nid(i) + 1))
+            nh = self.node_emb(nf.layer_parent_nid(i) + 1)
             nf.layers[i].data['h'] = nh
             nf.layers[i].data['one'] = torch.ones(nf.layer_size(i))
             mix_embeddings(nf.layers[i].data, self.proj)
             nf.layers[i].data['h'] = nf.layers[i].data['h'] / nf.layers[i].data['h'].norm(dim=1, keepdim=True).clamp(min=1e-5)
-        if self.n_layers == 0:
-            return nf.layers[i].data['h']
         for i in range(self.n_layers):
             nf.block_compute(i, self.msg, self.red, self.convs[i])
 
+        parent_node_ids = nf.layer_parent_nid(self.n_layers)
+        map_from_parent_node_ids = nf.map_from_parent_nid(-1, parent_node_ids, True)
         result = nf.layers[self.n_layers].data['h']
+        result[map_from_parent_node_ids] = 0.5 * result[map_from_parent_node_ids] + 0.5 * self.previous[parent_node_ids]
+        self.previous[parent_node_ids] = result[map_from_parent_node_ids].detach()
         assert (result != result).sum() == 0
         return result
 

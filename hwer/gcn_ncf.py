@@ -153,7 +153,7 @@ class GcnNCF(RecommendationBase):
                 sampler = dgl.contrib.sampling.NeighborSampler(
                     g_train,  # the graph
                     batch_size * 2,  # number of nodes to compute at a time, HACK 2
-                    5,  # number of neighbors for each node
+                    2,  # number of neighbors for each node
                     gcn_layers,  # number of layers in GCN
                     seed_nodes=seed_nodes,  # list of seed nodes, HACK 2
                     prefetch=True,  # whether to prefetch the NodeFlows
@@ -259,7 +259,7 @@ class GcnNCF(RecommendationBase):
             sampler = dgl.contrib.sampling.NeighborSampler(
                 g_train,
                 batch_size,
-                5,
+                2,
                 gcn_layers,
                 seed_nodes=torch.arange(g_train.number_of_nodes()),
                 prefetch=True,
