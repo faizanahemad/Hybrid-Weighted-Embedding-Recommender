@@ -187,7 +187,7 @@ class GraphConvModule(nn.Module):
         parent_node_ids = nf.layer_parent_nid(self.n_layers)
         map_from_parent_node_ids = nf.map_from_parent_nid(-1, parent_node_ids, True)
         result = nf.layers[self.n_layers].data['h']
-        result[map_from_parent_node_ids] = 0.5 * result[map_from_parent_node_ids] + 0.5 * self.previous[parent_node_ids]
+        result[map_from_parent_node_ids] = 0.9 * result[map_from_parent_node_ids] + 0.1 * self.previous[parent_node_ids]
         self.previous[parent_node_ids] = result[map_from_parent_node_ids].detach()
         assert (result != result).sum() == 0
         return result
