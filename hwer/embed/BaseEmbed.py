@@ -57,7 +57,7 @@ class FeatureHashingEmbed(BaseEmbed):
         super().__init__(n_dims, make_unit_length=True)
         from sklearn.feature_extraction.text import HashingVectorizer
         self.log = getLogger(type(self).__name__)
-        self.vectorizer = HashingVectorizer(n_features=n_dims, ngram_range=(1, 2), analyzer='char_wb')
+        self.vectorizer = HashingVectorizer(n_features=n_dims, ngram_range=kwargs.pop("ngram_range", (1, 2)), analyzer=kwargs.pop("analyzer", "char_wb"))
 
     def fit(self, feature: Feature, **kwargs):
         super().fit(feature, **kwargs)
