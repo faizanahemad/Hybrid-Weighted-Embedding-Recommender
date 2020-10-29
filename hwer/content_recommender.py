@@ -8,7 +8,7 @@ from collections import defaultdict
 from .embed import BaseEmbed
 from .logging import getLogger
 from .recommendation_base import RecommendationBase, NodeType, Node, Edge, FeatureName
-from .utils import unit_length, auto_encoder_transform
+from .utils import unit_length
 
 
 class ContentRecommendation(RecommendationBase):

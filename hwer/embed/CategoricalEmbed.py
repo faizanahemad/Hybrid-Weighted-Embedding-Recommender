@@ -12,7 +12,7 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.preprocessing import OneHotEncoder
 
 from ..logging import getLogger
-from ..utils import auto_encoder_transform, unit_length, is_1d_array
+from ..utils import unit_length, is_1d_array
 from typing import List, Union
 
 Feature = List[List[Union[str, List, int]]]
@@ -86,7 +86,7 @@ class CategoricalEmbed(BaseEmbed):
         network_output = np.concatenate((network_inputs, df[columns_count].values), axis=1)
         min_max_scaler = MinMaxScaler(feature_range=(0.0, 0.95))
         network_output = min_max_scaler.fit_transform(network_output)
-
+        from ..utils import auto_encoder_transform
         _, encoder = auto_encoder_transform(network_inputs, network_output, n_dims=self.n_dims, verbose=self.verbose,
                                             epochs=self.n_iters)
         self.encoder = encoder

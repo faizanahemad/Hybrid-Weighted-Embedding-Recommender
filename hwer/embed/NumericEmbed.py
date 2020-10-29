@@ -18,7 +18,7 @@ from sklearn.preprocessing import PowerTransformer
 from sklearn.pipeline import make_union
 
 from ..logging import getLogger
-from ..utils import auto_encoder_transform, unit_length
+from ..utils import unit_length
 from typing import List, Union
 
 Feature = List[List[Union[float, int]]]
