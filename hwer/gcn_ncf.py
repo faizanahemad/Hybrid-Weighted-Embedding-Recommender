@@ -297,7 +297,7 @@ class GcnNCF(RecommendationBase):
                 return loss, h_src, h_dst
 
             hp_recimplicit = copy.deepcopy(hyperparams)
-            hp_recimplicit["epochs"] = ncf_epochs // 3
+            hp_recimplicit["epochs"] = max(1, ncf_epochs // 3)
             self.__train__(recimplicit, g_train, generate_training_samples, hp_recimplicit, loss_fn_recimplicit, trainer="gcn")
 
         ncf_vectors = get_gcn_vectors()
