@@ -129,10 +129,12 @@ class GcnNCF(RecommendationBase):
         batch_size = hyperparams["batch_size"] if "batch_size" in hyperparams else 512
         kernel_l2 = hyperparams["kernel_l2"] if "kernel_l2" in hyperparams else 0.0
         gcn_layers = hyperparams["gcn_layers"] if "gcn_layers" in hyperparams else 2
+        warmup_steps = hyperparams["warmup_steps"] if "warmup_steps" in hyperparams else 100.0
         src, dst, weights, ratings = data_generator()
         import torch_optimizer as optim
         opt = optim.RAdam(model.parameters(), lr=lr, weight_decay=kernel_l2)
         # scheduler = get_cosine_schedule_with_warmup(opt, epochs, batch_size, len(src))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lambda epoch: (min(warmup_steps, epoch)+1.0)/warmup_steps)
         import gc
         from tqdm.auto import tqdm, trange
         gc.collect()
@@ -169,10 +171,10 @@ class GcnNCF(RecommendationBase):
             for s, d, nodeflow, w, r in zip(src_batches, dst_batches, sampler, weights_batches, ratings_batches):
                 loss, _, _ = loss_fn(model, s, d, nodeflow, w, r)
                 total_loss = total_loss + loss.item()
-                # scheduler.step()
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
+                scheduler.step()
             return total_loss / len(src_batches)
 
         for epoch in range(epochs):
