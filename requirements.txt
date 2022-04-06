@@ -70,7 +70,7 @@ nbformat==4.4.0
 networkx==2.4
 nltk==3.4.5
 nmslib==1.8.1
-notebook==6.0.1
+notebook==6.4.10
 numba==0.45.1
 numpy==1.17.3
 opt-einsum==3.1.0
