@@ -46,7 +46,7 @@ ipywidgets==7.5.1
 jedi==0.15.1
 Jinja2==2.10.3
 jmespath==0.9.4
-joblib==0.14.0
+joblib==1.2.0
 jsonschema==3.0.2
 Keras-Applications==1.0.8
 Keras-Preprocessing==1.1.0
